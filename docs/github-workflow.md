@@ -78,9 +78,23 @@ address is not a personal one, with no attempt to conceal who is behind the proj
 Practical consequences:
 
 - Do **not** put a personal email address in the README, `src/init.lua` metadata, the te4.org
-  listing, or the Steam Workshop page. Use the project mailbox.
-- Do **not** bother with commit-author scrubbing, private org membership, or separate
-  te4.org / Steam identities. None of that is wanted.
+  listing, or the Steam Workshop page. Use the project mailbox: `skoobot.reclauded@proton.me`.
+- **Set the repo-local git identity to the machine account** in every clone, before the first
+  commit:
+
+  ```bash
+  git config user.name  "skoobot-reclauded-bot"
+  git config user.email "319607269+skoobot-reclauded-bot@users.noreply.github.com"
+  ```
+
+  Without it, git falls back to the global identity and commits land under whoever is at the
+  keyboard. That is how the first eleven commits here ended up authored by the owner; they
+  were rewritten to the machine account on 2026-08-21, while the repo was still unpushed and
+  the fix was free.
+- **This is attribution, not concealment.** The two are easy to confuse. Do **not** bother
+  with private org membership, separate te4.org / Steam identities, or hiding that SkoobyDoo
+  is behind the project — none of that is wanted. Assistant-written commits carry the machine
+  account because the owner did not write them, which is the opposite of hiding.
 - The mailbox is **receive-only**. If outbound mail is ever needed, note that Proton's free
   tier has no SMTP (Bridge is paid), so the provider choice would have to be revisited.
 
