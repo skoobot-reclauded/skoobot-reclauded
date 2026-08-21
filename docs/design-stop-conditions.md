@@ -1,35 +1,39 @@
-# Design: data-driven condition framework
+# Design: liveness vs. model validity
 
 **Status:** proposed · **Task:** T-026 · **Date:** 2026-08-21
 **Supersedes:** v1's `getStopConditionList()` + `checkForDebuffs()` split
 
-Agreed direction: fold pinned and everything like it into the existing WARN/STOP/IGNORE
-framework, driven from a definition list rather than a hardcoded if-chain. Two findings from
-the ToME 1.7.6 source change the shape of that list, and a third changes how it persists.
+> **Revised 2026-08-21** after author correction. An earlier draft of this document called
+> v1's `DEBUFF_STUNNED` stop "over-conservative" on the grounds that a stunned character can
+> still act. That was wrong about the intent. The stop is not a liveness guard — it is a
+> deliberate **model-validity boundary**. See §2.
 
 ---
 
-## Keep: the policy layer
+## 0. The decoupling
 
-v1's tri-state is good and should survive unchanged.
+Two problems were being treated as one. They need different mechanisms, different defaults,
+and different degrees of user control.
 
-- **STOP** — halt, unconditionally.
-- **WARN** — halt *once*, remember the acknowledgement in `skoobotstopwarn`, and let the
-  player resume. The flag auto-clears when the condition lifts, so it re-arms naturally.
-- **IGNORE** — never halt on this.
+| | **§1 Liveness** | **§2 Model validity** |
+|---|---|---|
+| Question | *Can the bot make progress at all?* | *Is my risk model still meaningful?* |
+| Failure mode | The game hangs or spins | The bot confidently makes a bad decision |
+| Detection | Capability predicates + progress invariant | Named conditions |
+| Configurable? | **No** — this is correctness | **Yes** — risk appetite and class semantics |
+| Example | Immobilised, so pathing can never succeed | Stunned, so the power-level maths is invalid |
 
-The WARN re-arm behaviour is the non-obvious part and it's genuinely well designed. Don't
-touch it.
+Conflating them produces the worst of both: liveness bugs that a user can accidentally
+configure away, and risk policy hardcoded where the player's judgement is better.
 
 ---
 
-## Finding 1 — the list must hold *capabilities*, not effect names
+## 1. Liveness — not configurable
 
-The obvious refactor is a list of effects: `EFF_PINNED`, `EFF_CONSTRICTED`, and so on. That
-approach cannot be made correct.
+### 1.1 Capability predicates
 
-**36 references to `never_move` across ToME's timed-effect files**, spanning at least sixteen
-distinct effects:
+Detect what the bot *can do*, never the named cause. `never_move` has **36 references** across
+ToME's timed-effect files spanning 16+ distinct effects:
 
 ```
 SPYDRIC_POISON · CONSTRICTED · DAZED · FROZEN_FEET · PINNED · BONE_GRAB
@@ -37,82 +41,18 @@ GRAPPLED · CRUSHING_HOLD · STRANGLE_HOLD · PSIONIC_BIND · GARROTE
 BEAR_TRAP · STONE_VINE · TREE_OF_LIFE · RECALL · …
 ```
 
-mishander's fork checks `EFF_PINNED`. That is **one of sixteen**.
+mishander's fork checks `EFF_PINNED` — one of sixteen. And an effect list still couldn't be
+correct, because `Actor.lua:4186` sets `never_move` for **encumbrance**, which is not an effect
+at all. A bot that picks up too much loot soft-locks identically.
 
-And an effect list still wouldn't be enough, because movement is also blocked by something
-that isn't an effect at all — `Actor.lua:4186`, being over-encumbered:
+The predicate ToME's own `move()` gates on (`Actor.lua:1416`) is `self:attr("never_move")`.
+One check, all sixteen, plus encumbrance, plus whatever 1.7.7 adds.
 
-```lua
-self.encumbered = self:addTemporaryValue("never_move", 1)
-```
+**Liveness use is unconditional:** if you cannot move, do not attempt to path. Not a policy —
+attempting the impossible is simply a bug. (The same fact *also* feeds §2 as a configurable
+risk condition. One signal, two consumers.)
 
-A bot that picks up too much loot cannot move, is not under any effect, and would soft-lock
-exactly the same way.
-
-**The correct predicate is the one ToME's own `move()` gates on** (`Actor.lua:1416`):
-
-```lua
-elseif not force and self:attr("never_move") then
-```
-
-One check. Covers all sixteen effects, covers encumbrance, and stays correct when a future
-ToME version adds the seventeenth — because it's the same predicate the game uses. This is
-the difference between a list that needs maintaining forever and one that doesn't.
-
-**Design rule: every entry detects a capability the bot needs, not a named cause of losing
-it.**
-
-### The clinching evidence: STUNNED no longer means what v1 thinks
-
-v1 treats `DEBUFF_STUNNED` as a stop condition. In ToME 1.7.6, stun does **not** prevent
-acting:
-
-> *"The target is stunned, reducing damage by 50%, putting 3 random talents on cooldown and
-> reducing movement speed by 50%. While stunned talents cooldown twice as slow."*
-
-It sets `stunned = 1`, halves damage and movement speed, and puts three talents on cooldown.
-It blocks nothing outright. A stunned character can move and fight — worse than usual, but
-perfectly able. v1 halts anyway, surrendering turns it could have used.
-
-Meanwhile `DAZED` — which *does* incapacitate — sets `never_move`, so the capability check
-catches it for free.
-
-This is the argument for the whole approach. **Named conditions drift in meaning between game
-versions; capabilities don't.** A bot that asks "can I move?" stays correct across a rules
-change. A bot that asks "am I stunned?" silently becomes wrong the day the developer rebalances
-stun, with nothing to signal that it has — which is precisely what happened here, and it went
-unnoticed for the remaining life of the project.
-
-**Reclassify accordingly:** stunned and confused are *impairments* that should feed the score
-(fight yes, explore cautiously), not conditions that halt the bot.
-
----
-
-## Finding 2 — "cannot move" must not mean "stop"
-
-This is why folding pinned in as a plain stop condition would be a regression.
-
-The five conditions v1 tracked all prevent the character *acting*, so halting is the only
-sensible response. Immobilisation is different: **a pinned character can still attack.**
-Halting there throws away turns the bot could use.
-
-So an entry needs to say *what it takes away*, and the act loop consults that:
-
-| condition | blocks | correct bot response |
-|---|---|---|
-| immobilised (`never_move`) | move | don't path, don't explore — **keep fighting** an adjacent target |
-| incapacitated (stunned / dazed / stoned / `dont_act`) | act | nothing is possible; halt |
-| asleep | act | halt |
-| confused | reliable move | safe to fight, unsafe to explore |
-| blind | target acquisition | fight only what's adjacent |
-
-That table is also the reason this task feeds **T-020**. A scored evaluation needs to know
-what the character *can currently do*; capability flags are an input to the score, not a gate
-in front of it.
-
-### But "cannot act" needs no condition at all
-
-`never_move` has a clean aggregate. **"Cannot act" has no usable twin, and doesn't need one.**
+### 1.2 "Cannot act" needs no handling at all
 
 `mod/class/Player.lua`, first line of `act()`:
 
@@ -121,196 +61,213 @@ function _M:act()
     if not mod.class.Actor.act(self) then return end
 ```
 
-and `Actor:act()` bails at the energy gate before any player control flow:
+`Actor:act()` bails at the energy gate after `paralyzed`/`stoned`/`dont_act`/`time_stun`/
+`time_prison` zero it. **The player is never prompted, and the bot's superloaded code never
+runs.** No spin is possible, and control cannot be handed to a player who equally cannot act.
+
+This asymmetry is the whole point: **movement blocking still grants turns, which is why it
+hangs. Act blocking doesn't.**
+
+What *is* worth surfacing is the aftermath — the "attacked 24 times in a row" case, currently
+only discoverable from a post-mortem of the log. `game.turn` advances by 1000 per game turn,
+so the gap is measurable on the first real turn after it:
 
 ```lua
-if self:attr("paralyzed")   then ... self.energy.value = 0 ... end
-if self:attr("stoned")      then self.energy.value = 0 end
-if self:attr("dont_act")    then self.energy.value = 0 end
-if self:attr("time_stun")   then self.energy.value = 0 end
-if self:attr("time_prison") then self.energy.value = 0 end
-if self.energy.value < game.energy_to_act then return false end
-if self:attr("never_act") then return false end
+{ code = "BLACKOUT", label = "Turns lost while unable to act", default = "WARN",
+  detect = function(p, ctx) return ctx.turnGap > 1 end,
+  msg    = "lost %d turns while unable to act" }
 ```
 
-So when the character cannot act, **the player is never prompted** — no keypress is requested,
-the engine simply ticks other actors. And because the addon superloads `Player:act()`, the
-bot's code doesn't run either.
+That belongs in §2, not §1 — it's information for a decision, not a liveness guard.
+`LIFE_BIGLOSS` already covers much of it incidentally, since the remembered life predates the
+gap.
 
-Three consequences:
+### 1.3 Progress invariant, not iteration caps
 
-1. **A `CANNOT_ACT` stop condition is unimplementable.** The detector would live in code that
-   never executes during the very state it's meant to detect.
-2. **A "player manually passes turns" policy is impossible**, not merely tedious — there is no
-   prompt to pass at. Nor would it help: you cannot hand control to a player who also cannot
-   act.
-3. **The bot cannot spin here.** The immobilisation soft-lock exists precisely *because*
-   movement blocking still grants turns. Act blocking doesn't. That asymmetry is the whole
-   reason `never_move` needs handling and act blocking doesn't.
-
-### The actionable moment is when it *ends*
-
-The real hazard is invisible: you're paralysed, you take twenty hits, and you find out
-afterwards from the log. The bot's first real turn after the gap is the only point where
-anything can be decided.
-
-Two mechanisms, both cheap:
-
-- **`LIFE_BIGLOSS` already covers most of it.** The bot's remembered life is from *before* the
-  blackout, so the delta on resume naturally spans the entire gap. It fires as designed.
-- **Add a `BLACKOUT` condition** that measures the gap directly. `game.turn` advances by 1000
-  per game turn, so recording it each bot turn makes the gap trivially detectable:
+v1's hang guard, `Player.lua:857`:
 
 ```lua
-{
-  code    = "BLACKOUT",
-  label   = "Turns lost while unable to act",
-  default = "WARN",
-  detect  = function(p, ctx) return ctx.turnGap > 1 end,
-  msg     = "lost %d turns while unable to act",
-}
+if _M.skoobot.tempActivation.turnCount > 1000 then
+    aiStop("#LIGHT_RED#AI Disabled. AI acted for 1000 turns. Did it get stuck?")
 ```
 
-That surfaces the thing the player currently has to reconstruct from a post-mortem — and it
-hands control back at the one moment they can actually use it.
+A magic number counting **invocations, not progress**. Three problems:
 
-For reference, ToME has its own version of this idea: `life_lost_warning` fires
-`game.bignews` and disables input for two seconds after a large life drop.
+- A genuinely productive 1000-turn run trips the same wire as a spin. The message even asks
+  the user to guess which happened.
+- It only counts outer iterations. A spin *inside* one `act()` call is invisible to it.
+- 1000 wasted iterations still happen before it fires.
+
+**Better primitive: did game time advance?** Every bot iteration should consume energy. If
+`game.turn` is unchanged after an iteration, no game time passed — by definition nothing
+happened, whatever the code thinks it did.
+
+```lua
+-- Liveness invariant: an iteration that does not advance game.turn did nothing.
+-- N consecutive no-ops is a livelock regardless of cause -- including causes
+-- not yet imagined, which is the point. Small N, because there is no legitimate
+-- reason to burn several iterations on zero game time.
+if game.turn == ctx.lastTurn then
+    ctx.stalled = ctx.stalled + 1
+    if ctx.stalled >= STALL_LIMIT then
+        return aiStop(("#RED#AI stopped: no progress in %d iterations (state: %s)")
+                      :format(ctx.stalled, aiStateString()))
+    end
+else
+    ctx.stalled = 0
+end
+```
+
+This catches the general class rather than enumerated instances — the pinned freeze, the
+explore soft-lock, encumbrance, and the next one nobody has hit yet. Capability checks (§1.1)
+remain the cheap early-out that avoids reaching the guard at all; the invariant is the
+backstop that makes "we missed a case" survivable instead of fatal.
+
+Reporting the AI state in the stop message turns each trip into a bug report rather than a
+shrug.
 
 ---
 
-## Finding 3 — v1's list can never gain entries
+## 2. Model validity — configurable, and deliberately so
 
-`getStopConditionList()`:
+### 2.1 What the stop conditions are actually for
+
+The bot's threat model is `evaluatePowerLevel()` — a heuristic over offensive and defensive
+stats. **It does not model impairment.** Under stun in 1.7.6 the character has −50% damage,
+−50% movement speed, and three random talents on cooldown, and the power figure reflects none
+of it.
+
+So the bot will read a fight as winnable when it is not. The stop is not saying *"I would
+hang"*; it is saying **"my model is out of its validity range here — hand this to a better
+model, which is the player."**
+
+That is a sound engineering decision, and it should be preserved. A heuristic that knows where
+it stops being trustworthy is more valuable than one that extrapolates confidently.
+
+**Correction to the earlier draft:** stunned and confused should **not** be quietly demoted to
+score inputs. They may graduate to that later *if* the scorer earns it (§2.3), but until it
+demonstrably models impairment, an honest boundary beats a confident guess.
+
+### 2.2 Why WARN / STOP / IGNORE must stay per-condition
+
+The tri-state is not a convenience. It carries knowledge the bot cannot derive:
+
+- **Risk appetite** varies by player and by run. A one-life character and a throwaway test
+  character want different answers to the same situation.
+- **Class semantics invert the meaning of a condition.** A **Solipsist** wants `ASLEEP` set to
+  `IGNORE` — sleep is *beneficial* for them. No universal heuristic gets that right, and
+  hardcoding a class list would rot the moment a new class or addon changed the assumption.
+
+The `lucid_dreamer` term in v1's ASLEEP check was an attempt to encode exactly this in code.
+It was also the line that carried the precedence bug, so the check never fired — meaning the
+mechanism intended to serve Solipsists was inoperative, and the `IGNORE` policy was doing the
+work regardless. That is an argument for policy over cleverness: **the configuration was right
+and the code was wrong.**
+
+Keep the tri-state exactly as designed, including the WARN acknowledgement that auto-rearms
+when the condition lifts.
+
+### 2.3 The tempo problem, stated honestly
+
+Priority-list talent selection cannot express the following:
+
+> One turn of stun remaining. The best long-cooldown attack just came off cooldown. Correct
+> play: shield or heal this turn, fire the big hit next turn at full damage. Naive play: fire
+> it now at −50%.
+
+This is a **tempo** decision, and a descending-priority list is structurally incapable of
+representing it — priority encodes *what is best*, never *when*. Solving it properly means
+lookahead over effect durations and cooldowns, which is a planner, not a heuristic.
+
+Three honest options, in increasing cost:
+
+1. **Stop and let the player play it.** What v1 does. Costs nothing, always correct, gives up
+   automation exactly where automation is hardest. This stays the default.
+2. **Per-talent suppression flag.** The talent config UI already collects `usetype` and
+   `priority`; a third field — *"hold while impaired"* — lets the player encode "don't waste
+   Execution while stunned" declaratively. Consistent with the existing philosophy of pushing
+   irreducible judgement to the player rather than guessing. Only useful to players who set
+   stun to `WARN`/`IGNORE`, so it is a refinement, not a replacement.
+3. **Effectiveness-aware scoring.** T-020 territory, and genuinely hard: it needs expected
+   value over remaining effect duration. Not a v0.1 goal, and possibly never worth it.
+
+Do not let option 3's existence justify weakening option 1 before it is built.
+
+---
+
+## 3. Framework mechanics
+
+### 3.1 Definition list
+
+One entry is the single source of truth for a condition's UI, detection, default policy, and
+capability implications.
 
 ```lua
-if not game.player.skoobotstopconditions then game.player.skoobotstopconditions = { ... } end
-return game.player.skoobotstopconditions
+CONDITIONS = {
+  { code = "CANNOT_MOVE", label = "Immobilised", default = "WARN",
+    blocks = { move = true },
+    detect = function(p) return p:attr("never_move") end,
+    msg    = "immobilised and unable to move" },
+
+  { code = "ASLEEP", label = "Asleep", default = "WARN",
+    -- ToME's own idiom, Actor.lua:1402/4448/5800. v1 wrote
+    -- `not p.lucid_dreamer == 1`, always false. See v1-latent-bugs.md.
+    -- Solipsists should set this to IGNORE; sleep is good for them.
+    detect = function(p) return p:attr("sleep") and not p:attr("lucid_dreamer") end,
+    msg    = "asleep" },
+
+  { code = "STUNNED", label = "Stunned", default = "WARN",
+    -- Model-validity boundary, NOT a liveness guard. A stunned character can
+    -- act; evaluatePowerLevel() just cannot be trusted while they are. See §2.1.
+    detect = function(p) return p:attr("stunned") end,
+    msg    = "stunned -- threat estimate unreliable" },
+  -- …
+}
 ```
 
-The defaults are written to the character **once**, then never reconciled. Any condition added
-in a later version is invisible to every character created before it. Worse, `getStopCondition`
-returns `nil` for an unknown code after printing an error, and every caller immediately does
-`.stoptype` on it — so an older save meeting newer code crashes rather than degrading.
+Drift between list and detection is what broke v1: `DEBUFF_ASLEEP` rendered as a working
+toggle while its detection was dead code, with no mechanism to notice. One entry makes that
+structurally impossible.
 
-v1 never hit this because it stopped shipping. A project that intends to keep shipping will.
+### 3.2 Reconcile on access
 
-### Fix: reconcile the saved list against the definitions
-
-On access, walk the definitions and add anything the character is missing, using that
-definition's current default. **The same pass must handle two adjacent cases**, or it leaves
-the bug it's meant to fix:
-
-| case | why it matters |
-|---|---|
-| **definition present, save missing** | the reported problem — new conditions never reach existing characters |
-| **save present, definition gone** | a retired condition lingers as a phantom toggle in the config UI that controls nothing. That is the ASLEEP failure in miniature: a control that looks live and isn't |
-| **label changed in code** | display text is stale forever, so the same condition reads differently on two characters |
-
-So: **add missing, drop orphans, and take everything except the player's chosen `stoptype`
-from the definition.**
+Definitions live in code. Only the player's chosen `stoptype` persists.
 
 ```lua
--- Idempotent. Cheap at this size (~15 entries), so just run it on every
--- access rather than guarding with a "migrated" flag -- that way a save
--- that was hand-edited or half-written repairs itself too.
+-- Idempotent, unguarded by a "migrated" flag: at ~15 entries it is cheap
+-- enough to run every access, so a hand-edited or half-written save repairs
+-- itself. No version stamps -- self-healing convergence beats ordered
+-- migrations.
 local function reconcileConditions(player)
-    local saved = player.skoobot_conditions or {}
     local policy = {}
-    for _, e in ipairs(saved) do policy[e.code] = e.stoptype end  -- keep only the choice
+    for _, e in ipairs(player.skoobot_conditions or {}) do policy[e.code] = e.stoptype end
 
     local out = {}
     for _, def in ipairs(CONDITIONS) do        -- definitions drive; orphans fall away
-        out[#out+1] = {
-            code     = def.code,
-            label    = def.label,              -- always current
-            stoptype = policy[def.code] or def.default,
-        }
+        out[#out+1] = { code = def.code, label = def.label,
+                        stoptype = policy[def.code] or def.default }
     end
     player.skoobot_conditions = out
     return out
 end
 ```
 
-Because everything but `stoptype` is refreshed from the definition, the only thing the save
-actually carries is the player's deviation from the defaults — the list form and an
-overrides map converge on identical behaviour. Keeping the list shape is the smaller change
-and reads more obviously in a save dump; if the schema is ever simplified, storing
-`{code = stoptype}` alone is sufficient and loses nothing.
+Handles all three cases: definitions the save lacks are added at their current default;
+orphans whose definition is gone are dropped (otherwise a retired condition lingers as a
+phantom toggle controlling nothing — the ASLEEP failure in miniature); and labels are always
+current.
 
-**No version stamps.** A reconcile that is idempotent and self-healing beats a chain of
-version-gated migrations: there is no ordering to get wrong, nothing to forget to write, and
-a save from any past or future version converges on the same correct state.
+`getStopCondition` must additionally **fail closed**, returning the definition's default
+rather than `nil`, so a lookup bug degrades to "used the default" instead of crashing mid-run.
 
-**Guard the lookup regardless.** `getStopCondition` currently returns `nil` after printing an
-error, and every caller immediately dereferences `.stoptype`. Reconciliation makes that
-unreachable in practice, but the function should still fail closed — return the definition's
-default rather than `nil`, so a lookup bug degrades into "uses the default" instead of a
-crash mid-run.
+### 3.3 Incidental fix
+
+`tryStop` shadows its own parameter — a condition *code* named `stoptype`, then overwritten by
+the actual stoptype — so the diagnostic prints `Ignoring stop condition: IGNORE` instead of
+naming the condition. `luacheck` flags the shadowing.
 
 ---
 
-## Proposed shape
+## 4. Migration
 
-```lua
--- One entry = one thing the bot needs, its detector, its default policy,
--- and what its absence takes away. Single source of truth: the UI, the
--- detection, and the capability model all read from here.
-CONDITIONS = {
-  {
-    code    = "CANNOT_MOVE",
-    label   = "Immobilised",
-    default = "WARN",
-    blocks  = { move = true },
-    detect  = function(p) return p:attr("never_move") end,
-    msg     = "immobilised and unable to move",
-  },
-  {
-    code    = "ASLEEP",
-    label   = "Asleep",
-    default = "WARN",
-    blocks  = { act = true },
-    -- ToME's own idiom, Actor.lua:1402/4448/5800. v1 tried to copy this and
-    -- wrote `not p.lucid_dreamer == 1`, which is always false. See
-    -- v1-latent-bugs.md.
-    detect  = function(p) return p:attr("sleep") and not p:attr("lucid_dreamer") end,
-    msg     = "asleep",
-  },
-  -- …
-}
-```
-
-Adding a condition becomes one table entry. The UI list, the detection pass, and the
-capability model are generated from it, so they cannot drift.
-
-**Drift is not hypothetical.** It is exactly what broke v1: `DEBUFF_ASLEEP` existed in the
-list, rendered in the config UI as a working `WARN` toggle, and its detection in
-`checkForDebuffs()` was dead code. Two sources of truth, no mechanism to notice they
-disagreed, and a user (h-youhei) reporting the resulting soft-lock in 2021 with nobody able to
-see why.
-
----
-
-## Also fix while in here
-
-`tryStop` shadows its own parameter:
-
-```lua
-_M.tryStop = function(self, stoptype, msg)
-    local stoptype = self:getStopCondition(stoptype).stoptype   -- param was a *code*
-    if stoptype == "IGNORE" then print("... Ignoring stop condition: "..stoptype) ...
-```
-
-The parameter is a condition *code*, named `stoptype`, then shadowed by the actual stoptype —
-so the diagnostic prints `Ignoring stop condition: IGNORE` instead of naming the condition.
-Harmless, but it's the naming confusion that makes the rest of this code hard to read, and
-`luacheck` flags shadowing.
-
----
-
-## Migration note
-
-v1 persisted the full record — `{label, code, stoptype}` — into the save. Under the new
-scheme, labels and defaults live in code and only policy overrides persist. Nothing needs
-migrating from v1 saves, since this is a separate addon with its own `short_name` and no
-shared state.
+Nothing to migrate from v1. Separate addon, separate `short_name`, no shared state.
