@@ -34,12 +34,15 @@ archive alongside this repo.
 | `src/` | The addon itself. This tree is what gets packed into a `.teaa` |
 | `src/init.lua` | Addon manifest |
 | `spec/` | [busted](https://lunarmodules.github.io/busted/) tests for logic that can run outside the game |
-| `tools/` | Build and install scripts |
+| `tools/` | Development tooling — the test harness. **Never packaged into a release** |
 | `docs/` | Design notes |
+| `CLAUDE.md` | Orientation and the non-negotiable rules — read this first |
 
 ## Development
 
-Requires LuaJIT 2.1 (matching ToME's Lua 5.1 semantics), `luacheck`, and `busted`.
+Requires LuaJIT, `luacheck` and `busted`. Note the game itself runs **LuaJIT 2.0.2, x86** --
+same Lua 5.1 dialect as a local 2.1 build, but not the same version, so a 2.1-only idiom will
+pass `busted` and fail in-game.
 
 Parse-check without launching the game:
 
@@ -58,6 +61,12 @@ Run tests:
 ```bash
 busted spec/
 ```
+
+## Project procedures
+
+Hosting, the machine account, issue conventions, and the two rules that must not be broken —
+never touch the original SkooBot repo, never authenticate as the human owner — are in
+[docs/github-workflow.md](docs/github-workflow.md). Read it before doing anything on GitHub.
 
 ## Licence
 
