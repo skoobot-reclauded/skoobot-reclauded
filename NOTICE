@@ -63,6 +63,35 @@ This addon is a derivative work. Its lineage, oldest first:
     a soft-lock fix, likewise never merged).
 
 
+Development tooling
+-------------------
+
+Everything under `tools/` is original work of this project:
+
+    tools/harness.ps1           tools/devbridge/
+    tools/new-character.ps1     tools/devbridge-boot/
+    tools/smoke-test.ps1
+    tools/test-unfocused.ps1
+
+Copyright (C) 2026 SkoobyDoo <skoobot.reclauded@proton.me>
+
+None of it is adapted from Tales of Maj'Eyal, Player AI, SkooBot, or mishander's
+fork. It carries no other author's copyright header, and the attribution chain
+above does not apply to it. Sole authorship is recorded here deliberately: GPL-3.0
+is only enforceable by someone who can show they hold the copyright, and this is
+what makes that provable.
+
+It is licensed GPL-3.0, the same as the rest of this repository. The PowerShell
+harness is an external process driver, not a derivative of the game, so it could
+have been licensed permissively. GPL-3.0 is a deliberate choice rather than an
+inherited obligation: the intent is that improvements stay available to everyone
+who receives them, and that the work cannot be folded into a closed product.
+
+The two devbridge addons are development-only. They execute arbitrary Lua from
+disk by design, are never packaged into a release (see T-035), and should not be
+installed by anyone who is not developing this addon.
+
+
 On the name
 -----------
 
