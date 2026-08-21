@@ -1,0 +1,15 @@
+# Build output
+build/
+dist/
+*.teaa
+
+# Lint/test caches
+.luacheckcache
+luacov.*.out
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

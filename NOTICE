@@ -1,0 +1,77 @@
+SkooBot: Reclauded
+==================
+
+Copyright (C) 2026 SkoobyDoo <skoobot.reclauded@proton.me>
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE for the full text.
+
+
+Attribution
+-----------
+
+This addon is a derivative work. Its lineage, oldest first:
+
+1.  Tales of Maj'Eyal and the T-Engine
+    Copyright (C) 2009-2023 Nicolas Casalini "DarkGod"
+    GPL-3.0. https://te4.org/
+
+    The root of the chain. Files adapted from the game's own source -- keybind
+    definitions, dialog scaffolding, and the Player/Actor classes this addon
+    superloads -- carry Casalini's copyright header. Those headers are retained
+    verbatim wherever such code appears here, and must stay that way.
+
+2.  Player AI
+    Copyright (C) Charidan
+    https://github.com/Charidan/Tales-of-Maj-Eyal-Player-AI
+
+    A port of the game's built-in dumb_ai to drive the player character. The
+    common ancestor of every autoplay addon for ToME. Published without an
+    explicit LICENSE file, but derived from GPL-3.0 game source and carrying
+    Casalini's headers; treated as GPL-3.0 accordingly.
+
+3.  SkooBot
+    Copyright (C) 2018-2020 SkoobyDoo <skoobot.reclauded@proton.me>
+    GPL-3.0. https://github.com/SkoobyDoo/tome4-SkooBot
+
+    Began as a fork of Charidan's Player AI and diverged substantially: bespoke
+    enemy threat scoring, a talent-priority configuration UI, and configurable
+    stop conditions. This project is its successor. The original remains
+    published and untouched.
+
+    Additional contributor: VitaminC4.
+
+4.  SkooBot fork
+    Copyright (C) 2021-2024 mishander
+    GPL-3.0. https://github.com/mishander/tome4-SkooBot
+
+    Carried the project forward after upstream development stopped. Contributed
+    working fixes for the pin/dominate freeze, underwater air pathing, glowing
+    chest handling, and HP-weighted power-level evaluation. This work was
+    submitted upstream as pull request #51 and was never merged.
+
+    Where that work is used here it is used with authorship intact. It was
+    written, tested, and offered in good faith, and it is owed the credit
+    independently of what the licence requires.
+
+    Additional contributor to the upstream project: yura9111 (pull request #48,
+    a soft-lock fix, likewise never merged).
+
+
+On the name
+-----------
+
+"Reclauded" is a play on "rebooted". This addon was built with the assistance
+of Claude, an AI assistant made by Anthropic.
+
+It contains no language model and makes no network requests. It runs entirely
+offline inside the game, as ordinary Lua. No API key is required and no data
+leaves your machine. Claude's involvement is authorship, not architecture.
+
+Claude is a trademark of Anthropic, PBC. This project is not affiliated with,
+endorsed by, or sponsored by Anthropic.
+
+Tales of Maj'Eyal is a trademark of Nicolas Casalini. This project is not
+affiliated with or endorsed by the ToME developers.
