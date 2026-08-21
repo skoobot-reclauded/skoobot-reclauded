@@ -86,7 +86,7 @@ $null = Step 'save' 'game:saveGame() return "save requested"' 120
 # returns immediately and a separate thread writes game.teag.tmp, then renames.
 # Killing the process on the strength of that return leaves a zero-byte .tmp and
 # no save at all. Wait for the real file.
-$save = "C:\Users\localuser\T-Engine\4.0\tome\save\$Name\game.teag"
+$save = Join-Path $script:SaveRoot "$Name\game.teag"
 $deadline = (Get-Date).AddSeconds(180)
 while ((Get-Date) -lt $deadline) {
     if ((Test-Path $save) -and (Get-Item $save).Length -gt 0) { break }
@@ -101,6 +101,6 @@ if ((Test-Path $save) -and (Get-Item $save).Length -gt 0) {
     exit 0
 }
 Write-Host "`n[new-character] FAILED - no completed save at $save"
-Get-ChildItem "C:\Users\localuser\T-Engine\4.0\tome\save\$Name" -ErrorAction Ignore |
+Get-ChildItem (Join-Path $script:SaveRoot $Name) -ErrorAction Ignore |
     Select-Object Name, Length | Format-Table -AutoSize
 exit 1

@@ -8,10 +8,18 @@
     Dot-source it:   . .\tools\harness.ps1
 #>
 
-$script:GameDir   = 'C:\games\TalesMajEyal'
+# Paths. Derived rather than hardcoded, so nothing here carries one machine's
+# user name and the tools work for anyone who checks the repo out. Override the
+# game location with TOME_DIR if it is installed elsewhere.
+if ($env:TOME_DIR) { $script:GameDir = $env:TOME_DIR } else { $script:GameDir = 'C:\games\TalesMajEyal' }
 $script:GameExe   = Join-Path $script:GameDir 't-engine.exe'
 $script:LogPath   = Join-Path $script:GameDir 'te4_log.txt'
-$script:BridgeDir = 'C:\Users\localuser\T-Engine\4.0\skoobot-bridge'
+
+# T-Engine's home directory. bootstrap/boot.lua mounts it at / inside the game,
+# so <home>\skoobot-bridge is /skoobot-bridge to the devbridge addons.
+$script:TomeHome  = Join-Path $env:USERPROFILE 'T-Engine\4.0'
+$script:BridgeDir = Join-Path $script:TomeHome 'skoobot-bridge'
+$script:SaveRoot  = Join-Path $script:TomeHome 'tome\save'
 
 $script:Seq       = 0
 $script:GamePid   = $null
