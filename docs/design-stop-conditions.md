@@ -104,15 +104,58 @@ returns `nil` for an unknown code after printing an error, and every caller imme
 
 v1 never hit this because it stopped shipping. A project that intends to keep shipping will.
 
-**Fix:** the definition list is **code**, and is the single source of truth. Only the player's
-*overrides* persist:
+### Fix: reconcile the saved list against the definitions
+
+On access, walk the definitions and add anything the character is missing, using that
+definition's current default. **The same pass must handle two adjacent cases**, or it leaves
+the bug it's meant to fix:
+
+| case | why it matters |
+|---|---|
+| **definition present, save missing** | the reported problem — new conditions never reach existing characters |
+| **save present, definition gone** | a retired condition lingers as a phantom toggle in the config UI that controls nothing. That is the ASLEEP failure in miniature: a control that looks live and isn't |
+| **label changed in code** | display text is stale forever, so the same condition reads differently on two characters |
+
+So: **add missing, drop orphans, and take everything except the player's chosen `stoptype`
+from the definition.**
 
 ```lua
-game.player.skoobot_policy = { CANNOT_MOVE = "STOP" }   -- deviations only
+-- Idempotent. Cheap at this size (~15 entries), so just run it on every
+-- access rather than guarding with a "migrated" flag -- that way a save
+-- that was hand-edited or half-written repairs itself too.
+local function reconcileConditions(player)
+    local saved = player.skoobot_conditions or {}
+    local policy = {}
+    for _, e in ipairs(saved) do policy[e.code] = e.stoptype end  -- keep only the choice
+
+    local out = {}
+    for _, def in ipairs(CONDITIONS) do        -- definitions drive; orphans fall away
+        out[#out+1] = {
+            code     = def.code,
+            label    = def.label,              -- always current
+            stoptype = policy[def.code] or def.default,
+        }
+    end
+    player.skoobot_conditions = out
+    return out
+end
 ```
 
-Unknown keys are dropped on load; unset conditions fall back to the definition's default. New
-conditions appear for existing characters automatically, and removed ones vanish harmlessly.
+Because everything but `stoptype` is refreshed from the definition, the only thing the save
+actually carries is the player's deviation from the defaults — the list form and an
+overrides map converge on identical behaviour. Keeping the list shape is the smaller change
+and reads more obviously in a save dump; if the schema is ever simplified, storing
+`{code = stoptype}` alone is sufficient and loses nothing.
+
+**No version stamps.** A reconcile that is idempotent and self-healing beats a chain of
+version-gated migrations: there is no ordering to get wrong, nothing to forget to write, and
+a save from any past or future version converges on the same correct state.
+
+**Guard the lookup regardless.** `getStopCondition` currently returns `nil` after printing an
+error, and every caller immediately dereferences `.stoptype`. Reconciliation makes that
+unreachable in practice, but the function should still fail closed — return the definition's
+default rather than `nil`, so a lookup bug degrades into "uses the default" instead of a
+crash mid-run.
 
 ---
 
