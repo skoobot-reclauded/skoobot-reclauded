@@ -30,6 +30,8 @@ undead and living characters alike. Verified under LuaJIT:
 | living (`undead = nil`) | `not nil == 1` | `false` |
 | *intended* | `undead ~= 1` | `true` |
 
+> Full write-up of this and a second instance of the same defect: [v1-latent-bugs.md](v1-latent-bugs.md)
+
 **The entire "run to air when drowning" block was unreachable for the whole life of the
 project.** The code was written in October 2018 (commit *"Added support for undead not
 worrying about drowning"*) and never once executed.
@@ -100,7 +102,7 @@ rather than an absolute cutoff. Correct: threat is relative to the character, no
 reach. Both correct. Note that these fix a *live* bug (#5) and a *latent* one (#6) that was
 masked by #5 — the pathing was never exercised.
 
-**7. Pinned check before `SAI_beginExplore()`** — prevents the freeze where the bot tries to
+**7. Pinned check before `SAI_beginExplore()`** — see [v1-latent-bugs.md](v1-latent-bugs.md) for why this is incomplete. — prevents the freeze where the bot tries to
 explore while unable to move. Fixes the reported symptom, but **incomplete**: it only tests
 `EFF_PINNED`, while mishander's own PR text and broness's bug report both mention Dominate,
 and h-youhei reported the same freeze from *sleep*. The general form is "can I move at all?",
