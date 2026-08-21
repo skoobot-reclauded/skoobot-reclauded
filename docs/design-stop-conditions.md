@@ -62,6 +62,30 @@ the difference between a list that needs maintaining forever and one that doesn'
 **Design rule: every entry detects a capability the bot needs, not a named cause of losing
 it.**
 
+### The clinching evidence: STUNNED no longer means what v1 thinks
+
+v1 treats `DEBUFF_STUNNED` as a stop condition. In ToME 1.7.6, stun does **not** prevent
+acting:
+
+> *"The target is stunned, reducing damage by 50%, putting 3 random talents on cooldown and
+> reducing movement speed by 50%. While stunned talents cooldown twice as slow."*
+
+It sets `stunned = 1`, halves damage and movement speed, and puts three talents on cooldown.
+It blocks nothing outright. A stunned character can move and fight — worse than usual, but
+perfectly able. v1 halts anyway, surrendering turns it could have used.
+
+Meanwhile `DAZED` — which *does* incapacitate — sets `never_move`, so the capability check
+catches it for free.
+
+This is the argument for the whole approach. **Named conditions drift in meaning between game
+versions; capabilities don't.** A bot that asks "can I move?" stays correct across a rules
+change. A bot that asks "am I stunned?" silently becomes wrong the day the developer rebalances
+stun, with nothing to signal that it has — which is precisely what happened here, and it went
+unnoticed for the remaining life of the project.
+
+**Reclassify accordingly:** stunned and confused are *impairments* that should feed the score
+(fight yes, explore cautiously), not conditions that halt the bot.
+
 ---
 
 ## Finding 2 — "cannot move" must not mean "stop"
@@ -85,6 +109,73 @@ So an entry needs to say *what it takes away*, and the act loop consults that:
 That table is also the reason this task feeds **T-020**. A scored evaluation needs to know
 what the character *can currently do*; capability flags are an input to the score, not a gate
 in front of it.
+
+### But "cannot act" needs no condition at all
+
+`never_move` has a clean aggregate. **"Cannot act" has no usable twin, and doesn't need one.**
+
+`mod/class/Player.lua`, first line of `act()`:
+
+```lua
+function _M:act()
+    if not mod.class.Actor.act(self) then return end
+```
+
+and `Actor:act()` bails at the energy gate before any player control flow:
+
+```lua
+if self:attr("paralyzed")   then ... self.energy.value = 0 ... end
+if self:attr("stoned")      then self.energy.value = 0 end
+if self:attr("dont_act")    then self.energy.value = 0 end
+if self:attr("time_stun")   then self.energy.value = 0 end
+if self:attr("time_prison") then self.energy.value = 0 end
+if self.energy.value < game.energy_to_act then return false end
+if self:attr("never_act") then return false end
+```
+
+So when the character cannot act, **the player is never prompted** — no keypress is requested,
+the engine simply ticks other actors. And because the addon superloads `Player:act()`, the
+bot's code doesn't run either.
+
+Three consequences:
+
+1. **A `CANNOT_ACT` stop condition is unimplementable.** The detector would live in code that
+   never executes during the very state it's meant to detect.
+2. **A "player manually passes turns" policy is impossible**, not merely tedious — there is no
+   prompt to pass at. Nor would it help: you cannot hand control to a player who also cannot
+   act.
+3. **The bot cannot spin here.** The immobilisation soft-lock exists precisely *because*
+   movement blocking still grants turns. Act blocking doesn't. That asymmetry is the whole
+   reason `never_move` needs handling and act blocking doesn't.
+
+### The actionable moment is when it *ends*
+
+The real hazard is invisible: you're paralysed, you take twenty hits, and you find out
+afterwards from the log. The bot's first real turn after the gap is the only point where
+anything can be decided.
+
+Two mechanisms, both cheap:
+
+- **`LIFE_BIGLOSS` already covers most of it.** The bot's remembered life is from *before* the
+  blackout, so the delta on resume naturally spans the entire gap. It fires as designed.
+- **Add a `BLACKOUT` condition** that measures the gap directly. `game.turn` advances by 1000
+  per game turn, so recording it each bot turn makes the gap trivially detectable:
+
+```lua
+{
+  code    = "BLACKOUT",
+  label   = "Turns lost while unable to act",
+  default = "WARN",
+  detect  = function(p, ctx) return ctx.turnGap > 1 end,
+  msg     = "lost %d turns while unable to act",
+}
+```
+
+That surfaces the thing the player currently has to reconstruct from a post-mortem — and it
+hands control back at the one moment they can actually use it.
+
+For reference, ToME has its own version of this idea: `life_lost_warning` fires
+`game.bignews` and disables input for two seconds after a large life drop.
 
 ---
 
