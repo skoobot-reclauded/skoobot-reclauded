@@ -102,11 +102,12 @@ rather than an absolute cutoff. Correct: threat is relative to the character, no
 reach. Both correct. Note that these fix a *live* bug (#5) and a *latent* one (#6) that was
 masked by #5 — the pathing was never exercised.
 
-**7. Pinned check before `SAI_beginExplore()`** — see [v1-latent-bugs.md](v1-latent-bugs.md) for why this is incomplete. — prevents the freeze where the bot tries to
+**7. Pinned check before `SAI_beginExplore()`** — prevents the freeze where the bot tries to
 explore while unable to move. Fixes the reported symptom, but **incomplete**: it only tests
 `EFF_PINNED`, while mishander's own PR text and broness's bug report both mention Dominate,
 and h-youhei reported the same freeze from *sleep*. The general form is "can I move at all?",
-not "am I pinned?". Take the fix, generalise the condition.
+not "am I pinned?". Take the fix, generalise the condition — full reasoning in
+[v1-latent-bugs.md](v1-latent-bugs.md).
 
 **8. Level-change `turnCount` handling.** Lets the bot start on a level-entrance tile instead
 of immediately stopping. mishander wanted to rebind auto-explore to the bot entirely and hit
