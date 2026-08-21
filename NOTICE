@@ -56,6 +56,9 @@ This addon is a derivative work. Its lineage, oldest first:
     written, tested, and offered in good faith, and it is owed the credit
     independently of what the licence requires.
 
+    Additional contributor to that fork: Shchvova (Vlad Svoka), settings
+    defaults, pull request #1.
+
     Additional contributor to the upstream project: yura9111 (pull request #48,
     a soft-lock fix, likewise never merged).
 
