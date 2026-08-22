@@ -34,12 +34,7 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
 4. **`tools/` must never ship.** The devbridge executes arbitrary Lua from disk by design.
    Only `src/` is packed into a `.teaa`, by `tools/pack.ps1`, which refuses any entry under
    `tools/` or `spec/`.
-5. **Never rewrite published history.** No `--force`, no `--force-with-lease`, no deleting
-   `main`. The bot token has had Contents read/write since 2026-08-21, so nothing *mechanically*
-   stops it any more — `main` is unprotected and rulesets need a public repo or a paid plan.
-   A rewrite needs the owner's explicit sign-off in advance. See
-   [docs/github-workflow.md](docs/github-workflow.md) §5.
-6. **GPL-3.0, four-deep attribution.** Casalini → Charidan → SkoobyDoo → mishander. Keep
+5. **GPL-3.0, four-deep attribution.** Casalini → Charidan → SkoobyDoo → mishander. Keep
    per-file GPL headers on adapted code; do not strip them.
 
 ## Conventions
@@ -55,6 +50,9 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
 - Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer in the local
   research archive — not in this repo, not in issues, for now — and are cited by ID; every
   citation here should carry its one-line substance.
+- Push with `--follow-tags` and don't force-push `main` — ordinary hygiene, not a security
+  control. **D-9: the owner has accepted the history-rewrite risk and closed the question.**
+  Do not add branch protection or rulesets for it, and do not re-raise it as a finding.
 - The game's Lua is **LuaJIT 2.0.2, x86**, and `busted` must run under LuaJIT too — it ran
   under PUC Lua 5.4 until T-045, which made the suite test a different language in both
   directions (`loadstring`/`setfenv`/`unpack` absent under test but correct in-game; `//` and

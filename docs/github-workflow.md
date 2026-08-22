@@ -207,21 +207,20 @@ Note that a repo's `.permissions` block reports the **account's role**, not the 
 ceiling. `push:true` there does not mean a push will succeed; the token's Contents permission
 is the real gate. Do not infer token scope from that field.
 
-**Contents is read/write, and that means the token can rewrite history.** It was read-only
-until the first push needed it on 2026-08-21. While it was read-only, an automated agent
-holding it structurally *could not* force-push or delete a branch; that protection is gone and
-nothing replaced it. `main` is not protected — branch protection returns 403 for this token,
-and rulesets need Pro or a public repo — so the constraint is now a rule rather than a
-mechanism:
+**Contents is read/write**, since the first push needed it on 2026-08-21. It was read-only
+before that, which meant the token structurally could not force-push or delete a branch.
 
-- **Never `--force`, never `--force-with-lease`, never delete `main`.** A history rewrite
-  needs explicit owner sign-off, in advance. The full-history rewrite done on 2026-08-21 was
-  safe only because nothing had been pushed yet.
-- Treat "it is on GitHub" as **not a backup**. A bad force-push is usually recoverable from
-  the local reflog for 90 days, which is a window, not a guarantee. The push script keeps a
-  `git bundle` off to one side and each milestone gets an annotated tag, so a rewrite is
-  recoverable from more than one direction.
-- Enable rulesets the day the repo goes public (T-054).
+That property is gone, and **the maintainer has accepted the risk rather than replacing it**
+(decision D-9, held in the research archive): this project does not need that level of
+security. `main` is deliberately unprotected. Do not add branch protection or rulesets for it,
+and do not raise it as a finding — it is a closed question, revisitable later if the project's
+exposure changes.
+
+What remains is ordinary hygiene rather than a control: don't force-push `main`, and let a
+history rewrite be something done on purpose rather than by accident. The push script keeps a
+`git bundle` beside the repo and pushes annotated milestone tags with `--follow-tags`; both
+are cheap conveniences, and neither is load-bearing. Durability of the maintainer's own
+material is handled by external backups outside this project entirely.
 
 ---
 
