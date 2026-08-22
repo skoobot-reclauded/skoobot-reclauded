@@ -128,31 +128,70 @@ local DEFAULT_CONDITIONS = {
     {label="Power Level: CROWDPOWER",   code="SCOUTER_CROWDPOWER",    stoptype="STOP"},
 }
 
--- v1: written to the save once and never reconciled, so a character never
--- gains a condition added later and never loses one removed. T-026.
-local function getStopConditionList(p)
-    local d = data(p)
-    if not d.stopconditions then
-        d.stopconditions = {}
-        for i, c in ipairs(DEFAULT_CONDITIONS) do
-            d.stopconditions[i] = {label=c.label, code=c.code, stoptype=c.stoptype}
-        end
+local STOPTYPES = { WARN = true, STOP = true, IGNORE = true }
+
+-- True when a saved list is exactly this version's conditions, in order.
+local function stopListIsCurrent(list)
+    if #list ~= #DEFAULT_CONDITIONS then return false end
+    for i, c in ipairs(DEFAULT_CONDITIONS) do
+        local v = list[i]
+        if type(v) ~= "table" or v.code ~= c.code or v.label ~= c.label then return false end
     end
-    return d.stopconditions
+    return true
 end
 
--- v1: returns nil for an unknown code, and the callers index the result.
--- T-026 makes this fail closed.
+-- FIXED (T-019). v1 wrote the list to the save once and never looked at it
+-- again, so a character never gained a condition added later and never lost
+-- one removed -- and every lookup of a code the save lacked returned nil to a
+-- caller that indexed it. v1 got away with that by never adding a condition;
+-- the port's first one, TERRAIN_GLOWING_CHEST (T-013), is consulted on every
+-- explore decision and took down every character created before it. The
+-- saved list is now reconciled with DEFAULT_CONDITIONS whenever it differs:
+-- same codes in the same order with fresh labels, keeping the user's
+-- WARN/STOP/IGNORE choice wherever the code survives. Rebuilt in place, so
+-- anything already holding the table sees the result. What the defaults
+-- SHOULD be is T-026's question; this only keeps a save in step with them.
+local function getStopConditionList(p)
+    local d = data(p)
+    local list = d.stopconditions
+    if type(list) ~= "table" then
+        list = {}
+        d.stopconditions = list
+    end
+    if not stopListIsCurrent(list) then
+        local chosen = {}
+        for _, v in ipairs(list) do
+            if type(v) == "table" and v.code and STOPTYPES[v.stoptype] then
+                chosen[v.code] = v.stoptype
+            end
+        end
+        for i = #list, 1, -1 do list[i] = nil end
+        for i, c in ipairs(DEFAULT_CONDITIONS) do
+            list[i] = {label=c.label, code=c.code, stoptype=chosen[c.code] or c.stoptype}
+        end
+        log("[StopConditions] Reconciled the saved stop-condition list with this version's "
+            .. #list .. " conditions")
+    end
+    return list
+end
+
+-- FIXED (T-019). v1 returned nil for an unknown code and every caller indexed
+-- it. After reconciliation an unknown code can only be a programming error (a
+-- lookup with no DEFAULT_CONDITIONS entry), so it fails closed: the bot treats
+-- it as STOP, and the log names the code so the entry gets added.
 local function getStopCondition(p, code)
     for index, v in ipairs(getStopConditionList(p)) do
         if v.code == code then return v, index end
     end
-    log("[StopConditions] [ERROR] Attempt to fetch nonexistent stop condition: " .. tostring(code))
+    log("[StopConditions] [ERROR] Unknown stop condition " .. tostring(code) .. "; treating it as STOP")
+    return {label=tostring(code), code=code, stoptype="STOP"}, nil
 end
 
 local function setStopCondition(p, code, stoptype)
     local v, index = getStopCondition(p, code)
+    if not index then return false end
     getStopConditionList(p)[index] = {label=v.label, code=code, stoptype=stoptype}
+    return true
 end
 
 bot.conditions = {
