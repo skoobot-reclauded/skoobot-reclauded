@@ -173,39 +173,28 @@ if ($Remove) {
     Set-Cfg 'resolution.cfg' "window.size = '800x600 Windowed'"
 }
 
-# Connectivity IS reverted, because unlike the resolution we know what it was.
+# DELIBERATELY NOT MANAGED HERE: disable_all_connectivity.
 #
-# The engine connects to profiles.te4.org at startup, reconnects to channels,
-# fetches news and measures latency. Turning that off removes a background
-# thread and tightens the normal launch from 5-10s to 5-7s. (--no-web does not
-# cover it: that is the embedded browser, not the profile thread.)
+# This script briefly set it true, on the theory that the engine's te4.org
+# profile connection caused the intermittent 90-170s launches. It does not.
+# An alternating A/B, eight launches per arm:
 #
-# Modest, and honestly less than first claimed. This was originally believed to
-# be the cause of the intermittent 90-166s launches, because the gaps in a
-# sampled slow launch all ended on `Server latency` lines. They did -- but that
-# thread emits periodically, so its lines land at the boundary of any long gap.
-# With connectivity fully disabled a 166s stall still happened, with no
-# `Server latency` lines in the log at all. The tail is the boot menu building
-# its demo level (see design-harness.md section 4) and this does not fix it.
+#   connectivity ON    median 12.8s   typical mean 10.1s   stalls >30s: 2 of 8
+#   connectivity OFF   median 59.7s   typical mean  7.0s   stalls >30s: 4 of 8
 #
-# So the dev loop turns it off, and -Remove turns it back on.
+# Stalls in BOTH arms, and more of them with it disabled. The typical case is
+# perhaps a second better offline, which is well inside the noise of a sample
+# this size. The tail is the boot menu generating its demo level, and nothing
+# here touches it (design-harness.md section 4).
 #
-# ---------------------------------------------------------------------------
-# RELEASE TESTING MUST RUN WITH CONNECTIVITY ENABLED.
-# ---------------------------------------------------------------------------
-# Everything measured with it off is measured in a configuration no player
-# uses. The online profile touches addon hash validation, achievements and
-# character upload, and an addon that misbehaves only when those are live
-# would pass every gate here. Before calling a build releasable, run
-# `-Remove` (or set disable_all_connectivity = false by hand) and repeat the
-# behaviour runs. Recorded against T-051 (#32), which owns the release gates.
-if ($Remove) {
-    Set-Cfg 'disable_all_connectivity.cfg' 'disable_all_connectivity = false'
-    Note "        ^ connectivity restored -- this is the configuration to do release testing in"
-} else {
-    Set-Cfg 'disable_all_connectivity.cfg' 'disable_all_connectivity = true'
-    Note "        ^ offline for speed; RELEASE testing must be re-run with this false (T-051)"
-}
+# So the dev loop runs in the configuration players run in. One configuration
+# means every behaviour result means what it appears to mean -- no "...but
+# measured offline" qualifier, and no retest step to remember before a
+# release. Trading a second of startup for a rule someone has to remember is
+# the wrong way round for this project.
+#
+# Reinstating it needs evidence that it helps. The numbers above are that
+# evidence pointing the other way.
 
 # --------------------------------------------------------------------------
 Write-Host ''

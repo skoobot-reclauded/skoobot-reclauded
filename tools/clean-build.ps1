@@ -165,33 +165,12 @@ try {
     Check ($luaErrors.Count -eq 0) 'no Lua Error after the addon was bound'
     foreach ($e in ($luaErrors | Select-Object -First 5)) { Write-Host "        $e" }
 
-    # ---------------------------------------------------------------------
-    # Say, every run, which network configuration this was measured in.
-    #
-    # The dev loop disables connectivity to drop the te4.org profile thread
-    # (setup-dev.ps1). That is a reasonable trade for iteration and the WRONG
-    # one for a release decision:
-    # the online profile touches addon hash validation, achievements and
-    # character upload, so an addon that misbehaves only when those are live
-    # passes everything here and fails for players.
-    #
-    # This does not fail the gate -- T-051 (#32) owns what "releasable" means
-    # and it is not written yet. It refuses to let the question go unnoticed.
-    # ---------------------------------------------------------------------
-    Write-Host ''
-    Write-Host '[clean-build] network configuration'
-    $connCfg = Join-Path $script:TomeHome 'settings\disable_all_connectivity.cfg'
-    $conn = if (Test-Path $connCfg) { (Get-Content $connCfg -Raw).Trim() } else { '(unset -- engine default is connected)' }
-    Write-Host "        $conn"
-    if ($conn -match 'true') {
-        Write-Host '  NOTE  measured OFFLINE. Good enough to prove the artifact loads and runs;'
-        Write-Host '        NOT good enough to call a build releasable. Re-run these checks with'
-        Write-Host '        connectivity enabled before release:'
-        Write-Host '          powershell -ExecutionPolicy Bypass -File .\tools\setup-dev.ps1 -Remove'
-        Write-Host '        See T-051 (#32).'
-    } else {
-        Write-Host '  NOTE  measured with connectivity ENABLED -- the configuration players use.'
-    }
+    # A network-configuration report used to live here, back when the dev loop
+    # disabled connectivity and this gate had to warn that its results were
+    # therefore measured in a configuration no player uses. The dev loop no
+    # longer disables it (setup-dev.ps1 records the measurements), so there is
+    # one configuration, this gate measures the one players get, and the
+    # warning has nothing left to warn about.
 
     # The artifact must not carry the bridge, whatever else is true.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
