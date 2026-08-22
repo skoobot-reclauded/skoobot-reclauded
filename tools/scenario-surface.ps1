@@ -334,8 +334,14 @@ local r = ("learned=%d title='%s' items=%d h=%d game.h=%d overflow=%s"):format(l
 while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end
 return r
 '@ 90
-    if ($many.Status -eq 'OK' -and $many.Result -match 'overflow=true') { Finding 'DEFECT' "T-014 reproduced: $($many.Result)" }
-    elseif ($many.Status -eq 'OK') { Finding 'INFO' "picker fits: $($many.Result)" }
+    if ($many.Status -eq 'OK') {
+        # T-014 is fixed if the picker now fits the screen AND still lists every
+        # talent (bounded + scrolled, not truncated). Overflow here is a regression.
+        if ($many.Result -match 'overflow=false') { Finding 'OK' "T-014 fixed: the talent picker fits the screen ($($many.Result))" }
+        else { Finding 'BROKEN' "T-014 regressed: the picker overflows again ($($many.Result))" }
+        if ($many.Result -match 'items=(\d+)' -and [int]$Matches[1] -ge 40) { Finding 'OK' 'the picker still lists every talent (scrolled, not truncated)' }
+        else { Finding 'BROKEN' "the picker dropped talents: $($many.Result)" }
+    }
 
     $exit = 0
 }
