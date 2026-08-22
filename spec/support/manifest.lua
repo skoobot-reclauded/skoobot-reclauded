@@ -99,8 +99,14 @@ end
 --- The origin remote's URL, normalised to a bare https GitHub URL, or nil.
 --- Used to check the manifest's homepage against where the code actually
 --- lives, rather than against a constant that can rot in place.
+--- SKOOBOT_GIT_ROOT lets a caller point this at the real working tree when the
+--- files under test are somewhere else. The pre-commit hook runs the suite
+--- against an extracted copy of the index, which is not a git repository, so
+--- without this the homepage check would quietly downgrade to "pending" in the
+--- one place it is supposed to be enforced.
 function M.originUrl()
-  local pipe = io.popen('git -C "' .. M.root() .. '" remote get-url origin 2>&1')
+  local root = os.getenv("SKOOBOT_GIT_ROOT") or M.root()
+  local pipe = io.popen('git -C "' .. root .. '" remote get-url origin 2>&1')
   if not pipe then return nil end
   local out = pipe:read("*a") or ""
   local ok = pipe:close()

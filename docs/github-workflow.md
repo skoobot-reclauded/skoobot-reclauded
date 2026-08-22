@@ -91,6 +91,26 @@ Practical consequences:
   keyboard. That is how the first eleven commits here ended up authored by the owner; they
   were rewritten to the machine account on 2026-08-21, while the repo was still unpushed and
   the fix was free.
+
+- **Point git at the tracked hooks, in every clone**, in the same breath:
+
+  ```bash
+  git config core.hooksPath tools/githooks
+  ```
+
+  `tools/githooks/pre-commit` parse-checks, lints and unit-tests the **index** — what the
+  commit will actually contain, not the working tree — and refuses the commit if any of them
+  fail. It exists because v1 leaked four globals, one of which (`if not x == y`, parsed as
+  `(not x) == y`) was silent: nothing errored, the bot simply never acted, playtesting could
+  not surface it, and it cost users characters for eight years. luacheck flags that class
+  with no configuration at all, and the version that does predates v1's final release.
+
+  Like the identity above, this is clone-level and **untracked**, so it does not survive a
+  fresh clone. That is the whole reason the hook itself is tracked in `tools/` rather than
+  dropped into `.git/hooks`, where it would vanish.
+
+  The escape hatch is `git commit --no-verify`, for genuine emergencies. Reaching for it
+  routinely turns an enforced check back into a remembered one.
 - **This is attribution, not concealment.** The two are easy to confuse. Do **not** bother
   with private org membership, separate te4.org / Steam identities, or hiding that SkoobyDoo
   is behind the project — none of that is wanted. Assistant-written commits carry the machine

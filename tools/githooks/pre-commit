@@ -1,0 +1,131 @@
+#!/bin/sh
+#
+# Parse, lint and unit-test what is about to be committed.
+#
+# Why this exists at all: v1 leaked four globals, and one of them was a silent
+# behavioural bug -- `if not x == y`, which Lua parses as `(not x) == y`. The
+# bot simply never acted. Nothing errored, so playtesting could not surface it,
+# and it cost users characters for eight years. luacheck flags that class by
+# default ("Error prone negation: negation is executed before relational
+# operator", W582) with no configuration at all, and luacheck 1.2.0 predates
+# v1's final release. It was catchable then. T-023.
+#
+# This checks the INDEX, not the working tree. A hook that lints unstaged edits
+# passes on code that is not being committed and fails on code that is not
+# being committed either -- both useless. `git checkout-index` gives us exactly
+# what the commit will contain.
+#
+# Installed per clone, because .git/hooks is untracked and vanishes on clone:
+#
+#     git config core.hooksPath tools/githooks
+#
+# See docs/github-workflow.md section 3, next to the git identity step.
+#
+# Escape hatch, for a genuine emergency only:  git commit --no-verify
+
+set -e
+
+say() { printf '[pre-commit] %s\n' "$1"; }
+die() { printf '[pre-commit] %s\n' "$1" >&2; exit 1; }
+
+# Resolve a tool, allowing for Windows launchers.
+#
+# Two Windows-specific traps here, both of which make a tool look absent when
+# it is installed and working:
+#
+#   1. luarocks installs busted as busted.bat, not busted.
+#   2. It writes that .bat with mode 0644 -- no execute bit. Windows runs it
+#      regardless, and an interactive shell finds it, but POSIX `command -v`
+#      in a NON-interactive shell (which is what a hook is) does not. So the
+#      obvious check passes when you test it by hand and fails in the hook.
+#
+# A hook that mistook either for "tool missing" would block every commit, and
+# would then most likely be "fixed" by skipping the check -- which is the one
+# outcome this hook exists to prevent. So: ask the shell first, and if that
+# fails, look for the file ourselves.
+resolve() {
+    _name=$1
+    for _ext in '' '.bat' '.exe' '.cmd'; do
+        if command -v "$_name$_ext" >/dev/null 2>&1; then
+            printf '%s' "$_name$_ext"
+            return 0
+        fi
+    done
+    _oldifs=$IFS
+    IFS=:
+    for _dir in $PATH; do
+        for _ext in '' '.bat' '.exe' '.cmd'; do
+            if [ -f "$_dir/$_name$_ext" ]; then
+                IFS=$_oldifs
+                printf '%s' "$_dir/$_name$_ext"
+                return 0
+            fi
+        done
+    done
+    IFS=$_oldifs
+    die "$_name not found on PATH (tried $_name, .bat, .exe, .cmd; and a
+             direct scan of PATH for launchers without an execute bit).
+             This hook enforces checks rather than trusting discipline, so a
+             missing tool is a failure, not a skip. Install it, or use
+             'git commit --no-verify' if this is genuinely an emergency."
+}
+
+LUAJIT=$(resolve luajit)
+LUACHECK=$(resolve luacheck)
+BUSTED=$(resolve busted)
+
+STAGED_LUA=$(git diff --cached --name-only --diff-filter=ACM -- '*.lua')
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+git checkout-index -a --prefix="$TMP/"
+
+# ---------------------------------------------------------------------------
+# 1. Parse-check, in the game's own dialect.
+#
+# luacheck parses too, but LuaJIT is the thing that has to accept this file at
+# runtime, and it is the only check here that is exactly the game's parser.
+# ---------------------------------------------------------------------------
+if [ -n "$STAGED_LUA" ]; then
+    say "parse-checking $(printf '%s\n' "$STAGED_LUA" | wc -l | tr -d ' ') staged Lua file(s)"
+    printf '%s\n' "$STAGED_LUA" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        [ -f "$TMP/$f" ] || continue
+        "$LUAJIT" -bl "$TMP/$f" /dev/null >/dev/null \
+            || die "parse error in $f"
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Lint.
+#
+# Interim ignore list: 111 (manifest fields are globals by design), 113 (ToME
+# supplies `game`, `fs` and friends) and 631 (long lines in the description
+# string). Tighten it as T-002 lands a real .luacheckrc declaring ToME's global
+# surface -- but note the W582 class this hook exists for fires with no
+# configuration whatsoever, so waiting for T-002 was never necessary.
+#
+# The '.' matters: `luacheck --std luajit src/` with a trailing slash checks no
+# files at all and exits 3 (T-046).
+# ---------------------------------------------------------------------------
+say 'linting'
+( cd "$TMP" && "$LUACHECK" --std luajit . --ignore 111 113 631 ) \
+    || die 'luacheck failed'
+
+# ---------------------------------------------------------------------------
+# 3. Unit tests.
+#
+# Cheap (tens of milliseconds) and they enforce the manifest rule that keeps
+# the addon loadable at all: a directory flag may only be true if its directory
+# has real content, or the engine aborts module load (T-040).
+# ---------------------------------------------------------------------------
+# The extracted index is not a git repository, so point the suite back at the
+# real one; otherwise the manifest's homepage-vs-origin check downgrades to
+# "pending" precisely where it is meant to be enforced.
+say 'unit tests'
+SKOOBOT_GIT_ROOT=$(git rev-parse --show-toplevel)
+export SKOOBOT_GIT_ROOT
+( cd "$TMP" && "$BUSTED" ) \
+    || die 'busted failed'
+
+say 'ok'
