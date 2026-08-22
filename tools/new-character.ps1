@@ -19,10 +19,21 @@
 #>
 param(
     [string]$Name = 'harness',
-    [int]$BirthTimeoutSec = 900
+    [int]$BirthTimeoutSec = 900,
+    # The addon short_names the save must record. Defaults to the product and
+    # the devbridge (harness.ps1). The T-003 baseline runs the ORIGINAL SkooBot
+    # instead of the product, and needs a save that records that.
+    [string[]]$RequiredAddons
 )
 
 . (Join-Path $PSScriptRoot 'harness.ps1')
+if ($RequiredAddons) {
+    # `powershell -File` hands every argument over as a plain string, so a
+    # [string[]] parameter given "a,b" arrives as ONE element containing a
+    # comma. Split it here, or Assert-SaveAddons looks for an addon literally
+    # named "skoobot,skoobot_devbridge" and fails a correct save.
+    $script:RequiredSaveAddons = @($RequiredAddons | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
 
 function Step($label, $lua, $timeout = 30) {
     $r = Invoke-Bridge -Lua $lua -TimeoutSec $timeout

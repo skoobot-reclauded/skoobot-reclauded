@@ -33,6 +33,7 @@ $script:SaveRoot  = Join-Path $script:TomeHome 'tome\save'
 $script:Seq       = 0
 $script:GamePid   = $null
 $script:LogOffset = 0
+$script:LastResolution = $null   # last "[DO RESIZE] Got: WxH" seen; a change taints (Invoke-Bridge)
 $script:LogBuf    = New-Object System.Collections.Generic.Queue[string]
 
 function Reset-LogCursor {
@@ -477,8 +478,26 @@ function Invoke-Bridge {
 
     # Focus changes are logged but do NOT taint. Gaining or losing focus alters
     # no game state, and the launch itself emits one, so counting it would flag
-    # every first command of every run. Keys, clicks and resizes do change things.
-    $interference = @($r.Seen | Where-Object { $_ -match '\[BRIDGE\] INTERFERE (key|mouse)|\[DO RESIZE\]' })
+    # every first command of every run. Keys and clicks (which the devbridge
+    # emits only for non-injected input) always taint.
+    #
+    # A resize is subtler. Design says a human resizing mid-run taints, and it
+    # should -- but the engine emits `[DO RESIZE]` ITSELF at launch and at every
+    # module reboot, re-asserting the resolution setup-dev.ps1 wrote (800x600).
+    # A whole run of correct commands was flagged tainted by exactly that: zero
+    # INTERFERE lines, only the engine re-applying its own configured size. So a
+    # resize taints only when it CHANGES the size from the last one seen; the
+    # engine re-asserting the same dimensions is not a human and does not.
+    $interference = @($r.Seen | Where-Object { $_ -match '\[BRIDGE\] INTERFERE (key|mouse)' })
+    foreach ($line in $r.Seen) {
+        if ($line -match '\[DO RESIZE\] Got: (\d+)x(\d+)') {
+            $size = "$($Matches[1])x$($Matches[2])"
+            if ($null -ne $script:LastResolution -and $size -ne $script:LastResolution) {
+                $interference += $line
+            }
+            $script:LastResolution = $size
+        }
+    }
 
     $status = 'TIMEOUT'; $result = $null
     if ($r.Matched) {
