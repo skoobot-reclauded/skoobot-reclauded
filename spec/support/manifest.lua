@@ -116,6 +116,14 @@ function M.originUrl()
   url = url:gsub("%.git$", "")
   url = url:gsub("^git@github%.com:", "https://github.com/")
   url = url:gsub("^ssh://git@github%.com/", "https://github.com/")
+
+  -- Only a GitHub URL is comparable with `homepage`. A remote can legitimately
+  -- be a fork, a mirror, or a local path -- `git clone /some/dir` gives an
+  -- origin of `/some/dir` -- and none of those say anything about where the
+  -- addon's homepage should point. Returning one of them would fail the spec
+  -- on a perfectly good clone, which is what a fresh-clone check caught.
+  -- Unverifiable is not the same as wrong: the caller marks it pending.
+  if not url:match("^https://github%.com/[^/]+/[^/]+$") then return nil end
   return url
 end
 
