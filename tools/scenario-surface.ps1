@@ -300,13 +300,18 @@ return "dialogs=" .. bridge.dialogs()
         $null = Probe "$label-off" 'local r = bridge.key("STOP_SKOOBOT_RECLAUDED") return r .. " | " .. bl.status()'
         $adv = $turn - $before
         Finding 'INFO' ("{0}: game.turn advanced {1} ({2} -> {3}); handed back={4}; last: {5}" -f $label, $adv, $before, $turn, (-not $active), $last)
-        # A bot that hands back at once for a legitimate reason -- too-strong
-        # enemies, a level-change tile -- advances no turns, and that is the
-        # designed "stop early and often" behaviour, not a hang. Only a bot
-        # still active at the deadline is a real hang; only 0 turns with NO
-        # stop reason means it did nothing for no reason.
-        if ($active) { Finding 'BROKEN' "${label}: still active at the deadline -- it never handed back (a hang)" }
-        elseif ($adv -le 0 -and $last -match 'reason=nil') { Finding 'BROKEN' "${label}: did not advance and gave no reason" }
+        # What counts as healthy is progress, not whether it happened to be
+        # active at the (arbitrary) deadline. A bot that hands back at once for
+        # a legitimate reason -- too-strong enemies, a level-change tile --
+        # advances no turns and that is the designed "stop early" behaviour. A
+        # bot still active at the deadline having advanced thousands of turns is
+        # a long, healthy session. A hang is being active while NOT advancing.
+        if ($active) {
+            if ($adv -gt 0) { Finding 'INFO' "${label}: still playing at the ${deadlineSec}s deadline (advanced $adv turns) -- a long session, not a hang" }
+            else { Finding 'BROKEN' "${label}: active but advanced 0 turns -- a hang" }
+        } elseif ($adv -le 0 -and $last -match 'reason=nil') {
+            Finding 'BROKEN' "${label}: did not advance and gave no reason"
+        }
         if ($last -match 'internal error') { Finding 'BROKEN' "${label}: stopped on an internal error" }
     }
     Watch 'quiet' $ActDeadlineSec
