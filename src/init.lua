@@ -10,6 +10,8 @@ description = [[A reboot of SkooBot: hand your character over to a bot that rest
 
 The point is to take the tedium out of levelling a new character, not to beat the game. Expect it to stop often and early rather than get you killed.
 
+ENABLE THIS BEFORE CREATING THE CHARACTER YOU WANT TO USE IT ON. A savefile records the addons it was made with, and the game silently ignores any addon a save does not list, with no error message -- so it will not attach to a character that already exists.
+
 RUNS ENTIRELY OFFLINE. No language model, no network requests, no API key, no telemetry. "Reclauded" is a play on "rebooted" -- this addon was built with the help of Claude, an AI assistant, but contains none of it. It is ordinary Lua running inside your game.
 
 This is a separate addon from the original SkooBot, which remains published and unchanged. Installing this one will not touch it.

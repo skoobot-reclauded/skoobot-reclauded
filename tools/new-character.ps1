@@ -8,7 +8,14 @@
     directory is derived from it (mod/dialogs/Birther.lua:225) and the harness
     needs a predictable path.
 
-    Run:  powershell -File .\tools\new-character.ps1 -Name harness
+    Run:  powershell -ExecutionPolicy Bypass -File .\tools\new-character.ps1 -Name harness
+
+    The -ExecutionPolicy flag is not optional: every scope on this machine is
+    Restricted, so a bare `powershell -File ...` fails before the script runs.
+
+    Regenerate the save whenever the addon set changes. A save records the
+    addons it was made with and the engine silently drops any it does not
+    list, so a stale save quietly measures a game without the product (T-042).
 #>
 param(
     [string]$Name = 'harness',
@@ -44,8 +51,39 @@ return "starting"
 $null = Step 'newgame' $lua 25
 
 $w = Wait-LogLine -Pattern '\[BRIDGE\] ready tier=tome' -TimeoutSec 180
-if (-not $w.Matched) { Write-Host 'FAILED: tome-tier bridge never came up'; Stop-Game; exit 1 }
+if (-not $w.Matched) {
+    Write-Host 'FAILED: tome-tier bridge never came up'
+    Show-LoadDiagnostics -Seen $w.Seen
+    Stop-Game; exit 1
+}
 Write-Host "tome tier  OK       $($w.Line)"
+
+# The reboot reset the bridge's sequence gate; drop anything left over so the
+# new tier cannot re-claim a command meant for the old one.
+Clear-BridgeQueue
+$probe = Invoke-Bridge -Lua 'return "pong"' -TimeoutSec 240
+if ($probe.Status -ne 'OK') {
+    Write-Host "FAILED: tome-tier pump never turned (status=$($probe.Status))"
+    Show-LoadDiagnostics
+    Stop-Game; exit 1
+}
+
+# The reason this script exists at all now: a save records the addons that
+# were loaded when it was made, and the engine silently drops any addon a save
+# does not list. If the product is not loaded here, the save written below
+# would bake in its absence and every later behaviour run would measure a game
+# without it -- passing, and meaning nothing (T-042).
+$loaded = (Invoke-Bridge -Lua 'return bridge.addons()' -TimeoutSec 30).Result
+Write-Host "addons     $loaded"
+foreach ($need in $script:RequiredSaveAddons) {
+    if ($loaded -notmatch [regex]::Escape($need)) {
+        Write-Host "FAILED: '$need' is not loaded in this new game, so the save would"
+        Write-Host '        record its absence. Run tools/setup-dev.ps1, and check the'
+        Write-Host '        addon is not disabled in the game Addons menu.'
+        Stop-Game; exit 1
+    }
+}
+if (-not (Assert-NoAddonDropped -Seen $w.Seen)) { Stop-Game; exit 1 }
 
 $roll = @"
 local d = game.dialogs and game.dialogs[1]
@@ -97,6 +135,12 @@ $null = Step 'verify' 'return bridge.state()' 30
 Stop-Game
 
 if ((Test-Path $save) -and (Get-Item $save).Length -gt 0) {
+    # Check the descriptor that was actually written, not the game we think we
+    # ran. This is the artifact every later run depends on.
+    if (-not (Assert-SaveAddons -Name $Name)) {
+        Write-Host "`n[new-character] FAILED - save written but its addon list is wrong"
+        exit 1
+    }
     Write-Host "`n[new-character] PASS - $save ($((Get-Item $save).Length) bytes)"
     exit 0
 }

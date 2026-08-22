@@ -51,6 +51,10 @@ gets a clean repository rather than a rewrite in place. The original targets gam
 
 - **Tales of Maj'Eyal 1.7.6.** ToME addons are version-stamped and the game refuses
   mismatches, so this will not load on older or newer releases without a version bump.
+- **Enable it in the Addons menu before you create the character you want to use it on.** A
+  savefile records the addons it was made with, and the game silently ignores any addon a save
+  does not list — so this will not attach to a character that already exists. There is no
+  error message when that happens; the addon simply does nothing.
 - No other addons required. Compatibility with other addons is untested.
 
 ## Safety
@@ -86,15 +90,27 @@ Design documents worth reading before changing anything:
 
 ## Development
 
-Requires LuaJIT, `luacheck` and `busted`. Note the game itself runs **LuaJIT 2.0.2, x86** —
-the same Lua 5.1 dialect as a local 2.1 build but not the same version, so a 2.1-only idiom
-will pass `busted` and still fail in-game.
+Requires LuaJIT, `luacheck` and `busted`.
+
+**`busted` must run under LuaJIT, not PUC Lua.** Install it into a 5.1 rocks tree
+(`luarocks --lua-version 5.1 install busted`). This matters more than it sounds: on 5.4,
+`loadstring`, `setfenv` and `unpack` are missing although they are correct in the game, while
+5.4's `//` and bitwise operators compile although they crash in the game. A suite on the wrong
+interpreter is testing a different language in both directions. `.busted` pins the interpreter
+and `spec/dialect_spec.lua` fails the run if it is ever wrong again.
+
+One gap remains that tests cannot close: the game ships **LuaJIT 2.0.2, x86** and a local build
+is 2.1 — the same Lua 5.1 dialect, but 2.1 adds library functions (`table.new`, `table.clear`)
+that resolve under test and fail in-game. Lint cannot see it either. Only the harness can.
 
 ```bash
 luajit -bl src/init.lua /dev/null    # parse-check, no game launch
-luacheck --std luajit src/           # lint
-busted spec/                         # unit tests
+luacheck --std luajit .              # lint -- note the '.', see below
+busted                               # unit tests; .busted supplies the paths
 ```
+
+`luacheck --std luajit src/` **with a trailing slash checks nothing** and exits 3
+(`couldn't read: Permission denied`). Use `.` or `src`.
 
 Behaviour that only shows up inside a running game is tested by a harness that launches ToME,
 drives it, and reads results back — no human at the keyboard. See

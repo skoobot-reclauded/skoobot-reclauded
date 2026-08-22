@@ -3,8 +3,15 @@
 **Status:** implemented · **Tasks:** D-4, T-005 · **Date:** 2026-08-21
 
 Verifying that the bot *behaves* correctly needs a real game: the thing under test is a
-decision loop reacting to game state. Unit tests under LuaJIT cover pure logic; they cannot
-tell you the bot stopped when it should have. This is the other half.
+decision loop reacting to game state. Unit tests cover pure logic; they cannot tell you the
+bot stopped when it should have. This is the other half.
+
+They also cover less than they appear to. `busted` ran under PUC Lua 5.4 rather than LuaJIT
+until T-045, so the suite was testing a different language in both directions; it is pinned to
+LuaJIT now, with `spec/dialect_spec.lua` failing the run if that regresses. Even correct, it
+cannot see the difference between the game's LuaJIT 2.0.2 and a local 2.1 — `table.new`
+resolves under test and fails in-game — and neither can lint. **That gap is this harness's
+job**, and it is the reason the harness is not optional tooling.
 
 ---
 
@@ -114,8 +121,63 @@ progress invariant, arrived at independently, which is some evidence it is the r
   see 4.1. It also calls `requestNextTick`, which pins the engine at 30 FPS and holds a core.
 - Addon directories load unpacked if named `<module>-<something>` with an `init.lua`
   (engine/Module.lua:409-414). Junction the repo tree in and edits go live on next launch.
+- **Addons are scanned per module.** `listAddons` filters on `^<module.short_name>%-`, so at
+  the main menu only `boot-*` addons are considered; `tome-*` ones are not looked at until a
+  tome game is instanciated. A product addon can therefore be correctly installed and
+  completely invisible at the menu tier — that is not a fault.
+- **A savefile records its addon list, and the engine enforces it.** `Module:instanciate`
+  passes `save_desc.addons` into `loadAddons` (`:1041`), which removes anything absent from
+  it — `Removing addon <name>: not allowed by savefile` (`:565-569`) — and carries on. The
+  addon is simply not there. Nothing errors, nothing is highlighted, and a behaviour run from
+  such a save happily "verifies" a game that never loaded the thing under test. The
+  enabled-by-default rule above applies only when there is **no** savefile list to consult,
+  which is why the menu tier needs no configuration and a loaded game does.
+
+  Two independent guards, in `harness.ps1`: `Assert-SaveAddons` reads `desc.lua` before
+  launching, and `Assert-NoAddonDropped` watches the log after. The first catches a stale
+  save without spending a launch; the second catches everything else, including an addon
+  dropped for a reason the descriptor cannot show. **A save must be regenerated whenever the
+  addon set changes** — `tools/new-character.ps1` does it unattended, and now refuses to
+  write a save whose game did not load the product.
 - The engine reboots into a module plus savefile via `Module:instanciate(mod, name, new_game,
   ...)` (engine/Module.lua:931), the same call the New Game menu makes.
+
+### 4.2 The load oracle, without the bridge
+
+The release gate removes every junction, including the devbridge, so there is no `[BRIDGE]`
+channel to ask. The engine's own log is enough, and this is what to match. **The separators
+are tab characters, not spaces** — `Module.lua:411` is a `print()` with six arguments, so
+matching on `Checking addon tome-…` with a space will silently never fire:
+
+```
+Checking addon<TAB>tome-skoobot_reclauded.teaa<TAB>:: (as dir)<TAB>false<TAB>:: (as teaa)<TAB>22<TAB>
+ * with hooks
+ * with superload
+```
+
+Read it as: `(as dir)` is `fs.exists(dir/init.lua)`, and `(as teaa)` is the result of
+`short_name:find(".teaa$")` — a match position, or `nil`. So an unpacked junction gives
+`true` / `nil`, and an installed archive gives `false` / a number. That single line therefore
+says **which of the two the engine actually loaded**, which is the whole question the gate
+exists to answer.
+
+The ` * with …` lines (`:511`, `:533`, and the `data`/`overload` equivalents) appear once per
+declared directory, so they double as a check that the manifest flags did what they claimed.
+A build whose `init.lua` sets `hooks = true` and produces no ` * with hooks` did not mount
+what it advertised.
+
+Two absences complete the oracle, and absences need explicit assertions or they pass by
+accident:
+
+- no `Removing addon skoobot_reclauded` (§4, the savefile rule);
+- no `Lua Error` after the addon is checked.
+
+One trap in the negative space: a `.teaa` with no root `init.lua` is skipped at `:416`
+**without any error at all** — no line is printed for it beyond the `Checking addon` one. If a
+junction is still present, the engine loads that instead and the gate passes on the working
+tree rather than on the artifact. That is why the gate removes *all* junctions rather than
+just the devbridge pair, and why `tools/pack.ps1` refuses to emit an archive without a root
+`init.lua` in the first place.
 
 ### 4.1 Ten traps, each of which cost a debugging cycle
 

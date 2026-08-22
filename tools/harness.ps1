@@ -6,6 +6,15 @@
     human interference so a disrupted run is quarantined rather than believed.
 
     Dot-source it:   . .\tools\harness.ps1
+
+    A script that dot-sources this one is run as
+
+        powershell -ExecutionPolicy Bypass -File .\tools\<script>.ps1
+
+    The flag is not optional: every execution-policy scope on this machine is
+    Restricted, so a bare `powershell -File ...` fails with "running scripts is
+    disabled on this system" before the script starts. Do not "fix" that by
+    changing the machine policy.
 #>
 
 # Paths. Derived rather than hardcoded, so nothing here carries one machine's
@@ -127,6 +136,97 @@ function Show-LoadDiagnostics {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Savefile addon list.
+#
+# The engine loads only the addons a savefile records: anything else is
+# dropped with one line -- "Removing addon <name>: not allowed by savefile"
+# (engine/Module.lua:565-569) -- and no other symptom. A behaviour run started
+# from a save that predates the product will therefore "verify" a game that
+# never loaded it, and nothing in the output will say so.
+#
+# Two independent checks, because each catches what the other misses: read the
+# descriptor before launching, and watch the log after. T-042.
+# ---------------------------------------------------------------------------
+
+# What a harness save must list to be worth measuring anything from.
+$script:RequiredSaveAddons = @('skoobot_reclauded', 'skoobot_devbridge')
+
+function Get-SaveDescPath {
+    param([Parameter(Mandatory)][string]$Name)
+    Join-Path $script:SaveRoot "$Name\desc.lua"
+}
+
+<#
+    The addon short_names a savefile records, or $null if there is no save.
+#>
+function Get-SaveAddons {
+    param([Parameter(Mandatory)][string]$Name)
+    $desc = Get-SaveDescPath -Name $Name
+    if (-not (Test-Path $desc)) { return $null }
+    $text = Get-Content $desc -Raw
+    if ($text -notmatch '(?s)addons\s*=\s*\{(.*?)\}') { return @() }
+    $inner = $Matches[1]
+    @([regex]::Matches($inner, "['""]([^'""]+)['""]") | ForEach-Object { $_.Groups[1].Value })
+}
+
+<#
+    Fail loudly, before launching, if a save cannot exercise the product.
+#>
+function Assert-SaveAddons {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string[]]$Required = $script:RequiredSaveAddons
+    )
+    $have = Get-SaveAddons -Name $Name
+    if ($null -eq $have) {
+        Write-Host "[harness] NO SAVE at $(Get-SaveDescPath -Name $Name)"
+        return $false
+    }
+    $missing = @($Required | Where-Object { $have -notcontains $_ })
+    if ($missing.Count -eq 0) {
+        Write-Host "[harness] save '$Name' lists: $($have -join ', ')"
+        return $true
+    }
+    Write-Host "[harness] SAVE '$Name' DOES NOT LIST: $($missing -join ', ')"
+    Write-Host "           it lists: $($have -join ', ')"
+    Write-Host '           The engine drops unlisted addons silently. Any behaviour'
+    Write-Host '           measured from this save is measuring a game without them.'
+    Write-Host "           Regenerate it:  powershell -ExecutionPolicy Bypass -File .\tools\new-character.ps1 -Name $Name"
+    return $false
+}
+
+<#
+    Did the engine drop any addon we needed? Reads whatever log lines the
+    caller already drained, plus anything still unread.
+#>
+function Assert-NoAddonDropped {
+    param(
+        [string[]]$Seen,
+        [string[]]$Required = $script:RequiredSaveAddons
+    )
+    $lines = @()
+    if ($Seen) { $lines += $Seen }
+    Read-NewLogLines
+    while ($script:LogBuf.Count -gt 0) { $lines += $script:LogBuf.Dequeue() }
+
+    $dropped = @()
+    foreach ($l in $lines) {
+        if ($l -match 'Removing addon ([\w\-]+):') {
+            if ($Required -contains $Matches[1]) { $dropped += $l }
+        }
+    }
+    if ($dropped.Count -eq 0) { return $true }
+    Write-Host '[harness] ENGINE DROPPED A REQUIRED ADDON:'
+    foreach ($d in $dropped) { Write-Host "           $d" }
+    return $false
+}
+
+function Clear-BridgeQueue {
+    Get-ChildItem $script:BridgeDir -Filter 'cmd-*' -ErrorAction Ignore | Remove-Item -Force
+    $script:Seq = 0
+}
+
 function Stop-Game {
     Get-Process -Name 't-engine' -ErrorAction Ignore | ForEach-Object { Stop-Process -Id $_.Id -Force }
     $script:GamePid = $null
@@ -188,6 +288,91 @@ function Start-Game {
     Show-LoadDiagnostics
     [pscustomobject]@{ Pid = $p.Id; Ready = $false; Hook = $true; PumpSec = $elapsed }
 }
+<#
+    Load a named savefile and hand back a live tome-tier bridge.
+
+    Minimal on purpose. T-044 owns the regression-suite save loader --
+    fixtures, result records, taint handling. This is only what T-042 needs to
+    prove an addon set, and what a single T-071 scenario needs to start from a
+    character instead of spending fifteen minutes making one.
+
+    -SkipAddonCheck runs it anyway against a save known to be missing the
+    product, which is how the detector itself gets tested.
+#>
+function Load-Save {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [int]$TimeoutSec = 300,
+        [switch]$SkipAddonCheck
+    )
+
+    if (-not $SkipAddonCheck) {
+        if (-not (Assert-SaveAddons -Name $Name)) {
+            return [pscustomobject]@{ Ready = $false; Reason = 'save addon list' }
+        }
+    }
+
+    $g = Start-Game
+    if (-not $g.Ready) { return [pscustomobject]@{ Ready = $false; Reason = 'no bridge at menu' } }
+
+    # instanciate() reboots the Lua state into the module, so this command
+    # never returns -- fire and forget, then watch the log.
+    $lua = @"
+local Module = require "engine.Module"
+local mod
+for i, entry in ipairs(Module:listModules(true)) do
+  for j, m in ipairs(entry.versions) do
+    if m.short_name == "tome" and not m.is_boot and not mod then mod = m end
+  end
+end
+if not mod then return "tome module not found" end
+Module:instanciate(mod, "$Name", false, false)
+return "loading"
+"@
+    $null = Invoke-Bridge -NoWait -Lua $lua
+    Write-Host "[harness] loading save '$Name'"
+
+    # The reboot resets the bridge's sequence gate to zero, so the command
+    # file that triggered it would be claimed a second time by the new tier
+    # and reboot again, forever. Clear the queue the moment the reboot starts.
+    $boot = Wait-LogLine -Pattern '\[MODULE\] booting module version\s+tome' -TimeoutSec 60
+    if (-not $boot.Matched) {
+        Write-Host '[harness] module never rebooted'
+        Show-LoadDiagnostics -Seen $boot.Seen
+        Stop-Game
+        return [pscustomobject]@{ Ready = $false; Reason = 'no reboot' }
+    }
+    Clear-BridgeQueue
+
+    $w = Wait-LogLine -Pattern '\[BRIDGE\] ready tier=tome' -TimeoutSec $TimeoutSec
+    if (-not $w.Matched) {
+        Write-Host "[harness] tome-tier bridge never came up after ${TimeoutSec}s"
+        Show-LoadDiagnostics -Seen $w.Seen
+        Stop-Game
+        return [pscustomobject]@{ Ready = $false; Reason = 'no tome tier' }
+    }
+
+    # Same lesson as Start-Game: the hook line is not the pump.
+    $probe = Invoke-Bridge -Lua 'return "pong"' -TimeoutSec 240
+    if ($probe.Status -ne 'OK') {
+        Write-Host "[harness] tome-tier pump never turned (status=$($probe.Status))"
+        Show-LoadDiagnostics
+        Stop-Game
+        return [pscustomobject]@{ Ready = $false; Reason = 'no tome pump' }
+    }
+
+    $intact = Assert-NoAddonDropped -Seen $w.Seen
+    $loaded = (Invoke-Bridge -Lua 'return bridge.addons()' -TimeoutSec 30).Result
+    Write-Host "[harness] loaded addons: $loaded"
+
+    [pscustomobject]@{
+        Ready       = $true
+        AddonsIntact = $intact
+        Addons      = $loaded
+        Reason      = $null
+    }
+}
+
 <#
     Send Lua to the game, and by default wait for its result.
 
