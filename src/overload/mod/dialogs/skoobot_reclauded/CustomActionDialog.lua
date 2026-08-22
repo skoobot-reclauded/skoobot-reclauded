@@ -61,11 +61,18 @@ function _M:use(item)
 end
 
 function _M:generateList()
-	local list = self.optionlist
+	-- Build a fresh display list; do not mutate the caller's optionlist, or a
+	-- reused list would accumulate key-char prefixes across opens (the T-016
+	-- class of bug -- see PickOneDialog). Copy the option, prefix the copy.
+	local list = {}
 	local chars = {}
-	for i, v in ipairs(list) do
-		v.name = self:makeKeyChar(i) .. ") " .. v.name
-		chars[self:makeKeyChar(i)] = i
+	for i, v in ipairs(self.optionlist) do
+		local ch = self:makeKeyChar(i)
+		local item = {}
+		for k, val in pairs(v) do item[k] = val end
+		item.name = ch .. ") " .. v.name
+		list[i] = item
+		chars[ch] = i
 	end
 	list.chars = chars
 

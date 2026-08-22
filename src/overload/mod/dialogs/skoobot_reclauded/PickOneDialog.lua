@@ -68,11 +68,20 @@ function _M:use(item)
 end
 
 function _M:generateList()
-	local list = self.optionlist
+	-- Build a fresh display list; never mutate the caller's optionlist. The
+	-- key-char prefix used to be written back into each option's `name`
+	-- (`v.name = char .. ") " .. v.name`), so a shared option table -- e.g.
+	-- TalentDialog's USE_TYPES constant, reused for every rule -- accumulated
+	-- "a) a) a) ..." across opens (T-016). Copy the option, prefix the copy.
+	local list = {}
 	local chars = {}
-	for i, v in ipairs(list) do
-		v.name = self:makeKeyChar(i) .. ") " .. v.name
-		chars[self:makeKeyChar(i)] = i
+	for i, v in ipairs(self.optionlist) do
+		local ch = self:makeKeyChar(i)
+		local item = {}
+		for k, val in pairs(v) do item[k] = val end
+		item.name = ch .. ") " .. v.name
+		list[i] = item
+		chars[ch] = i
 	end
 	list.chars = chars
 

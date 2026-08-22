@@ -91,16 +91,25 @@ function _M:use(item)
 end
 
 function _M:generateList()
-	local list = {
+	local raw = {
 		{1,   name="Set Skill Usage",                           order="skillconfig"},
 		{2,   name="Activate/Deactivate Bot Stop Conditions",  order="botstopconditions"},
 		{999, name="Cancel",                                    order="donothing"},
 	}
 
+	-- Build a fresh display list rather than prefixing `raw` in place. This
+	-- menu builds its own list each open so it never accumulated, but the same
+	-- non-mutating shape as the other two dialogs keeps one correct pattern
+	-- (see PickOneDialog, T-016).
+	local list = {}
 	local chars = {}
-	for i, v in ipairs(list) do
-		v.name = self:makeKeyChar(i) .. ") " .. v.name
-		chars[self:makeKeyChar(i)] = i
+	for i, v in ipairs(raw) do
+		local ch = self:makeKeyChar(i)
+		local item = {}
+		for k, val in pairs(v) do item[k] = val end
+		item.name = ch .. ") " .. v.name
+		list[i] = item
+		chars[ch] = i
 	end
 	list.chars = chars
 
