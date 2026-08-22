@@ -1,5 +1,8 @@
 <#
     Build dist/tome-skoobot_reclauded-<a.b.c>.teaa from the contents of src/.
+    A development build (no -Release) is named
+    tome-skoobot_reclauded-<a.b.c>-g<sha7>[-dirty].teaa so that two builds of
+    the same version can be told apart afterwards (T-055).
 
     A .teaa is an ordinary ZIP that the engine mounts. Three properties of the
     shipped v1 artifacts are load-bearing, and all three are easy to get wrong
@@ -76,7 +79,26 @@ if ($initText -notmatch 'addon_version\s*=\s*\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\
     Die 'could not read addon_version from src/init.lua'
 }
 $Version = '{0}.{1}.{2}' -f $Matches[1], $Matches[2], $Matches[3]
-$ArchiveName = "tome-$SHORT_NAME-$Version.teaa"
+
+# Development builds carry the commit in the name (T-055). Two artifacts from
+# different commits are otherwise both "0.1.0" and indistinguishable after the
+# fact -- the owner lost the provenance of a crash to exactly that. The engine
+# only needs the ^tome- prefix and the .teaa suffix (engine/Module.lua:409)
+# and takes the addon's identity from init.lua, so the stamp is inert at load
+# time; it does appear in the engine log's "Binding addon" line, and so in
+# every error report. Releases keep the canonical name. No stderr redirect on
+# the git calls: under 'Stop' a redirected native stderr line throws (see
+# OPERATIONS 2.1.1); an unstamped name is the graceful outcome outside a repo.
+$Stamp = ''
+if (-not $Release) {
+    $sha = & git -C $RepoRoot rev-parse --short=7 HEAD
+    if ($LASTEXITCODE -eq 0 -and $sha) {
+        $Stamp = "-g$sha"
+        $dirtySrc = & git -C $RepoRoot status --porcelain -- src
+        if ($LASTEXITCODE -eq 0 -and $dirtySrc) { $Stamp += '-dirty' }
+    }
+}
+$ArchiveName = "tome-$SHORT_NAME-$Version$Stamp.teaa"
 $ArchivePath = Join-Path $OutDir $ArchiveName
 
 Write-Host ''
