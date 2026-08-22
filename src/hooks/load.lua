@@ -52,7 +52,12 @@ end
 -- level and stop the bot resting forever.
 local function spotHostiles(self)
     local seen = {}
-    if not self or not self.x then return seen end
+    -- game.level is absent between levels and during world generation, and
+    -- this runs inside the engine's turn processing, where an index error is
+    -- not a stack trace in a console -- it is the player's game ending.
+    if not self or not self.x or not game or not game.level or not game.level.map then
+        return seen
+    end
     core.fov.calc_circle(
         self.x, self.y, game.level.map.w, game.level.map.h, self.sight or 10,
         function(_, x, y) return game.level.map:opaque(x, y) end,
@@ -117,7 +122,26 @@ function bot.start()
     bot.actions      = 0
     bot.last_reason  = nil
     say("started at turn " .. bot.started_turn .. ", budget " .. TURN_BUDGET .. " turns")
-    bot.step()
+    bot.stepGuarded()
+end
+
+--- bot.step() with the failure contained.
+--
+-- Both entry points go through this. The keybind path needs it as much as the
+-- per-turn one: an error raised here would otherwise propagate out of the key
+-- handler into the engine's dispatch, on a keypress the player made. A bot
+-- that switches itself off is a bug report; a bot that takes the game with it
+-- is a lost character.
+function bot.stepGuarded()
+    -- On success `result` is step()'s own return; on failure it is the error.
+    local ok, result = pcall(bot.step)
+    if not ok then
+        bot.active = false
+        bot.last_reason = "internal error: " .. tostring(result)
+        say("stopped by an internal error: " .. tostring(result))
+        return false
+    end
+    return result
 end
 
 --- One decision, and the action that follows from it.
@@ -162,11 +186,7 @@ end
 -- would take the game down with it rather than just switching the bot off.
 function bot.onPlayerAct()
     if not bot.active then return end
-    local ok, err = pcall(bot.step)
-    if not ok then
-        bot.active = false
-        say("stopped by an internal error: " .. tostring(err))
-    end
+    bot.stepGuarded()
 end
 
 class:bindHook("ToME:run", function()
