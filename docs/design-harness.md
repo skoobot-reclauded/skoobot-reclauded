@@ -142,29 +142,44 @@ progress invariant, arrived at independently, which is some evidence it is the r
 - The engine reboots into a module plus savefile via `Module:instanciate(mod, name, new_game,
   ...)` (engine/Module.lua:931), the same call the New Game menu makes.
 
-### 4.2 The load oracle, without the bridge
+### 4.2 The load oracle
 
-The release gate removes every junction, including the devbridge, so there is no `[BRIDGE]`
-channel to ask. The engine's own log is enough, and this is what to match. **The separators
-are tab characters, not spaces** — `Module.lua:411` is a `print()` with six arguments, so
-matching on `Checking addon tome-…` with a space will silently never fire:
+The release gate has no `[BRIDGE]` channel to ask about the product, because the product
+junction is gone and only the packed archive is installed. The engine's own log answers it.
+**All these lines are tab-separated**, because they are `print()` calls with several
+arguments — matching `Checking addon tome-…` with a space silently never fires, and a gate
+that never fires passes.
+
+Two lines matter, and they are not the same question.
+
+**Discovery** — `Module.lua:411`, emitted for everything in `/addons/`:
 
 ```
-Checking addon<TAB>tome-skoobot_reclauded.teaa<TAB>:: (as dir)<TAB>false<TAB>:: (as teaa)<TAB>22<TAB>
+Checking addon<TAB>tome-skoobot_reclauded-0.1.0.teaa<TAB>:: (as dir)<TAB>false<TAB>:: (as teaa)<TAB>23<TAB>
+```
+
+`(as dir)` is `fs.exists(dir/init.lua)`; `(as teaa)` is `short_name:find(".teaa$")` — a match
+position, or `nil`. This says only that the engine *looked* at it.
+
+**Binding** — `Module.lua:490`, emitted only for addons actually loaded, and the line to
+assert on:
+
+```
+Binding addon<TAB>SkooBot: Reclauded<TAB>/addons/tome-skoobot_reclauded-0.1.0.teaa<TAB>tome-skoobot_reclauded-0.1.0
  * with hooks
  * with superload
 ```
 
-Read it as: `(as dir)` is `fs.exists(dir/init.lua)`, and `(as teaa)` is the result of
-`short_name:find(".teaa$")` — a match position, or `nil`. So an unpacked junction gives
-`true` / `nil`, and an installed archive gives `false` / a number. That single line therefore
-says **which of the two the engine actually loaded**, which is the whole question the gate
-exists to answer.
+The **third field is `add.teaa`**: the archive path when the addon came from an archive, and
+`nil` when it came from an unpacked directory. That one field is exactly the question the gate
+exists to answer — *did this load from the artifact, or from the working tree?* — and it
+answers it directly rather than by inference from what is absent.
 
-The ` * with …` lines (`:511`, `:533`, and the `data`/`overload` equivalents) appear once per
-declared directory, so they double as a check that the manifest flags did what they claimed.
-A build whose `init.lua` sets `hooks = true` and produces no ` * with hooks` did not mount
-what it advertised.
+The ` * with …` lines (`:496`, `:511`, `:522`, `:533`) follow their own `Binding addon` line,
+so attribution is unambiguous: read from one `Binding addon` to the next. They appear once per
+declared directory, so they also check that the manifest flags did what they claimed — a build
+whose `init.lua` sets `hooks = true` and produces no ` * with hooks` did not mount what it
+advertised.
 
 Two absences complete the oracle, and absences need explicit assertions or they pass by
 accident:
@@ -173,11 +188,31 @@ accident:
 - no `Lua Error` after the addon is checked.
 
 One trap in the negative space: a `.teaa` with no root `init.lua` is skipped at `:416`
-**without any error at all** — no line is printed for it beyond the `Checking addon` one. If a
+**without any error at all** — nothing is printed for it beyond the `Checking addon` line. If a
 junction is still present, the engine loads that instead and the gate passes on the working
-tree rather than on the artifact. That is why the gate removes *all* junctions rather than
-just the devbridge pair, and why `tools/pack.ps1` refuses to emit an archive without a root
-`init.lua` in the first place.
+tree rather than on the artifact. That is why the gate removes the product junction, why it
+asserts on `Binding addon`'s third field rather than on the absence of complaints, and why
+`tools/pack.ps1` refuses to emit an archive without a root `init.lua` in the first place.
+
+### 4.3 Why the gate cannot be entirely bridge-free
+
+The audit that specified this gate assumed the devbridge could be removed along with
+everything else, since the oracle above is read from the log rather than through the bridge.
+Reading it needs no bridge — but *reaching* it does.
+
+`tome-*` addons are only scanned when a tome game is instanciated (§4), and the engine has no
+command-line path into a module: its full flag set is `--flush-stdout`, `--home`,
+`--ignore-window-change-pos`, `--no-debug`, `--no-sandbox`, `--no-steam`, `--no-web`,
+`--safe-mode`, `--xpos`, `--ypos`. Booting into a module goes through
+`util.showMainMenu`/`Module:instanciate` from inside Lua. So without something driving the
+menu, the game sits at the main menu forever and never looks at a `tome-` addon at all.
+
+The gate therefore removes the **product** junction — the one that could make it pass on the
+working tree — and keeps the two devbridge junctions purely as the thing that presses the
+buttons. What that leaves unproven is narrow and worth stating: it shows the product loads and
+runs from the packed archive, not that the game runs with no dev addons present at all. The
+devbridge cannot contaminate the artifact, because `tools/pack.ps1` packs only `src/` and
+refuses any entry under `tools/`.
 
 ### 4.1 Ten traps, each of which cost a debugging cycle
 
