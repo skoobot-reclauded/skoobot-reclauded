@@ -2,7 +2,10 @@
     Devbridge smoke test. Proves the loop end to end: launch a real game, run
     commands through the bridge, read results back, shut down.
 
-    Run:  powershell -File .\tools\smoke-test.ps1
+    Run:  powershell -ExecutionPolicy Bypass -File .\tools\smoke-test.ps1
+
+    The -ExecutionPolicy flag is not optional: every scope on this machine is
+    Restricted, so a bare `powershell -File ...` fails before the script runs.
 #>
 
 . (Join-Path $PSScriptRoot 'harness.ps1')

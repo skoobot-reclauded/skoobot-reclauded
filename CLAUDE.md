@@ -49,9 +49,14 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
 - Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer in the local
   research archive — not in this repo, not in issues, for now — and are cited by ID; every
   citation here should carry its one-line substance.
-- The game's Lua is **LuaJIT 2.0.2, x86**. Local LuaJIT is 2.1 — same dialect, so a 2.1-only
-  idiom passes `busted` and fails in-game. Parse-check with
-  `luajit -bl <file> /dev/null`; lint with `luacheck --std luajit src/`.
+- The game's Lua is **LuaJIT 2.0.2, x86**, and `busted` must run under LuaJIT too — it ran
+  under PUC Lua 5.4 until T-045, which made the suite test a different language in both
+  directions (`loadstring`/`setfenv`/`unpack` absent under test but correct in-game; `//` and
+  bitwise operators compiling under test but fatal in-game). `spec/dialect_spec.lua` now fails
+  the run if that regresses. The residual gap is 2.1-vs-2.0.2 — `table.new` and `table.clear`
+  resolve under test and fail in-game — and only the harness catches it, not lint.
+- Parse-check with `luajit -bl <file> /dev/null`; lint with `luacheck --std luajit .`. The
+  trailing-slash form `luacheck --std luajit src/` checks **no files** and exits 3.
 
 ## Verifying behaviour
 
@@ -59,7 +64,14 @@ There is a working harness that drives a real game unattended — launch, comman
 kill. Do not hand-test what it can test. Do not trust a failing run that came back `Tainted`;
 that means a human touched the machine mid-run and the result is void.
 
+Every `.ps1` here needs `-ExecutionPolicy Bypass`: the machine's policy is `Restricted` in
+every scope, so `powershell -File …` alone fails with "running scripts is disabled on this
+system" before the script starts. Do not change the machine policy to make a document true.
+
 ```
-powershell -File tools/smoke-test.ps1        # bridge round-trip
-powershell -File tools/new-character.ps1     # create and save a character, no human input
+powershell -ExecutionPolicy Bypass -File tools/setup-dev.ps1       # junction src/ + devbridge in
+powershell -ExecutionPolicy Bypass -File tools/smoke-test.ps1      # bridge round-trip
+powershell -ExecutionPolicy Bypass -File tools/new-character.ps1   # create and save a character
+powershell -ExecutionPolicy Bypass -File tools/pack.ps1            # build dist/*.teaa
+powershell -ExecutionPolicy Bypass -File tools/clean-build.ps1     # release gate
 ```
