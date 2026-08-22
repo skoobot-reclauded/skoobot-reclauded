@@ -99,17 +99,22 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Lint.
 #
-# Interim ignore list: 111 (manifest fields are globals by design), 113 (ToME
-# supplies `game`, `fs` and friends) and 631 (long lines in the description
-# string). Tighten it as T-002 lands a real .luacheckrc declaring ToME's global
-# surface -- but note the W582 class this hook exists for fires with no
-# configuration whatsoever, so waiting for T-002 was never necessary.
+# No flags: .luacheckrc (T-002) now declares ToME's whole global surface and
+# scopes every per-path environment, so a bare `luacheck .` is authoritative.
+# The interim `--std luajit --ignore 111 113 631` is gone, and deliberately:
+#   * --std on the command line REPLACES the rc's top-level std (per-path stds
+#     still win), so passing it can only match or contradict the rc -- never help;
+#   * --ignore silences those classes EVERYWHERE, including the real leaks
+#     (W111) and undefined reads (W113) the rc exists to surface, and the long
+#     lines (W631) that are now wrapped rather than hidden.
+# The extracted index is not a git repo, but .luacheckrc is a tracked file, so
+# `git checkout-index` puts it in $TMP and luacheck finds it there.
 #
-# The '.' matters: `luacheck --std luajit src/` with a trailing slash checks no
-# files at all and exits 3 (T-046).
+# The '.' matters: `luacheck src/` with a trailing slash checks no files at all
+# and exits 3 (T-046). Use '.' or 'src'.
 # ---------------------------------------------------------------------------
 say 'linting'
-( cd "$TMP" && "$LUACHECK" --std luajit . --ignore 111 113 631 ) \
+( cd "$TMP" && "$LUACHECK" . ) \
     || die 'luacheck failed'
 
 # ---------------------------------------------------------------------------
