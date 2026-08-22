@@ -1,0 +1,29 @@
+-- busted configuration.
+--
+-- Without a ROOT, `busted` with no arguments exits 1 with "No test files
+-- found matching Lua pattern: _spec", which makes the unit-test step
+-- unusable in a gate (T-040).
+--
+-- The interpreter matters more than the paths. The game runs LuaJIT 2.0.2
+-- (Lua 5.1). busted's launcher on this machine used to be PUC Lua 5.4, so
+-- ToME-dialect code (loadstring, setfenv, unpack) failed under test while
+-- being correct in-game, and 5.4-only syntax passed here and crashed there
+-- -- the risk exactly backwards from how four documents described it.
+--
+-- Two guards, because either alone can be defeated (T-045):
+--   * `lua = "luajit"` re-execs the suite under LuaJIT from PATH, so a
+--     5.4 launcher cannot quietly run the tests in the wrong dialect. It
+--     is a name, not a path, so it carries no machine's layout.
+--   * spec/dialect_spec.lua asserts the dialect from inside a running
+--     spec, which is the only check that cannot be bypassed by however
+--     busted was invoked.
+return {
+  _all = {
+    ROOT    = { "spec" },
+    pattern = "_spec",
+    lua     = "luajit",
+  },
+  default = {
+    verbose = true,
+  },
+}
