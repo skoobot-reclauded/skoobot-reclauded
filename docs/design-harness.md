@@ -117,7 +117,18 @@ progress invariant, arrived at independently, which is some evidence it is the r
 - The engine reboots into a module plus savefile via `Module:instanciate(mod, name, new_game,
   ...)` (engine/Module.lua:931), the same call the New Game menu makes.
 
-### 4.1 Nine traps, each of which cost a debugging cycle
+### 4.1 Ten traps, each of which cost a debugging cycle
+
+**`ready` is not readiness.** The hook emits `[BRIDGE] ready` from `Boot:run` / `ToME:run`,
+which fires well before the `display()` pump starts turning. On a cold start — the first
+launch after the addon set changes, when the engine recomputes addon MD5s — the pump stayed
+silent for about a hundred seconds after `ready` while the window came up. `Start-Game`
+returned on the log line, the first five commands were fired into that gap, timed out, and
+were deleted unread. Five failures in a row, none of them real: precisely the class of result
+this harness exists to prevent, produced by the harness itself. Readiness is now proved by a
+round trip — `Start-Game` sends `return "pong"` and only reports ready when it comes back.
+A warm start answers in about a second, so the generous timeout costs nothing when it is not
+needed.
 
 **`fs.delete` silently no-ops on the command files.** physfs writes only beneath its own write
 path, which the module repoints. The first pump deleted nothing and re-ran `cmd-0001` about
@@ -188,12 +199,33 @@ Nothing in the engine, module, or DLC archives is modified. The whole footprint 
 
 | Change | Revert |
 |---|---|
-| Junction `game/addons/tome-skoobot-devbridge` | remove it |
-| Junction `game/addons/boot-skoobot-devbridge` | remove it |
-| `T-Engine/4.0/settings/resolution.cfg` set to `800x600 Windowed` | one line |
-| `te4_log.txt`, `T-Engine/4.0/skoobot-bridge/` | artifacts, delete freely |
+| Junction `game/addons/tome-skoobot_reclauded` → `src/` | remove it |
+| Junction `game/addons/tome-skoobot-devbridge` → `tools/devbridge` | remove it |
+| Junction `game/addons/boot-skoobot-devbridge` → `tools/devbridge-boot` | remove it |
+| `T-Engine/4.0/settings/resolution.cfg` set to `800x600 Windowed` | one line, not reverted |
+| `te4_log.txt`, `T-Engine/4.0/skoobot-bridge/`, `build/logs/` | artifacts, delete freely |
 
-A clean-build check is therefore "delete two junctions", not "restore a patched file".
+**Three junctions, not two.** The devbridge pair is the channel; `tome-skoobot_reclauded` is
+the product. Until it existed, every harness run exercised the bridge and never once loaded
+the thing under test.
+
+None of this is done by hand any more:
+
+```
+powershell -ExecutionPolicy Bypass -File .\tools\setup-dev.ps1            # apply
+powershell -ExecutionPolicy Bypass -File .\tools\setup-dev.ps1 -Remove    # revert
+```
+
+It is idempotent, so re-running it is also how you check the state. It refuses to touch a
+real directory sitting where a junction should be, and removes junctions through
+`Directory::Delete(path, false)` rather than `Remove-Item -Recurse` — the latter can delete
+*through* a junction, which here would mean emptying `src/` out of the working tree.
+
+`resolution.cfg` is deliberately **not** reverted: the pre-harness value is recorded nowhere,
+so restoring a guess is worse than leaving it, and it cannot affect whether an addon loads.
+
+A clean-build check is therefore "delete three junctions", not "restore a patched file" —
+and `-Remove` is exactly the inverse T-035 needs.
 
 ---
 
@@ -203,7 +235,8 @@ A clean-build check is therefore "delete two junctions", not "restore a patched 
 |---|---|
 | `tools/devbridge/` | tome tier: pump, injection, interference detection |
 | `tools/devbridge-boot/` | boot tier: pump and injection at the main menu |
-| `tools/harness.ps1` | `Start-Game`, `Invoke-Bridge`, `Stop-Game`, `Wait-LogLine` |
+| `tools/setup-dev.ps1` | creates/removes the three junctions and `resolution.cfg` |
+| `tools/harness.ps1` | `Start-Game`, `Invoke-Bridge`, `Stop-Game`, `Wait-LogLine`, `Show-LoadDiagnostics` |
 | `tools/smoke-test.ps1` | proves the loop end to end |
 | `tools/test-unfocused.ps1` | proves the pump survives a minimised window |
 | `tools/new-character.ps1` | creates and saves a character with no human input |

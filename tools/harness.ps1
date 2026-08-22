@@ -78,6 +78,55 @@ function Wait-LogLine {
     }
 }
 
+<#
+    Explain a bridge timeout instead of just reporting one.
+
+    An addon that errors at load and a bridge that never came up produce the
+    identical symptom: silence. The engine says which it was, loudly, in
+    te4_log.txt -- and that file is opened in 'w' mode, so the next launch
+    destroys the evidence. Print the lines that carry the answer and keep a
+    copy of the whole log before it goes.
+
+    build/logs/ is gitignored (build/ already is), so archiving is free.
+#>
+function Show-LoadDiagnostics {
+    param([string[]]$Seen)
+
+    $pattern = 'Lua Error|Removing addon|Checking addon|error opening|stack traceback|\*\*\*'
+
+    # Whatever the caller already drained, plus anything still unread.
+    $lines = @()
+    if ($Seen) { $lines += $Seen }
+    Read-NewLogLines
+    while ($script:LogBuf.Count -gt 0) { $lines += $script:LogBuf.Dequeue() }
+
+    $hits = @($lines | Where-Object { $_ -match $pattern })
+    if ($hits.Count -gt 0) {
+        Write-Host '[harness] --- engine lines that may explain it ---'
+        foreach ($h in ($hits | Select-Object -Last 25)) { Write-Host "           $h" }
+    } else {
+        Write-Host '[harness] --- no addon-load or Lua-error lines in the log ---'
+    }
+
+    $archive = Join-Path (Split-Path -Parent $PSScriptRoot) 'build\logs'
+    if (-not (Test-Path $archive)) { New-Item -ItemType Directory -Path $archive -Force | Out-Null }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $dest  = Join-Path $archive "te4_log-$stamp.txt"
+    if (Test-Path $script:LogPath) {
+        # The game still holds it open for writing; copy through a shared read.
+        try {
+            $fs = [System.IO.File]::Open($script:LogPath, 'Open', 'Read', 'ReadWrite')
+            try {
+                $out = [System.IO.File]::Create($dest)
+                try { $fs.CopyTo($out) } finally { $out.Dispose() }
+            } finally { $fs.Dispose() }
+            Write-Host "[harness] full log archived to $dest"
+        } catch {
+            Write-Host "[harness] could not archive the log: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Stop-Game {
     Get-Process -Name 't-engine' -ErrorAction Ignore | ForEach-Object { Stop-Process -Id $_.Id -Force }
     $script:GamePid = $null
@@ -88,8 +137,26 @@ function Test-GameAlive {
     [bool](Get-Process -Id $script:GamePid -ErrorAction Ignore)
 }
 
+<#
+    Launch a game and wait until the bridge can actually execute a command.
+
+    "ready" is not readiness. The hook emits it from Boot:run/ToME:run, which
+    happens well before the display() pump starts turning: on a cold start
+    here the pump stayed silent for roughly a hundred seconds after "ready"
+    while the window came up, and every command fired into that gap timed out
+    and was deleted unread. That looks exactly like a broken bridge and is
+    not one -- five phantom failures in a row, which is the class of result
+    this harness exists to prevent.
+
+    So readiness is proved by a round trip, not by a log line. PumpTimeoutSec
+    covers the wait for the first frame; it is generous on purpose, because
+    the cost of being wrong is a fake failure.
+#>
 function Start-Game {
-    param([int]$TimeoutSec = 60)
+    param(
+        [int]$TimeoutSec = 60,
+        [int]$PumpTimeoutSec = 240
+    )
     Stop-Game
     if (-not (Test-Path $script:BridgeDir)) { New-Item -ItemType Directory -Path $script:BridgeDir | Out-Null }
     Get-ChildItem $script:BridgeDir -Filter 'cmd-*' -ErrorAction Ignore | Remove-Item -Force
@@ -100,10 +167,26 @@ function Start-Game {
                        -WorkingDirectory $script:GameDir -PassThru
     $script:GamePid = $p.Id
     Write-Host "[harness] launched pid=$($p.Id)"
+
     $r = Wait-LogLine -Pattern '\[BRIDGE\] ready' -TimeoutSec $TimeoutSec
-    if ($r.Matched) { Write-Host "[harness] bridge up: $($r.Line)" }
-    else { Write-Host "[harness] NO BRIDGE after ${TimeoutSec}s" }
-    [pscustomobject]@{ Pid = $p.Id; Ready = $r.Matched }
+    if (-not $r.Matched) {
+        Write-Host "[harness] NO BRIDGE after ${TimeoutSec}s"
+        Show-LoadDiagnostics -Seen $r.Seen
+        return [pscustomobject]@{ Pid = $p.Id; Ready = $false; Hook = $false; PumpSec = $null }
+    }
+    Write-Host "[harness] hook ran: $($r.Line)"
+
+    $t0 = Get-Date
+    $probe = Invoke-Bridge -Lua 'return "pong"' -TimeoutSec $PumpTimeoutSec
+    $elapsed = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
+    if ($probe.Status -eq 'OK') {
+        Write-Host "[harness] pump live after ${elapsed}s"
+        return [pscustomobject]@{ Pid = $p.Id; Ready = $true; Hook = $true; PumpSec = $elapsed }
+    }
+
+    Write-Host "[harness] BRIDGE HOOK RAN BUT PUMP NEVER TURNED (${elapsed}s, status=$($probe.Status))"
+    Show-LoadDiagnostics
+    [pscustomobject]@{ Pid = $p.Id; Ready = $false; Hook = $true; PumpSec = $elapsed }
 }
 <#
     Send Lua to the game, and by default wait for its result.

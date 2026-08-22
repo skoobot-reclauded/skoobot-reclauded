@@ -174,6 +174,27 @@ if not KeyBind.__skoobot_interference then
 	end
 end
 
+--- Which addons the engine actually loaded, sorted, comma-separated.
+---
+--- The engine drops any addon a savefile does not list, with one line in the
+--- log and no other symptom (engine/Module.lua:565-569). Without this a
+--- behaviour run can "verify" a game that never loaded the product. Assert on
+--- this before measuring anything.
+---
+--- mod.addons is populated at Module.lua:549 and reachable from the running
+--- game because Module.lua:163 stores the module table on the Game class as
+--- __mod_info, which instances inherit.
+function bridge.addons()
+	local mi = rawget(_G, "game") and game.__mod_info
+	local adds = mi and mi.addons
+	if not adds then return "unknown" end
+	local out = {}
+	for name, _ in pairs(adds) do out[#out+1] = tostring(name) end
+	if #out == 0 then return "none" end
+	table.sort(out)
+	return table.concat(out, ",")
+end
+
 --- One-line state snapshot. Turn count first: progress is measured in turns,
 --- never wall-clock, so a resize or a stray click cannot fail a test on timing.
 function bridge.state()

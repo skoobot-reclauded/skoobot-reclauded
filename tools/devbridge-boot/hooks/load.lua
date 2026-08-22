@@ -65,6 +65,22 @@ function bridge.dialogs()
 	return table.concat(out, " | ")
 end
 
+--- Which addons the engine actually loaded, sorted, comma-separated.
+---
+--- At this tier that is the boot module's set; the tome tier answers the same
+--- question about the real game. Same helper in both so a scenario can ask
+--- without caring which tier is answering (T-041, T-043).
+function bridge.addons()
+	local mi = rawget(_G, "game") and game.__mod_info
+	local adds = mi and mi.addons
+	if not adds then return "unknown" end
+	local out = {}
+	for name, _ in pairs(adds) do out[#out+1] = tostring(name) end
+	if #out == 0 then return "none" end
+	table.sort(out)
+	return table.concat(out, ",")
+end
+
 local function readAll(path)
 	local f = fs.open(path, "r")
 	if not f then return nil end

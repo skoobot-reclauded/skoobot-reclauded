@@ -14,6 +14,7 @@ $commands = @(
     'return "class=" .. tostring(game.__CLASSNAME)'
     'bridge.say("driven from outside") return "said"'
     'return "keyhandler=" .. tostring(require("engine.Key").current ~= nil)'
+    'return bridge.addons()'
     'return bridge.key("EXIT")'
 )
 
