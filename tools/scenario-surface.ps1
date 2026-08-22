@@ -273,9 +273,16 @@ return "dialogs=" .. bridge.dialogs()
         # path; if it fails, start directly so the bot is still measured.
         $null = Probe "$label-clear" 'while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end return "dialogs=" .. bridge.dialogs() .. " focus_is_map=" .. tostring(require("engine.Key").current == game.key)'
         $tg = Probe "$label-toggle" 'local r = bridge.key("TOGGLE_SKOOBOT_RECLAUDED") return r .. " | " .. bl.status()'
-        if ($tg.Status -eq 'OK' -and $tg.Result -notmatch 'active=true') {
+        # "active=false" right after the toggle is only a failure if the bot did
+        # NOTHING. It legitimately activates and hands back in the same decision
+        # -- on a level-change tile, or facing enemies too strong to fight -- and
+        # that shows as active=false with a stop reason. Only a bare active=false
+        # with no reason means the key was swallowed; then start directly.
+        if ($tg.Status -eq 'OK' -and $tg.Result -notmatch 'active=true' -and $tg.Result -match 'reason=nil') {
             Finding 'BROKEN' "${label}: the toggle keybind did not activate the bot: $($tg.Result)"
             $tg = Probe "$label-direct" 'skoobot_reclauded.start() return bl.status()'
+        } elseif ($tg.Result -notmatch 'active=true') {
+            Finding 'INFO' "${label}: activated and handed back at once ($($tg.Result -replace '.*reason=', 'reason='))"
         }
         $deadline = (Get-Date).AddSeconds($deadlineSec)
         $turn = $before; $active = $true; $last = ''
@@ -293,8 +300,13 @@ return "dialogs=" .. bridge.dialogs()
         $null = Probe "$label-off" 'local r = bridge.key("STOP_SKOOBOT_RECLAUDED") return r .. " | " .. bl.status()'
         $adv = $turn - $before
         Finding 'INFO' ("{0}: game.turn advanced {1} ({2} -> {3}); handed back={4}; last: {5}" -f $label, $adv, $before, $turn, (-not $active), $last)
-        if ($adv -le 0) { Finding 'BROKEN' "${label}: the bot did not advance the game at all" }
-        if ($active) { Finding 'CHANGED' "${label}: still active at the deadline (no stop within ${deadlineSec}s)" }
+        # A bot that hands back at once for a legitimate reason -- too-strong
+        # enemies, a level-change tile -- advances no turns, and that is the
+        # designed "stop early and often" behaviour, not a hang. Only a bot
+        # still active at the deadline is a real hang; only 0 turns with NO
+        # stop reason means it did nothing for no reason.
+        if ($active) { Finding 'BROKEN' "${label}: still active at the deadline -- it never handed back (a hang)" }
+        elseif ($adv -le 0 -and $last -match 'reason=nil') { Finding 'BROKEN' "${label}: did not advance and gave no reason" }
         if ($last -match 'internal error') { Finding 'BROKEN' "${label}: stopped on an internal error" }
     }
     Watch 'quiet' $ActDeadlineSec

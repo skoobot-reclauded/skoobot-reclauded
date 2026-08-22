@@ -45,6 +45,7 @@ local Astar = require "engine.Astar"
 local _M = loadPrevious(...)
 
 local power = dofile("/data-skoobot_reclauded/power.lua")
+local air = dofile("/data-skoobot_reclauded/air.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -379,34 +380,51 @@ local function spotHostiles(self, actors_only)
     return seen
 end
 
-local function getPathToAir(self)
-    local seen = {}
-    if not self.x then return nil end
+--- The breathing capabilities air.lua needs, read off an actor.
+local function breathCaps(self)
+    return {
+        no_breath    = self:attr("no_breath"),
+        invulnerable = self:attr("invulnerable"),
+        can_breath   = self.can_breath,
+    }
+end
 
-    core.fov.calc_circle(self.x, self.y, game.level.map.w, game.level.map.h, self.sight or 10,
-        function(_, x, y) return game.level.map:opaque(x, y) end,
+--- Would this actor suffocate standing on (x, y)? ToME's own rule, via air.lua.
+local function suffocatingAt(self, x, y)
+    local map = game.level.map
+    local air_level     = map:checkEntity(x, y, map.TERRAIN, "air_level")
+    local air_condition = map:checkEntity(x, y, map.TERRAIN, "air_condition")
+    return air.suffocates(breathCaps(self), air_level, air_condition)
+end
+bot.suffocating = function() local p = game.player return suffocatingAt(p, p.x, p.y) end
+
+--- A path to the nearest tile the actor can breathe on AND actually reach.
+--
+-- v1 looked for `not air_level or air_level > 0` and did no reachability check,
+-- so it could pick a pocket of air inside a wall and then fail to path there
+-- (T-001 / salvage #6). This uses the same breathable test as the suffocation
+-- trigger, and `canMove` so a coral wall that merely has air is never chosen.
+local function getPathToAir(self)
+    if not self.x then return nil end
+    local map = game.level.map
+    local caps = breathCaps(self)
+    local best, best_dist
+
+    core.fov.calc_circle(self.x, self.y, map.w, map.h, self.sight or 10,
+        function(_, x, y) return map:opaque(x, y) end,
         function(_, x, y)
-            local terrain = game.level.map(x, y, game.level.map.TERRAIN)
-            -- v1: no reachability check; a tile of air behind a wall is chosen
-            -- and the path fails. T-015.
-            if not terrain.air_level or terrain.air_level > 0 then
-                seen[#seen + 1] = {x=x, y=y, terrain=terrain}
+            local air_level     = map:checkEntity(x, y, map.TERRAIN, "air_level")
+            local air_condition = map:checkEntity(x, y, map.TERRAIN, "air_condition")
+            if air.breathable(caps, air_level, air_condition) and self:canMove(x, y, false) then
+                local dist = math.abs(x - self.x) + math.abs(y - self.y)
+                if not best_dist or dist < best_dist then
+                    best_dist, best = dist, {x = x, y = y}
+                end
             end
         end, nil)
 
-    local min_dist = math.huge
-    local close_coord = nil
-    for _, coord in pairs(seen) do
-        local dist = math.abs(coord.x - self.x) + math.abs(coord.y - self.y)
-        if dist < min_dist then
-            min_dist = dist
-            close_coord = coord
-        end
-    end
-
-    if close_coord ~= nil then
-        local a = Astar.new(game.level.map, self)
-        return a:calc(self.x, self.y, close_coord.x, close_coord.y)
+    if best then
+        return Astar.new(map, self):calc(self.x, self.y, best.x, best.y)
     end
     return nil
 end
@@ -679,25 +697,31 @@ function skoobot_act(noAction)
     log("[State] " .. aiStateString())
 
     if bot.state == STATE_REST then
-        if game.player.air < 50 then
-            return aiStop("#RED#AI stopped: Attempting to rest while under half breath!")
-        end
-        local terrain = game.level.map(game.player.x, game.player.y, game.level.map.TERRAIN)
-        -- v1: `not game.player.undead == 1` parses as `(not undead) == 1`, a
-        -- boolean compared with a number, so the whole run-to-air block has
-        -- never executed. Reproduced literally; T-015 makes it real.
-        if terrain.air_level and terrain.air_level < 0 and ((not game.player.undead) == 1) then
+        local p = game.player
+        -- FIXED (T-015). This block never ran in v1: the guard read
+        -- `not game.player.undead == 1`, which Lua parses as
+        -- `(not undead) == 1` -- a boolean compared with a number, always
+        -- false -- so a character rested underwater and drowned (TheIronBird,
+        -- eight years). mishander's `not can_breath` replacement was dead too
+        -- (can_breath is always a table). The trigger is now ToME's own
+        -- suffocation rule (data/air.lua), so run to air whenever the game
+        -- itself would be draining our breath -- water, void, whatever a
+        -- future version adds -- rather than resting into a drowning death.
+        if suffocatingAt(p, p.x, p.y) then
+            local path = getPathToAir(p)
             local moved
-            local path = getPathToAir(game.player)
-            if path ~= nil then
-                moved = SAI_movePlayer(path[1].x, path[1].y)
-            end
+            if path and path[1] then moved = SAI_movePlayer(path[1].x, path[1].y) end
             if not moved and bot.active then
-                return aiStop("#RED#AI stopped: Suffocating, no air in sight!")
-            else
-                checkForAdditionalAction()
-                return
+                return aiStop("#RED#AI stopped: suffocating, and no reachable air!")
             end
+            checkForAdditionalAction()
+            return
+        end
+        -- Below half breath and not actively suffocating (surfaced, air still
+        -- recovering): hand back rather than rest. Measured as a fraction of
+        -- max_air, since it is 200 for a Yeek, not the flat 50 v1 assumed.
+        if p.max_air and p.max_air > 0 and (p.air / p.max_air) < 0.5 then
+            return aiStop("#RED#AI stopped: below half breath!")
         end
         return SAI_beginRest()
 
@@ -716,7 +740,10 @@ function skoobot_act(noAction)
                 aiStop("#RED#AI stopped: took damage while exploring, now below the safe threshold!")
             end
         end
-        if game.player.air < 75 then
+        -- Breath below three-quarters: switch to REST, which now runs to air
+        -- if we are actually suffocating (T-015). Ratio, not v1's flat 75.
+        if game.player.max_air and game.player.max_air > 0
+           and (game.player.air / game.player.max_air) < 0.75 then
             bot.state = STATE_REST
             return skoobot_act(true)
         end
