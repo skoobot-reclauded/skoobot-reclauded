@@ -83,6 +83,24 @@ local function snapshot(p)
     }
 end
 
+--- What the bot can see right now, as one line.
+--
+-- A bot that cannot say what it saw is guesswork to debug: "it stopped and I
+-- do not know why" is most of a bug report about an autoplay addon, and the
+-- reason is always in this table. Also what lets a harness scenario establish
+-- its own preconditions instead of hoping for a convenient starting position.
+function bot.inspect()
+    local p = game and game.player
+    if not p then return "no player" end
+    local s = snapshot(p)
+    local action, reason = decide.decide(s)
+    return ("turn=%s hostiles=%d life=%s/%s resting=%s running=%s wilderness=%s "
+        .. "active=%s actions=%d would=%s (%s)"):format(
+        tostring(s.turn), s.hostiles, tostring(s.life), tostring(s.max_life),
+        tostring(s.resting), tostring(s.running), tostring(s.wilderness),
+        tostring(bot.active), bot.actions, tostring(action), tostring(reason))
+end
+
 function bot.stop(reason)
     if not bot.active then return end
     bot.active = false

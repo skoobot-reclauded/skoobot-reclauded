@@ -214,7 +214,7 @@ runs from the packed archive, not that the game runs with no dev addons present 
 devbridge cannot contaminate the artifact, because `tools/pack.ps1` packs only `src/` and
 refuses any entry under `tools/`.
 
-### 4.1 Ten traps, each of which cost a debugging cycle
+### 4.1 Eleven traps, each of which cost a debugging cycle
 
 **`ready` is not readiness.** The hook emits `[BRIDGE] ready` from `Boot:run` / `ToME:run`,
 which fires well before the `display()` pump starts turning. On a cold start — the first
@@ -270,6 +270,15 @@ and it cost a full run to find.*
 cycle; the frame that invoked it does not survive to report a result. Waiting for a reply that
 will never arrive is not a diagnosis. Fire it with `-NoWait` and poll for the resulting state
 instead — the same discipline as measuring turns rather than seconds.
+
+**Visibility is stale until FOV is recomputed, and stale reads as "nothing there".** Hostile
+detection goes through `game.level.map.seens`, which `mod.class.Player:playerFOV()` populates
+(mod/class/Player.lua:550). In normal play that runs every turn, so it is always current. But
+a scenario that *moves* the player — `teleportRandom` to set up a situation — and then asks
+what is visible gets the answer for the old position, and after a teleport that answer is
+usually zero. Zero is indistinguishable from success. The walking-skeleton scenario believed
+it once, moved on, and the bot found four hostiles the instant it took a real turn. **Call
+`playerFOV()` after any injected movement, before reading anything about visibility.**
 
 **The savefile directory comes from the character's name**, not from the name passed to
 `Module:instanciate` (mod/dialogs/Birther.lua:225). `randomBirth()` also randomises the name,

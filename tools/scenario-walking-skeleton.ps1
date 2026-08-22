@@ -12,6 +12,19 @@
     failure. What the scenario refuses to accept is a bot that loads and then
     does nothing at all, or one that runs forever.
 
+    The save comes from a RANDOM birth, so the starting situation is not ours
+    to choose -- one character wakes up in an empty corner of the Trollmire,
+    the next is looking straight at a monster in Norgos Lair. The first
+    version of this scenario assumed the quiet case and reported a defect
+    against a bot that was refusing to act for exactly the right reason. It
+    now establishes its own starting state instead (docs/design-harness.md
+    section 2), and takes the noisy case as a free assertion on the way past.
+
+    Exit codes:  0 pass   1 fail   2 tainted by human input   3 inconclusive
+
+    3 means the scenario could not set up the situation it wanted to measure.
+    That is not a product failure and must not be recorded as one.
+
     Run:
         powershell -ExecutionPolicy Bypass -File .\tools\scenario-walking-skeleton.ps1
 
@@ -73,6 +86,68 @@ return "handler=" .. tostring(handler ~= nil)
     Check ($kb.Result -match 'bot=true') 'the addon installed its runtime'
     Check ($kb.Result -match 'handler=true') 'the toggle action has a handler'
     Check ($kb.Result -notmatch 'keys=none') 'the toggle action is bound to a key'
+
+    # -----------------------------------------------------------------------
+    # Preconditions.
+    #
+    # The save comes from a RANDOM birth, so where the character wakes up is
+    # not ours to choose: a Cornac Berserker starts in the Trollmire with
+    # nothing in sight, a Thalore Archer can start in Norgos Lair looking
+    # straight at a monster. In the second case the bot correctly refuses to
+    # act, and a scenario that demanded action would report a defect against
+    # the behaviour this project exists to produce.
+    #
+    # So the scenario establishes its own starting state rather than hoping
+    # for a convenient one -- which is what direct Lua injection is for
+    # (docs/design-harness.md section 2). If it cannot, it says INCONCLUSIVE
+    # rather than FAILED, because that distinction is the difference between
+    # a bug and a bad test.
+    # -----------------------------------------------------------------------
+    $look = Invoke-Bridge -Lua 'return skoobot_reclauded.inspect()' -TimeoutSec 30
+    Write-Host "  look  $($look.Result)"
+
+    if ($look.Result -notmatch 'hostiles=0') {
+        # Free safety assertion while we are here: with something in sight the
+        # bot must hand back immediately and take no action at all.
+        Write-Host '  info  a hostile is in sight; checking it refuses to act first'
+        $null = Invoke-Bridge -Lua 'return bridge.key("TOGGLE_SKOOBOT_RECLAUDED")' -TimeoutSec 30
+        Start-Sleep -Seconds 2
+        $guard = Invoke-Bridge -Lua 'return skoobot_reclauded.inspect()' -TimeoutSec 30
+        Write-Host "  look  $($guard.Result)"
+        Check ($guard.Result -match 'active=false' -and $guard.Result -match 'actions=0') `
+              'refuses to act at all while a hostile is visible'
+
+        # Now move somewhere quiet so the act loop can be exercised.
+        #
+        # playerFOV() after every hop is not optional. Hostile detection reads
+        # game.level.map.seens, which mod.class.Player:playerFOV() populates
+        # (mod/class/Player.lua:550). It has not run for the new position yet,
+        # so the count immediately after a teleport is STALE -- and stale here
+        # means zero, which looks exactly like success. The first version of
+        # this loop believed it, moved on, and the bot then found four
+        # hostiles the moment it actually took a turn.
+        $moved = Invoke-Bridge -Lua @'
+local p = game.player
+local last = skoobot_reclauded.inspect()
+for i = 1, 40 do
+  if last:find("hostiles=0") then break end
+  p:teleportRandom(p.x, p.y, 60, 10)
+  p:playerFOV()
+  last = skoobot_reclauded.inspect()
+end
+return last
+'@ -TimeoutSec 120
+        Write-Host "  look  $($moved.Result)"
+        if ($moved.Result -notmatch 'hostiles=0') {
+            Write-Host ''
+            Write-Host '[scenario] INCONCLUSIVE - could not find a spot with nothing in sight.'
+            Write-Host '           The bot is behaving correctly by refusing to act; the'
+            Write-Host '           scenario simply could not set up the case it wants to'
+            Write-Host '           measure. Re-run, or make a save in a quieter zone.'
+            Stop-Game
+            exit 3
+        }
+    }
 
     $before = Get-Turn
     Check ($null -ne $before) "read game.turn before ($before)"
