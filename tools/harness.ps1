@@ -40,6 +40,35 @@ function Reset-LogCursor {
     $script:LogBuf.Clear()
 }
 
+<#
+    Make the previous run's log unmatchable before launching the next one.
+
+    te4_log.txt is truncated by the engine on startup, but not until it opens
+    the file -- measured at ~5 ms AFTER Start-Process returns. Reset-LogCursor
+    rewinds to offset 0, so a read landing inside that window sees the whole
+    PREVIOUS run: its `[BRIDGE] ready`, and its `cmd-0001.lua OK`. Start-Game
+    then reports a game that is ready and answering before the process has
+    even opened its log.
+
+    That is a false pass, and it fired on two of four launches spaced three
+    seconds apart. Deleting the file first removes the possibility rather than
+    detecting it afterwards -- the engine recreates it. If the delete fails
+    (something still holds it open), fall back to parking the cursor at the
+    current end of file: reads then return nothing until the engine truncates,
+    at which point Read-NewLogLines' own truncation check rewinds to 0.
+#>
+function Clear-GameLog {
+    if (-not (Test-Path $script:LogPath)) { Reset-LogCursor; return }
+    try {
+        Remove-Item $script:LogPath -Force -ErrorAction Stop
+        Reset-LogCursor
+    } catch {
+        $script:LogOffset = (Get-Item $script:LogPath).Length
+        $script:LogBuf.Clear()
+        Write-Host "[harness] could not delete the log; parked cursor at $($script:LogOffset) bytes"
+    }
+}
+
 # te4_log.txt is held open for writing by the game, so a plain Get-Content hits
 # a sharing violation. Open it with FileShare.ReadWrite instead.
 function Read-NewLogLines {
@@ -227,9 +256,27 @@ function Clear-BridgeQueue {
     $script:Seq = 0
 }
 
+<#
+    Kill every game process, and WAIT until they are actually gone.
+
+    Stop-Process -Force returns as soon as the kill is requested, not when the
+    process has exited: measured here at 6 ms to return with the process still
+    alive, and 77 ms until it really went away. Start-Game calls this and then
+    launches immediately, so without the wait a second engine can start while
+    the first still holds the GL context, the audio device and te4_log.txt --
+    two instances at once, which is the one thing this harness must never do
+    (docs/design-harness.md; the bridge directory is shared).
+#>
 function Stop-Game {
     Get-Process -Name 't-engine' -ErrorAction Ignore | ForEach-Object { Stop-Process -Id $_.Id -Force }
     $script:GamePid = $null
+
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt 30) {
+        if (-not (Get-Process -Name 't-engine' -ErrorAction Ignore)) { return }
+        Start-Sleep -Milliseconds 25
+    }
+    Write-Host '[harness] WARNING: a t-engine process is still alive 30s after being killed'
 }
 
 function Test-GameAlive {
@@ -260,13 +307,24 @@ function Start-Game {
     Stop-Game
     if (-not (Test-Path $script:BridgeDir)) { New-Item -ItemType Directory -Path $script:BridgeDir | Out-Null }
     Get-ChildItem $script:BridgeDir -Filter 'cmd-*' -ErrorAction Ignore | Remove-Item -Force
-    Reset-LogCursor
+    Clear-GameLog
     $script:Seq = 0
     $p = Start-Process -FilePath $script:GameExe `
                        -ArgumentList '--flush-stdout','--no-steam','--no-web' `
                        -WorkingDirectory $script:GameDir -PassThru
     $script:GamePid = $p.Id
     Write-Host "[harness] launched pid=$($p.Id)"
+
+    # Anchor to THIS process's output before believing anything in the log.
+    # `[CPU] Detected N CPUs` is the engine's first line, so seeing it means we
+    # are reading the new run. Belt and braces with Clear-GameLog: the old log
+    # carried this banner too, so neither check alone is sufficient.
+    $b = Wait-LogLine -Pattern '^\[CPU\] Detected' -TimeoutSec 60
+    if (-not $b.Matched) {
+        Write-Host '[harness] the engine never printed its launch banner'
+        Show-LoadDiagnostics -Seen $b.Seen
+        return [pscustomobject]@{ Pid = $p.Id; Ready = $false; Hook = $false; PumpSec = $null }
+    }
 
     $r = Wait-LogLine -Pattern '\[BRIDGE\] ready' -TimeoutSec $TimeoutSec
     if (-not $r.Matched) {

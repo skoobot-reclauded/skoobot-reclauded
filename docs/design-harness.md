@@ -214,7 +214,39 @@ runs from the packed archive, not that the game runs with no dev addons present 
 devbridge cannot contaminate the artifact, because `tools/pack.ps1` packs only `src/` and
 refuses any entry under `tools/`.
 
-### 4.1 Eleven traps, each of which cost a debugging cycle
+- **Launch time is dominated by a network call, not by the game.** The engine connects to
+  `profiles.te4.org` on ports 2257/2258 at startup, reconnects to channels, fetches news and
+  measures latency. Sampling the log once a second during a slow launch shows the main thread
+  parked for **49 s, then 36 s, then 19 s**, each gap ending on a `Server latency` line. A
+  launch is ~7 s when that goes quickly and **90–166 s when it does not**, which is roughly
+  one launch in four to eight. Nothing about the addon, the junctions or the harness affects
+  it.
+
+  `--no-web` does not prevent this — that disables the embedded browser, not the profile
+  thread. The switch that does is `disable_all_connectivity`, which is `false` in
+  `T-Engine/4.0/settings/disable_all_connectivity.cfg` on this machine. Setting it `true`
+  removes the variance, at the cost of the online profile, news and achievement sync. Worth
+  knowing before blaming a slow run on anything in this repo.
+
+### 4.1 Thirteen traps, each of which cost a debugging cycle
+
+**The previous run's log can satisfy the next run's checks.** `te4_log.txt` is truncated by
+the engine on startup — but not until it opens the file, measured at **~5 ms after
+`Start-Process` returns**. `Reset-LogCursor` rewinds to offset 0, so a poll landing inside
+that window reads the *whole previous run*: its `[BRIDGE] ready`, and its `cmd-0001.lua OK`.
+`Start-Game` then reports a game that is up and answering **before the process has opened its
+log**. Measured: two of four launches spaced three seconds apart returned in 0.0 s. That is a
+false PASS, which is the only result this harness must never produce. `Clear-GameLog` now
+deletes the file before launching — removing the possibility rather than detecting it — and
+`Start-Game` additionally waits for the engine's own `[CPU] Detected` banner. Neither check
+suffices alone, because the stale log contains the banner too. Guarded by
+`tools/test-relaunch.ps1`.
+
+**`Stop-Process -Force` does not wait for the process to die.** It returned in 6 ms with the
+game still alive; the process actually exited 77 ms later. `Start-Game` calls `Stop-Game` and
+then launches immediately, so without a wait a second engine starts while the first still
+holds the GL context, the audio device and the log — two instances at once, the one thing
+§6 says never to do. `Stop-Game` now polls until they are gone.
 
 **`ready` is not readiness.** The hook emits `[BRIDGE] ready` from `Boot:run` / `ToME:run`,
 which fires well before the `display()` pump starts turning. On a cold start — the first
@@ -345,6 +377,7 @@ and `-Remove` is exactly the inverse T-035 needs.
 | `tools/harness.ps1` | `Start-Game`, `Invoke-Bridge`, `Stop-Game`, `Wait-LogLine`, `Show-LoadDiagnostics` |
 | `tools/smoke-test.ps1` | proves the loop end to end |
 | `tools/test-unfocused.ps1` | proves the pump survives a minimised window |
+| `tools/test-relaunch.ps1` | proves a relaunch cannot be satisfied by the previous run's log |
 | `tools/new-character.ps1` | creates and saves a character with no human input |
 
 Character creation drives the Birther's own `randomBirth()`, so no descriptor knowledge is
