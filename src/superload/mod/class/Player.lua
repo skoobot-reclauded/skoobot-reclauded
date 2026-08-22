@@ -273,7 +273,15 @@ local function SAI_useTalent(tid, who, force_level, ignore_cd, target)
     end
     log("[Action] Using Talent " .. name .. " on target " .. (target and target.name or ""))
     bot.actions = bot.actions + 1
-    return game.player:useTalent(tid, who, force_level, ignore_cd, target)
+    -- FIXED (T-010). The 5th arg is force_target and the 7th is no_confirm.
+    -- v1 passed the target but never no_confirm, so a talent that wanted a
+    -- confirmation or interactive targeting opened a prompt with no human to
+    -- answer it -- the rotation stalled instead of falling through to the next
+    -- priority (old #49, every marked-target class). With no_confirm and a
+    -- forced target, such a talent instead refuses cleanly (returns false),
+    -- postUseTalent marks it failed, and filterFailedTalents drops it so the
+    -- next priority is tried. T-001 remediation 3; the scored rotation is T-020.
+    return game.player:useTalent(tid, who, force_level, ignore_cd, target, false, true)
 end
 
 local function SAI_movePlayer(x, y)
