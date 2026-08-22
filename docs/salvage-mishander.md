@@ -60,8 +60,8 @@ never acts.
 | 2 | Rank-weighted enemy power ratios | **Take (concept)** | toward T-020 |
 | 3 | HP-weighted own power level | **Take** | toward T-020 |
 | 4 | Relative crowd-power threshold | **Take** | toward T-020 |
-| 5 | `can_breath` replacing the broken undead check | **Take** | T-015 |
-| 6 | `canMove` filter in `getPathToAir` | **Take** | T-015 |
+| 5 | `can_breath` replacing the broken undead check | **Take the intent only** — the change is dead code (T-001) | T-015 |
+| 6 | `canMove` filter in `getPathToAir` | **Take (concept)** — the reachability idea is right; the code sits on the dead #5 | T-015 |
 | 7 | Pinned check before explore | **Take, but incomplete** | T-012 |
 | 8 | Level-change `turnCount` handling | **Take (concept)** | UX |
 | 9 | Glowing chest seeking | **Rewrite** | T-013 |
@@ -97,10 +97,17 @@ fewer turns of margin.
 **4. Relative crowd threshold** — `sumVisibleEnemyPower > myPowerLevel + MAX_COMBINED_POWER`
 rather than an absolute cutoff. Correct: threat is relative to the character, not a constant.
 
-**5–6. Drowning fixes.** `not game.player.can_breath` replaces the broken undead check, and
+**5–6. Drowning fixes.** ~~`not game.player.can_breath` replaces the broken undead check, and
 `getPathToAir` gains `self:canMove(x, y, false)` so it stops pathing to air tiles it cannot
-reach. Both correct. Note that these fix a *live* bug (#5) and a *latent* one (#6) that was
-masked by #5 — the pathing was never exercised.
+reach. Both correct.~~
+
+> **Correction (T-001, 2026-08-22).** `not game.player.can_breath` is **dead code**, exactly
+> like the v1 line it replaces: `can_breath` is *always* a table in 1.7.6
+> (`T/mod/class/Actor.lua:226`), so the guard is permanently false and mishander's block never
+> ran either. Take the *intent* (stop resting and path to air when suffocating), not the line.
+> The reachability filter in #6 is the right idea but is written on top of the dead #5. The
+> correct drowning predicate, the air-tile ranking, and the `abs`/`MAX_INT` replacements are in
+> [api-surface-1.7.6.md](api-surface-1.7.6.md) Remediation 5; that is what T-015 implements.
 
 **7. Pinned check before `SAI_beginExplore()`** — prevents the freeze where the bot tries to
 explore while unable to move. Fixes the reported symptom, but **incomplete**: it only tests

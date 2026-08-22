@@ -39,7 +39,15 @@ The author replied that it was "currently planned and should be included in the 
 and advised avoiding water levels. The feature already existed. Tracked as **T-015**; open for
 eight years.
 
-**Fix:** `not game.player.can_breath` (mishander's fork already does this).
+**Fix:** ~~`not game.player.can_breath` (mishander's fork already does this).~~
+
+> **Correction (T-001, 2026-08-22).** That fix is **also dead code**: `can_breath` is *always*
+> a table in 1.7.6 (`T/mod/class/Actor.lua:226`), so `not game.player.can_breath` is
+> permanently false — mishander's replacement never runs either. The correct predicate is
+> `terrain.air_level < 0 and not p:attr("no_breath") and (not air_condition or
+> (p.can_breath[air_condition] or 0) <= 0)`. `undead` is the wrong test — `no_breath` is
+> Skeleton-only. Full remediation, with the air-tile ranking and the `abs`/`MAX_INT`
+> replacements v1 also needs, in [api-surface-1.7.6.md](api-surface-1.7.6.md) Remediation 5.
 
 ---
 
@@ -64,7 +72,15 @@ and did nothing.
 > *"With Base Game v1.7.2 and Skoobot v0.0.12, the soft-locks still occur.
 > **When I get asleep**, playing melee character."*
 
-**Fix:** `game.player.sleep == 1 and game.player.lucid_dreamer ~= 1`.
+**Fix:** ~~`game.player.sleep == 1 and game.player.lucid_dreamer ~= 1`.~~
+
+> **Correction (T-001, 2026-08-22).** `lucid_dreamer ~= 1` is **still wrong**: the sustain
+> stacks its bonus as a value of 5–25+, not 1, so `~= 1` is true for a lucid dreamer too. The
+> effect attributes are additive counters, never boolean flags — this is the same class of
+> error across every status stop (and a *third* instance: `confused` is a 0–50 percentage, so
+> v1's `confused == 1` CONFUSED stop never fired either). Gate on capabilities:
+> `p:attr("sleep") and not p:attr("lucid_dreamer")`. See
+> [api-surface-1.7.6.md](api-surface-1.7.6.md) Remediation 4 and "Value-domain notes".
 
 ---
 
