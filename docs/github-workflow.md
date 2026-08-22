@@ -102,16 +102,34 @@ Practical consequences:
 
 ## 4. Issue and commit conventions
 
+**GitHub Issues in this repository are the single source of truth for tasks.** A task exists
+when it is an issue with a milestone. Work that lives only in a design document, a chat, a
+local note, or the research archive is not tracked: file it. There is no second board anywhere,
+on purpose — two boards drift within a week.
+
 Task IDs (`T-001`, `T-010`, …) are permanent and are **not** GitHub issue numbers, which will
-never match. The mapping lives in the research archive's `TASKS.md`.
+never match. The mapping is the issue list itself.
 
-- **T-IDs go in issue titles**: `T-010 — Conditional / marked-target talents stall the rotation`
-- **T-IDs go in commit messages**: `Fix talent fallthrough (T-010)`
+- **T-IDs go in issue titles**: `T-010 — Conditional / marked-target talents stall the
+  rotation`. To find an issue by T-ID, search `T-010 in:title`.
+- **T-IDs go in commit messages**: `Fix talent fallthrough (T-010)`. That keeps
+  `git log --grep=T-010` working as the audit trail independently of GitHub, which matters
+  because the tracker can be migrated but history cannot.
+- **Allocating an ID**: take the next free number in the themed block — `00x` baseline and
+  tooling · `01x` inherited defects · `02x` core model and release features · `03x`
+  housekeeping · `04x` verification, harness and dev loop · `05x` release and packaging ·
+  `06x` safety and credentials · `07x` tracking, documentation and continuity — found by
+  searching issue titles for the highest one in that block. Gaps are unallocated, not retired;
+  no lettered sub-IDs.
+- **Every issue gets a milestone** (M1 Baseline and tooling · M2 Core model · M3 Inherited
+  defects · M4 Release readiness) and labels from the existing set. Dependencies and
+  "subsumed by" relations go in the issue body, so the board explains its own ordering.
+- Automated work files, comments on, and edits issues as the machine account (§2.2); the
+  verified mechanics live with the credentials (see below).
 
-That keeps `git log --grep=T-010` working as the audit trail independently of GitHub, which
-matters because the tracker can be migrated but history cannot.
-
-Decisions (`D-n`) are **not** issues. They stay in `TASKS.md` — they are reasoning, not work.
+Decisions (`D-n`) are **not** issues and are not filed as such. They are reasoning, not work;
+they are held by the maintainer in the local research archive for now and cited here by ID,
+each citation carrying its one-line substance.
 
 ---
 

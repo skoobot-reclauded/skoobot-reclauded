@@ -9,8 +9,8 @@ original SkooBot, not an update to it. `src/` is the shipped addon; `tools/` is 
 tooling that is never packaged; `docs/` is design record.
 
 The research archive that this project came out of lives beside it at `../Project Summary` —
-post-mortem of the original, every user complaint with its source, the decision log, and the
-task-ID mapping. It is read-only history.
+post-mortem of the original, every user complaint with its source, and the decision log. It is
+read-only history and holds no tasks; **tasks live only in this repo's GitHub Issues.**
 
 ## Read before acting
 
@@ -38,10 +38,17 @@ task-ID mapping. It is read-only history.
 
 ## Conventions
 
-- Task IDs (`T-nnn`) are permanent and are **not** GitHub issue numbers. Put them in issue
-  titles and in commit messages (`Fix talent fallthrough (T-010)`), so `git log --grep=T-010`
-  survives any tracker migration. Mapping is in `../Project Summary/TASKS.md`.
-- Decisions (`D-n`) live in `TASKS.md`, not in issues. They are reasoning, not work items.
+- **GitHub Issues are the single source of truth for tasks.** A task exists when it is an
+  issue with a milestone; work that lives only in a document, a chat, or a local file is not
+  tracked — file it, as the machine account. Task IDs (`T-nnn`) are permanent and are **not**
+  GitHub issue numbers. Put them in issue titles and in commit messages
+  (`Fix talent fallthrough (T-010)`), so `git log --grep=T-010` survives any tracker
+  migration. The mapping is the issue list itself (search `T-010 in:title`); allocate the next
+  free number in the themed block by searching titles for the highest one in use. Blocks and
+  procedure: [docs/github-workflow.md](docs/github-workflow.md) §4.
+- Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer in the local
+  research archive — not in this repo, not in issues, for now — and are cited by ID; every
+  citation here should carry its one-line substance.
 - The game's Lua is **LuaJIT 2.0.2, x86**. Local LuaJIT is 2.1 — same dialect, so a 2.1-only
   idiom passes `busted` and fails in-game. Parse-check with
   `luajit -bl <file> /dev/null`; lint with `luacheck --std luajit src/`.
