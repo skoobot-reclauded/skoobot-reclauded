@@ -32,8 +32,14 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
 3. **Never print a credential** into a log, a commit, a file, or the conversation. Verify by
    using the value, or by its length or fingerprint.
 4. **`tools/` must never ship.** The devbridge executes arbitrary Lua from disk by design.
-   Only `src/` is packed into a `.teaa`.
-5. **GPL-3.0, four-deep attribution.** Casalini → Charidan → SkoobyDoo → mishander. Keep
+   Only `src/` is packed into a `.teaa`, by `tools/pack.ps1`, which refuses any entry under
+   `tools/` or `spec/`.
+5. **Never rewrite published history.** No `--force`, no `--force-with-lease`, no deleting
+   `main`. The bot token has had Contents read/write since 2026-08-21, so nothing *mechanically*
+   stops it any more — `main` is unprotected and rulesets need a public repo or a paid plan.
+   A rewrite needs the owner's explicit sign-off in advance. See
+   [docs/github-workflow.md](docs/github-workflow.md) §5.
+6. **GPL-3.0, four-deep attribution.** Casalini → Charidan → SkoobyDoo → mishander. Keep
    per-file GPL headers on adapted code; do not strip them.
 
 ## Conventions

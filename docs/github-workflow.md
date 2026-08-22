@@ -65,6 +65,47 @@ The supported path is a fine-grained personal access token belonging to the mach
 read the token from the vault  ->  set GH_TOKEN for the life of the script  ->  clear it
 ```
 
+**That covers `gh` only. `git` does not read `GH_TOKEN`.** This distinction is the whole of
+rule 2.2 in practice, and getting it wrong does not fail loudly — it fails by succeeding as
+the wrong person.
+
+Left to itself an unattended `git push` reaches whatever credential helper is configured
+(Git Credential Manager, on Windows), which falls back to an **interactive** sign-in. If a
+human completes that prompt, GCM stores *their* credential, and every later push from that
+clone silently runs as them. That is exactly the outcome this rule exists to prevent, arrived
+at without anyone doing anything wrong.
+
+Two measures, and both are needed:
+
+- **Take the helper out of the loop for the push**, and supply the token through a transient
+  helper that lives only for that one command, so nothing is written to disk:
+
+  ```bash
+  git -c credential.helper= \
+      -c 'credential.helper=!f() { echo username=<machine-account>; echo password=$GH_TOKEN; }; f' \
+      push origin main
+  ```
+
+  The empty first `-c` resets the helper list so the configured helper is never consulted;
+  the second adds the transient one. `$GH_TOKEN` is single-quoted so the shell git spawns
+  expands it — the value never appears on a command line.
+
+- **Block the interactive fallback in the clone**, so a bare `git push` fails loudly instead
+  of quietly asking a human to authenticate:
+
+  ```bash
+  git config --local credential.helper ''
+  ```
+
+  Clone-level and untracked, so repeat it on any fresh clone, next to the identity and
+  hooks steps in §3.
+
+Bracket the push with checks rather than trusting it: working tree clean and every outgoing
+commit authored by the machine account before; fetch first and refuse if the remote moved;
+afterwards confirm the branch matches the remote and that **no credential was cached** by the
+push. The machine-specific script that does all of this, and the vault mechanics it depends
+on, are deliberately not in this repo — see [Where the credentials live](#where-the-credentials-live).
+
 Never write the token to a file, a commit, a log line, or the conversation. Verify access by
 using the token, or by checking a value's length or fingerprint — never by printing it.
 
@@ -165,6 +206,22 @@ without either party looking at the value.
 Note that a repo's `.permissions` block reports the **account's role**, not the token's scope
 ceiling. `push:true` there does not mean a push will succeed; the token's Contents permission
 is the real gate. Do not infer token scope from that field.
+
+**Contents is read/write, and that means the token can rewrite history.** It was read-only
+until the first push needed it on 2026-08-21. While it was read-only, an automated agent
+holding it structurally *could not* force-push or delete a branch; that protection is gone and
+nothing replaced it. `main` is not protected — branch protection returns 403 for this token,
+and rulesets need Pro or a public repo — so the constraint is now a rule rather than a
+mechanism:
+
+- **Never `--force`, never `--force-with-lease`, never delete `main`.** A history rewrite
+  needs explicit owner sign-off, in advance. The full-history rewrite done on 2026-08-21 was
+  safe only because nothing had been pushed yet.
+- Treat "it is on GitHub" as **not a backup**. A bad force-push is usually recoverable from
+  the local reflog for 90 days, which is a window, not a guarantee. The push script keeps a
+  `git bundle` off to one side and each milestone gets an annotated tag, so a rewrite is
+  recoverable from more than one direction.
+- Enable rulesets the day the repo goes public (T-054).
 
 ---
 
