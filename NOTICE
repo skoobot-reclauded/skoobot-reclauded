@@ -66,12 +66,10 @@ This addon is a derivative work. Its lineage, oldest first:
 Development tooling
 -------------------
 
-Everything under `tools/` is original work of this project:
-
-    tools/harness.ps1           tools/devbridge/
-    tools/new-character.ps1     tools/devbridge-boot/
-    tools/smoke-test.ps1
-    tools/test-unfocused.ps1
+Everything under `tools/` -- the PowerShell harness and scenario scripts, the
+packer, the release gate, the git hooks, and the two devbridge addons -- is
+original work of this project. The directory is the list; adding a file there
+adds it to this statement.
 
 Copyright (C) 2026 SkoobyDoo <skoobot.reclauded@proton.me>
 

@@ -1,5 +1,6 @@
--- SkooBot: Reclauded -- runtime.
+-- SkooBot: Reclauded -- keybinds, settings and the options tab.
 --
+-- Copyright (C) 2018-2020 SkoobyDoo (SkooBot 0.0.12, hooks/load.lua)
 -- Copyright (C) 2026 SkoobyDoo
 --
 -- This program is free software: you can redistribute it and/or modify it
@@ -7,193 +8,106 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- spotHostiles is adapted from the original SkooBot's
--- superload/mod/class/Player.lua, which follows ToME's own resting checks
--- (Nicolas Casalini, GPL-3.0). Kept close to the original deliberately: it
--- uses LOS rather than telepathy, so that having telepathy does not stop the
--- bot resting -- a subtlety that is easy to lose in a rewrite.
---
 -- ---------------------------------------------------------------------------
 --
--- WALKING SKELETON (T-071). The policy lives in data/decide.lua as a pure
--- function; this file is the part that has to touch the game, and it is kept
--- as small as that requires. See data/decide.lua for what is deliberately
--- absent.
+-- PORTED FROM SkooBot 0.0.12 (D-12). The bot itself lives in the Player
+-- superload and exposes the `skoobot_reclauded` runtime table; this file only
+-- wires keys and options to it. Every name here is distinct from the
+-- original's so the two addons can be enabled together: action types,
+-- the keybind file, the settings namespace and the options tab.
 
 local class = require "engine.class"
+local Textzone = require "engine.ui.Textzone"
 local KeyBind = require "engine.KeyBind"
-
--- The decision policy, loaded from the addon's own data mount. Kept out of
--- this file so it can be unit-tested with no game running (spec/decide_spec).
-local decide = dofile("/data-skoobot_reclauded/decide.lua")
-
--- How many game.turn units one activation may spend before handing back.
--- Turns, never seconds -- see data/decide.lua.
-local TURN_BUDGET = 500
-
-local bot = {
-    active       = false,
-    started_turn = 0,
-    actions      = 0,
-    last_reason  = nil,
-}
-_G.skoobot_reclauded = bot
-
-local function say(msg)
-    -- game.log for the player, print for te4_log.txt so the harness and any
-    -- bug report can both see the same decisions.
-    if game and game.log then game.log("#GOLD#[SkooBot] " .. msg) end
-    print("[SKOOBOT] " .. msg)
-end
-
---- Hostile actors the player can actually see.
---
--- LOS only, on purpose: telepathy would otherwise reveal something across the
--- level and stop the bot resting forever.
-local function spotHostiles(self)
-    local seen = {}
-    -- game.level is absent between levels and during world generation, and
-    -- this runs inside the engine's turn processing, where an index error is
-    -- not a stack trace in a console -- it is the player's game ending.
-    if not self or not self.x or not game or not game.level or not game.level.map then
-        return seen
-    end
-    core.fov.calc_circle(
-        self.x, self.y, game.level.map.w, game.level.map.h, self.sight or 10,
-        function(_, x, y) return game.level.map:opaque(x, y) end,
-        function(_, x, y)
-            local actor = game.level.map(x, y, game.level.map.ACTOR)
-            if actor and self:reactionToward(actor) < 0
-               and self:canSee(actor) and game.level.map.seens(x, y) then
-                seen[#seen + 1] = actor
-            end
-        end, nil)
-    return seen
-end
-
---- A snapshot of everything the policy is allowed to look at.
-local function snapshot(p)
-    return {
-        turn         = game.turn or 0,
-        started_turn = bot.started_turn,
-        budget       = TURN_BUDGET,
-        life         = p.life,
-        max_life     = p.max_life,
-        hostiles     = #spotHostiles(p),
-        resting      = p.resting and true or false,
-        running      = p.running and true or false,
-        wilderness   = (game.zone and game.zone.wilderness) and true or false,
-        dead         = p.dead and true or false,
-        can_explore  = true,   -- only autoExplore() itself really knows
-    }
-end
-
---- What the bot can see right now, as one line.
---
--- A bot that cannot say what it saw is guesswork to debug: "it stopped and I
--- do not know why" is most of a bug report about an autoplay addon, and the
--- reason is always in this table. Also what lets a harness scenario establish
--- its own preconditions instead of hoping for a convenient starting position.
-function bot.inspect()
-    local p = game and game.player
-    if not p then return "no player" end
-    local s = snapshot(p)
-    local action, reason = decide.decide(s)
-    return ("turn=%s hostiles=%d life=%s/%s resting=%s running=%s wilderness=%s "
-        .. "active=%s actions=%d would=%s (%s)"):format(
-        tostring(s.turn), s.hostiles, tostring(s.life), tostring(s.max_life),
-        tostring(s.resting), tostring(s.running), tostring(s.wilderness),
-        tostring(bot.active), bot.actions, tostring(action), tostring(reason))
-end
-
-function bot.stop(reason)
-    if not bot.active then return end
-    bot.active = false
-    bot.last_reason = reason
-    say("stopped after " .. bot.actions .. " action(s): " .. tostring(reason))
-end
-
-function bot.start()
-    if bot.active then bot.stop("toggled off by the player") return end
-    local p = game and game.player
-    if not p then return end
-    bot.active       = true
-    bot.started_turn = game.turn or 0
-    bot.actions      = 0
-    bot.last_reason  = nil
-    say("started at turn " .. bot.started_turn .. ", budget " .. TURN_BUDGET .. " turns")
-    bot.stepGuarded()
-end
-
---- bot.step() with the failure contained.
---
--- Both entry points go through this. The keybind path needs it as much as the
--- per-turn one: an error raised here would otherwise propagate out of the key
--- handler into the engine's dispatch, on a keypress the player made. A bot
--- that switches itself off is a bug report; a bot that takes the game with it
--- is a lost character.
-function bot.stepGuarded()
-    -- On success `result` is step()'s own return; on failure it is the error.
-    local ok, result = pcall(bot.step)
-    if not ok then
-        bot.active = false
-        bot.last_reason = "internal error: " .. tostring(result)
-        say("stopped by an internal error: " .. tostring(result))
-        return false
-    end
-    return result
-end
-
---- One decision, and the action that follows from it.
---
--- Returns true if the bot acted. Everything is wrapped by the caller: a Lua
--- error in here would otherwise land in the middle of the player's turn.
-function bot.step()
-    if not bot.active then return false end
-    local p = game and game.player
-    if not p then bot.stop("no player") return false end
-
-    local action, reason = decide.decide(snapshot(p))
-
-    if action == decide.CONTINUE then
-        return false
-    elseif action == decide.STOP then
-        bot.stop(reason)
-        return false
-    elseif action == decide.REST then
-        bot.actions = bot.actions + 1
-        say("resting (" .. reason .. ")")
-        p:restInit()
-        return true
-    elseif action == decide.EXPLORE then
-        bot.actions = bot.actions + 1
-        say("exploring (" .. reason .. ")")
-        -- autoExplore() is the only thing that knows whether anywhere is left
-        -- to go; a false return is the level being finished, not a fault.
-        if not p:autoExplore() then
-            bot.stop("auto-explore found nowhere left to go")
-            return false
-        end
-        return true
-    end
-
-    bot.stop("unknown action " .. tostring(action))
-    return false
-end
-
--- Called from the Player superload after each of the player's turns. Guarded,
--- because this runs inside the engine's turn processing and an error here
--- would take the game down with it rather than just switching the bot off.
-function bot.onPlayerAct()
-    if not bot.active then return end
-    bot.stepGuarded()
-end
+local GetQuantity = require "engine.dialogs.GetQuantity"
 
 class:bindHook("ToME:run", function()
     KeyBind:load("skoobot-reclauded")
     game.key:addBinds {
-        TOGGLE_SKOOBOT_RECLAUDED = function() bot.start() end,
-        STOP_SKOOBOT_RECLAUDED   = function() bot.stop("stopped by the player") end,
+        TOGGLE_SKOOBOT_RECLAUDED = function()
+            game.log("#GOLD#SkooBot: Reclauded toggle requested!")
+            skoobot_reclauded.start()
+        end,
+        STOP_SKOOBOT_RECLAUDED = function()
+            if skoobot_reclauded.active then
+                game.log("#GOLD#SkooBot: Reclauded stop requested!")
+                skoobot_reclauded.stop("#GOLD#SkooBot: Reclauded stopped by the player")
+            end
+        end,
+        RUNONCE_SKOOBOT_RECLAUDED = function()
+            game.log("#GOLD#SkooBot: Reclauded single run requested!")
+            skoobot_reclauded.runonce()
+        end,
+        ASK_SKOOBOT_RECLAUDED = function()
+            game.log("#GOLD#SkooBot: Reclauded query requested!")
+            skoobot_reclauded.query()
+        end,
+        MENU_SKOOBOT_RECLAUDED = function()
+            local d = require("mod.dialogs.skoobot_reclauded.Menu").new()
+            game.log("#GOLD#SkooBot: Reclauded menu requested!")
+            game:registerDialog(d)
+        end,
     }
-    print("[SKOOBOT] ready; Shift+F3 toggles")
+    print("[SKOOBOT] ready; Shift+F3 toggles, Shift+F7 opens the menu")
+end)
+
+dofile("/data-skoobot_reclauded/settings.lua")
+
+-- tab=function
+class:bindHook("GameOptions:tabs", function(self, data)
+    if not self.skoobot_reclauded_optioninit then
+        self.skoobot_reclauded_optioninit = true
+        data.tab("[SkooBot: Reclauded]", function() self.list = { skoobot_reclauded_options = true } end)
+    end
+end)
+
+local addonTitle = "SkooBot: Reclauded"
+local addonShort = "Reclauded"
+-- list=self.list, kind=kind
+class:bindHook("GameOptions:generateList", function(self, data)
+    if data.list.skoobot_reclauded_options then
+        local list = data.list
+        local settings = config.settings.tome.skoobot_reclauded
+
+        local function createNumericalOption(option, tabTitle, desc, minVal, maxVal, prompt)
+            minVal = minVal or 0
+            maxVal = maxVal or 1000000
+            local fct = function(item)
+                game:registerDialog(GetQuantity.new(prompt or tabTitle,
+                    "From " .. minVal .. " to " .. maxVal, settings[option] or minVal, maxVal,
+                    function(qty)
+                    settings[option] = qty
+                    game:saveSettings("tome.skoobot_reclauded." .. option,
+                        ("tome.skoobot_reclauded." .. option .. " = %s\n"):format(tostring(settings[option])))
+                    self.c_list:drawItem(item)
+                end))
+            end
+            local status = function()
+                return tostring(settings[option] or "-")
+            end
+
+            list[#list + 1] = {
+                zone = Textzone.new{width=self.c_desc.w, height=self.c_desc.h,
+                    text=string.toTString("#GOLD#" .. addonTitle .. "\n\n#WHITE#" .. desc .. "#WHITE#")},
+                name = string.toTString(("#GOLD##{bold}#[%s] %s#WHITE##{normal}#"):format(addonShort, tabTitle)),
+                status = status, fct = fct,
+            }
+        end
+
+        createNumericalOption("LOWHEALTH_RATIO", "Low Health Ratio",
+            "Bot pauses when under this life percent. Also will pause when losing half this " ..
+            "percent life in a single round.")
+        createNumericalOption("MAX_INDIVIDUAL_POWER", "Max enemy power level",
+            "Pauses the bot when an enemy with a power level over this amount is spotted.")
+        createNumericalOption("MAX_DIFF_POWER", "Maximum Individual Enemy Power",
+            "Pauses the bot when an enemy with a power level this much higher than yours is spotted.")
+        createNumericalOption("MAX_COMBINED_POWER", "Maximum Combined Enemy Power",
+            "Pauses the bot when the combined power level of visible enemies is over this amount.")
+        createNumericalOption("MAX_ENEMY_COUNT", "Maximum Enemy Count",
+            "Pauses the bot when this many enemies is spotted.")
+        createNumericalOption("ACTION_DELAY", "Action Delay",
+            "Bot will wait this many seconds between each action. THIS IS CURRENTLY A BIT BUGGY " ..
+            "AND THE BOT WILL ACT WHEN YOU PRESS BUTTONS OR MOVE YOUR MOUSE IN ADDITION TO " ..
+            "AUTOMATICALLY WITH THIS DELAY")
+    end
 end)
