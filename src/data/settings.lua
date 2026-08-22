@@ -22,6 +22,9 @@ config.settings.tome.skoobot_reclauded = config.settings.tome.skoobot_reclauded 
 local s = config.settings.tome.skoobot_reclauded
 
 if type(s.LOWHEALTH_RATIO)      == "nil" then s.LOWHEALTH_RATIO      = 0.5 end
+-- T-011: below this life fraction, damage taken while exploring hands back;
+-- above it, a scratch (a single poison tick) is ignored. Added over v1.
+if type(s.IGNORE_DAMAGE_HEALTH_RATIO) == "nil" then s.IGNORE_DAMAGE_HEALTH_RATIO = 0.75 end
 if type(s.MAX_INDIVIDUAL_POWER) == "nil" then s.MAX_INDIVIDUAL_POWER = 200 end
 if type(s.MAX_DIFF_POWER)       == "nil" then s.MAX_DIFF_POWER       = 10  end
 if type(s.MAX_COMBINED_POWER)   == "nil" then s.MAX_COMBINED_POWER   = 500 end

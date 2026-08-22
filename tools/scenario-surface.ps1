@@ -68,11 +68,19 @@ function bl.hostiles()
     end, nil)
   return n
 end
+function bl.onChangeLevel()
+  local p = game.player
+  return game.level.map:checkEntity(p.x, p.y, engine.Map.TERRAIN, "change_level") ~= nil
+end
 function bl.find(want)
   local p = game.player
   local n = bl.hostiles()
   for i = 1, 60 do
-    if (want == 0 and n == 0) or (want > 0 and n > 0) then break end
+    -- For the quiet case, also avoid level-change tiles: the bot correctly
+    -- hands back on one the instant it is toggled ("level change found"),
+    -- which would make the toggle look like it never activated.
+    local ok = (want == 0 and n == 0 and not bl.onChangeLevel()) or (want > 0 and n > 0)
+    if ok then break end
     p:teleportRandom(p.x, p.y, 60, 10)
     n = bl.hostiles()
   end
@@ -174,8 +182,8 @@ return "tab=" .. found .. " options=" .. #names .. ": " .. table.concat(names, "
 '@
     if ($op.Status -eq 'OK') {
         if ($op.Result -match '^ERR') { Finding 'BROKEN' "options tab: $($op.Result)" }
-        elseif ($op.Result -match 'options=6') { Finding 'OK' 'the [SkooBot: Reclauded] options tab lists its six settings' }
-        else { Finding 'CHANGED' "options tab present but not six entries: $($op.Result)" }
+        elseif ($op.Result -match 'options=7') { Finding 'OK' 'the [SkooBot: Reclauded] options tab lists its seven settings' }
+        else { Finding 'CHANGED' "options tab present but not seven entries: $($op.Result)" }
     }
 
     Write-Host ''

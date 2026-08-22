@@ -97,6 +97,9 @@ class:bindHook("GameOptions:generateList", function(self, data)
         createNumericalOption("LOWHEALTH_RATIO", "Low Health Ratio",
             "Bot pauses when under this life percent. Also will pause when losing half this " ..
             "percent life in a single round.")
+        createNumericalOption("IGNORE_DAMAGE_HEALTH_RATIO", "Ignore Damage Above Life Ratio",
+            "While exploring, the bot ignores damage as long as life stays above this fraction, " ..
+            "so a single poison tick no longer halts it. Below it, taking damage hands back.")
         createNumericalOption("MAX_INDIVIDUAL_POWER", "Max enemy power level",
             "Pauses the bot when an enemy with a power level over this amount is spotted.")
         createNumericalOption("MAX_DIFF_POWER", "Maximum Individual Enemy Power",

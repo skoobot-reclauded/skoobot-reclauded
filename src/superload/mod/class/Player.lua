@@ -596,14 +596,24 @@ end
 
 local function checkForDebuffs()
     local p = game.player
+    -- v1: these test `== 1`, but the effect attributes are additive counters,
+    -- not flags -- confused is even a 0-50 percentage (T-001). So a doubly
+    -- stunned or 30%-confused character reads as unafflicted. Kept as v1's `== 1`
+    -- for parity; the correct capability detection lands with the WARN/STOP/
+    -- IGNORE reconciliation in T-026, where the model-validity reasoning for
+    -- each (design-stop-conditions.md 2) decides its default.
     if checkStop(p, "DEBUFF_CONFUSED", p.confused == 1, "#RED#AI Stopped: Player is Confused!") then return true end
     if checkStop(p, "DEBUFF_DAZED",    p.dazed == 1,    "#RED#AI Stopped: Player is Dazed!")    then return true end
     if checkStop(p, "DEBUFF_STUNNED",  p.stunned == 1,  "#RED#AI Stopped: Player is Stunned!")  then return true end
     if checkStop(p, "DEBUFF_FROZEN",   p.frozen == 1,   "#RED#AI Stopped: Player is Frozen!")   then return true end
-    -- v1: `not p.lucid_dreamer == 1` parses as `(not p.lucid_dreamer) == 1`,
-    -- a boolean compared with a number, so this condition has never fired.
-    -- Reproduced literally; T-012 replaces it with the sleep capability check.
-    if checkStop(p, "DEBUFF_ASLEEP", p.sleep == 1 and ((not p.lucid_dreamer) == 1),
+    -- FIXED (T-012). v1 wrote `p.sleep == 1 and not p.lucid_dreamer == 1`, which
+    -- parses as `... and (not p.lucid_dreamer) == 1` -- a boolean compared with a
+    -- number, always false, so a sleeping bot never handed back ("when I get
+    -- asleep", #46). The capability form is the correct gate: sleep is a counter
+    -- and the Solipsist's lucid_dreamer sustain stacks 5-25+, never 1 (T-001), so
+    -- `~= 1` would have been wrong too. A Solipsist benefits from sleep and sets
+    -- this condition to IGNORE.
+    if checkStop(p, "DEBUFF_ASLEEP", p:attr("sleep") and not p:attr("lucid_dreamer"),
         "#RED#AI Stopped: Player is Asleep!") then return true end
     return false
 end
@@ -696,9 +706,14 @@ function skoobot_act(noAction)
             if #hostiles > 0 then
                 bot.state = STATE_FIGHT
                 return skoobot_act(true)
-            else
-                -- v1: any damage at all, a single poison tick included. T-011.
-                aiStop("#RED#AI stopped: took damage while exploring!")
+            elseif (game.player.life / game.player.max_life) <= cfg("IGNORE_DAMAGE_HEALTH_RATIO") then
+                -- FIXED (T-011). v1 stopped on ANY damage while exploring, so a
+                -- single poison tick halted the bot (lukesilveira). Hand back
+                -- only once life has actually fallen to the threshold; above it
+                -- a scratch is not worth a stop. mishander reached the same fix
+                -- from play (salvage item 1). Under T-020 this becomes a score
+                -- input rather than a standalone flag.
+                aiStop("#RED#AI stopped: took damage while exploring, now below the safe threshold!")
             end
         end
         if game.player.air < 75 then
@@ -707,8 +722,17 @@ function skoobot_act(noAction)
         end
         if game.level.map:checkEntity(game.player.x, game.player.y, engine.Map.TERRAIN, "change_level") then
             aiStop("#GOLD#AI stopping: level change found")
+        elseif game.player:attr("never_move") then
+            -- FIXED (T-012). v1 called auto-explore while unable to move, which
+            -- cannot make progress and spun -- the pin / dominate / entangle
+            -- freeze users reported (#46). "Can I move at all?" is one predicate
+            -- over every never_move source (16+ effects plus encumbrance), the
+            -- same attr the engine's own move() gates on, so it stays correct as
+            -- ToME adds effects -- unlike mishander's fork, which tested only
+            -- EFF_PINNED. The general liveness backstop is T-027; the framework
+            -- that folds this into the condition list is T-026.
+            aiStop("#RED#AI stopped: cannot move (pinned, held, or overloaded)")
         else
-            -- v1: explores while unable to move, and spins. T-012.
             SAI_beginExplore()
         end
         return
