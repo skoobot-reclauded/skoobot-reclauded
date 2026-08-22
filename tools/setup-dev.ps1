@@ -153,20 +153,58 @@ foreach ($s in $strays) { Note "STRAY   $($s.Name) -- not created by this script
 # --------------------------------------------------------------------------
 Write-Host ''
 Write-Host 'Settings'
-$resCfg  = Join-Path $SettingsDir 'resolution.cfg'
-$resWant = "window.size = '800x600 Windowed'"
+if (-not (Test-Path $SettingsDir)) { New-Item -ItemType Directory -Path $SettingsDir -Force | Out-Null }
+
+function Set-Cfg($file, $want) {
+    $path = Join-Path $SettingsDir $file
+    $current = $null
+    if (Test-Path $path) { $current = (Get-Content $path -Raw -ErrorAction Ignore) }
+    if ($current -and $current.Trim() -eq $want) { Note "ok      $file = $want"; return }
+    Set-Content -Path $path -Value $want -Encoding ascii
+    Note "wrote   $file = $want"
+}
+
+# resolution.cfg is NOT reverted by -Remove: the pre-harness value is recorded
+# nowhere, so restoring a guess is worse than leaving it, and it cannot affect
+# whether an addon loads.
 if ($Remove) {
     Note "kept    resolution.cfg (no recorded pre-harness value to restore)"
 } else {
-    if (-not (Test-Path $SettingsDir)) { New-Item -ItemType Directory -Path $SettingsDir -Force | Out-Null }
-    $current = $null
-    if (Test-Path $resCfg) { $current = (Get-Content $resCfg -Raw -ErrorAction Ignore) }
-    if ($current -and $current.Trim() -eq $resWant) {
-        Note "ok      resolution.cfg = $resWant"
-    } else {
-        Set-Content -Path $resCfg -Value $resWant -Encoding ascii
-        Note "wrote   resolution.cfg = $resWant"
-    }
+    Set-Cfg 'resolution.cfg' "window.size = '800x600 Windowed'"
+}
+
+# Connectivity IS reverted, because unlike the resolution we know what it was.
+#
+# The engine connects to profiles.te4.org at startup, reconnects to channels,
+# fetches news and measures latency. Turning that off removes a background
+# thread and tightens the normal launch from 5-10s to 5-7s. (--no-web does not
+# cover it: that is the embedded browser, not the profile thread.)
+#
+# Modest, and honestly less than first claimed. This was originally believed to
+# be the cause of the intermittent 90-166s launches, because the gaps in a
+# sampled slow launch all ended on `Server latency` lines. They did -- but that
+# thread emits periodically, so its lines land at the boundary of any long gap.
+# With connectivity fully disabled a 166s stall still happened, with no
+# `Server latency` lines in the log at all. The tail is the boot menu building
+# its demo level (see design-harness.md section 4) and this does not fix it.
+#
+# So the dev loop turns it off, and -Remove turns it back on.
+#
+# ---------------------------------------------------------------------------
+# RELEASE TESTING MUST RUN WITH CONNECTIVITY ENABLED.
+# ---------------------------------------------------------------------------
+# Everything measured with it off is measured in a configuration no player
+# uses. The online profile touches addon hash validation, achievements and
+# character upload, and an addon that misbehaves only when those are live
+# would pass every gate here. Before calling a build releasable, run
+# `-Remove` (or set disable_all_connectivity = false by hand) and repeat the
+# behaviour runs. Recorded against T-051 (#32), which owns the release gates.
+if ($Remove) {
+    Set-Cfg 'disable_all_connectivity.cfg' 'disable_all_connectivity = false'
+    Note "        ^ connectivity restored -- this is the configuration to do release testing in"
+} else {
+    Set-Cfg 'disable_all_connectivity.cfg' 'disable_all_connectivity = true'
+    Note "        ^ offline for speed; RELEASE testing must be re-run with this false (T-051)"
 }
 
 # --------------------------------------------------------------------------

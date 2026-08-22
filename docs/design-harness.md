@@ -214,19 +214,44 @@ runs from the packed archive, not that the game runs with no dev addons present 
 devbridge cannot contaminate the artifact, because `tools/pack.ps1` packs only `src/` and
 refuses any entry under `tools/`.
 
-- **Launch time is dominated by a network call, not by the game.** The engine connects to
-  `profiles.te4.org` on ports 2257/2258 at startup, reconnects to channels, fetches news and
-  measures latency. Sampling the log once a second during a slow launch shows the main thread
-  parked for **49 s, then 36 s, then 19 s**, each gap ending on a `Server latency` line. A
-  launch is ~7 s when that goes quickly and **90–166 s when it does not**, which is roughly
-  one launch in four to eight. Nothing about the addon, the junctions or the harness affects
-  it.
+- **Launch time has a long tail, and it is the main menu's demo level.** A launch is normally
+  **~6 s**, but roughly **one in eight takes 90–166 s**. Nothing about the addon, the
+  junctions or the harness affects it — measured with and without the product installed, and
+  the same tail appears either way.
 
-  `--no-web` does not prevent this — that disables the embedded browser, not the profile
-  thread. The switch that does is `disable_all_connectivity`, which is `false` in
-  `T-Engine/4.0/settings/disable_all_connectivity.cfg` on this machine. Setting it `true`
-  removes the variance, at the cost of the online profile, news and achievement sync. Worth
-  knowing before blaming a slow run on anything in this repo.
+  The log carries no timestamps, so sampling it once a second is what locates the time. Two
+  captured stalls, both ~166 s:
+
+  | | where the seconds went |
+  |---|---|
+  | dungeon demo | 15 s after `C Map seens texture`, **57 s** after `[RoomsLoader:init] loaded room`, then 13–18 s gaps between `Loading tile` lines |
+  | forest demo | 49 s, 36 s and 19 s gaps across the same phase |
+
+  So it is the boot module building its background demo level: procedural room generation,
+  then texture loading for whatever terrain it produced. Both are plausible sources of a long
+  tail here — generation with rejection/retry is naturally heavy-tailed, and this VM has **no
+  GPU**, so every `Loading tile` is a software texture upload. The exact split between the two
+  is not pinned down; what is established is that it is demo-level construction, it is
+  intermittent, and it is not ours.
+
+  **A correction worth keeping, because the mistake is easy to repeat.** The first diagnosis
+  blamed the te4.org profile connection: the gaps in the forest capture all ended on
+  `Server latency` lines, which looked conclusive. It was not. Those lines are emitted
+  periodically by a background thread, so they land at the boundary of *any* long gap.
+  Disabling connectivity entirely left a 166 s stall in place, with no `Server latency` lines
+  in the log at all. Periodic chatter is not evidence of causation — check that removing the
+  suspect removes the symptom.
+
+  Connectivity is disabled anyway (`tools/setup-dev.ps1`, `-Remove` restores it): it removes
+  the profile thread and tightens the fast case from 5–10 s to 5–7 s. It does **not** remove
+  the tail.
+
+  > **Release testing must be run with connectivity enabled.** Everything measured offline is
+  > measured in a configuration no player uses. The online profile touches addon hash
+  > validation, achievements and character upload, so an addon that misbehaves only when those
+  > are live would pass every gate here and fail for players. `tools/clean-build.ps1` prints
+  > which configuration it measured in on every run, and says so when it was offline. Owned by
+  > T-051 (#32), which defines the release gates.
 
 ### 4.1 Thirteen traps, each of which cost a debugging cycle
 
@@ -341,6 +366,7 @@ Nothing in the engine, module, or DLC archives is modified. The whole footprint 
 | Junction `game/addons/tome-skoobot-devbridge` → `tools/devbridge` | remove it |
 | Junction `game/addons/boot-skoobot-devbridge` → `tools/devbridge-boot` | remove it |
 | `T-Engine/4.0/settings/resolution.cfg` set to `800x600 Windowed` | one line, not reverted |
+| `T-Engine/4.0/settings/disable_all_connectivity.cfg` set to `true` | `setup-dev.ps1 -Remove` restores `false` |
 | `te4_log.txt`, `T-Engine/4.0/skoobot-bridge/`, `build/logs/` | artifacts, delete freely |
 
 **Three junctions, not two.** The devbridge pair is the channel; `tome-skoobot_reclauded` is
