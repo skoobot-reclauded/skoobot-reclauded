@@ -120,6 +120,8 @@ local DEFAULT_CONDITIONS = {
 
     {label="Dialog: LORE",              code="DIALOG_LORE",           stoptype="IGNORE"},
 
+    {label="Terrain: Glowing Chest",    code="TERRAIN_GLOWING_CHEST",  stoptype="WARN"},
+
     {label="Power Level: ENEMYCOUNT",   code="SCOUTER_ENEMYCOUNT",    stoptype="STOP"},
     {label="Power Level: BIGENEMY",     code="SCOUTER_BIGENEMY",      stoptype="STOP"},
     {label="Power Level: STRONGERENEMY",code="SCOUTER_STRONGERENEMY", stoptype="STOP"},
@@ -405,6 +407,32 @@ local function suffocatingAt(self, x, y)
     return air.suffocates(breathCaps(self), air_level, air_condition)
 end
 bot.suffocating = function() local p = game.player return suffocatingAt(p, p.x, p.y) end
+
+--- Is an unopened glowing chest in view? (T-013.)
+--
+-- v1 walked straight past them; the user asked the bot to STOP for one, so the
+-- player can decide whether to open it -- glowing chests can be guarded. A
+-- glowing chest is a terrain grid (data/general/events/glowing-chest.lua) with
+-- `special = true`, a name containing "chest", and `chest_opened` set once
+-- opened, so detection is exact and needs no name-string heuristics beyond
+-- that. This only STOPS; walking the bot TO the chest is a scored objective
+-- for T-020, deliberately not done here (salvage-mishander.md item 9).
+local function glowingChestInView(self)
+    if not self.x then return false end
+    local map = game.level.map
+    local found = false
+    core.fov.calc_circle(self.x, self.y, map.w, map.h, self.sight or 10,
+        function(_, x, y) return map:opaque(x, y) end,
+        function(_, x, y)
+            if found or not map.seens(x, y) then return end
+            local terrain = map(x, y, map.TERRAIN)
+            if terrain and terrain.special and not terrain.chest_opened
+               and terrain.name and tostring(terrain.name):lower():find("chest", 1, true) then
+                found = true
+            end
+        end, nil)
+    return found
+end
 
 --- A path to the nearest tile the actor can breathe on AND actually reach.
 --
@@ -754,6 +782,15 @@ function skoobot_act(noAction)
            and (game.player.air / game.player.max_air) < 0.75 then
             bot.state = STATE_REST
             return skoobot_act(true)
+        end
+        -- FIXED (T-013). Hand back when a glowing chest is in view so the player
+        -- can decide whether to open it (they can be guarded). WARN by default:
+        -- it stops once and re-arms when the chest leaves view, so a player who
+        -- re-toggles past it has chosen to skip it. A Solipsist-style player who
+        -- never wants to be bothered sets this to IGNORE.
+        if checkStop(game.player, "TERRAIN_GLOWING_CHEST", glowingChestInView(game.player),
+            "#GOLD#AI stopped: a glowing chest is nearby -- open it yourself, they can be guarded.") then
+            return
         end
         if game.level.map:checkEntity(game.player.x, game.player.y, engine.Map.TERRAIN, "change_level") then
             aiStop("#GOLD#AI stopping: level change found")
