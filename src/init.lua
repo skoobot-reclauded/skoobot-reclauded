@@ -32,7 +32,7 @@ tags = { 'bot', 'ai', 'auto', 'autoplay', 'skoobot' }
 -- Flip each one on in the same commit that gives its tree real content.
 -- spec/manifest_spec.lua enforces that: a flag may be true only if the
 -- matching directory holds a file that is not .gitkeep.
-hooks = false
-overload = false
-superload = false
-data = false
+hooks = true
+overload = true
+superload = true
+data = true
