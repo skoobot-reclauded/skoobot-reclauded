@@ -23,6 +23,10 @@
 -- spec/keys_spec.lua covers it without a running game. Mouse and gesture
 -- bindings are not expanded; describe() returns nil for them and the caller
 -- falls back to the engine's formatter.
+--
+-- The second half, collisions() and its two formatters, answers #50: which of
+-- this addon's actions share a key with something else. Same discipline --
+-- the engine's bind tables come in as plain data and nothing is rebound.
 
 local M = {}
 
@@ -68,6 +72,93 @@ function M.describe(ks, symname)
     end
     parts[#parts + 1] = name
     return table.concat(parts, "+")
+end
+
+-- ---------------------------------------------------------------------------
+-- Collisions (#50)
+--
+-- Every addon's defineAction lands in the one class-level table,
+-- KeyBind.binds_def, and the player's remaps in KeyBind.binds_remap; a key
+-- handler's own `binds` is rebuilt from those two by KeyBind:bindKeys
+-- (engine/KeyBind.lua:127-136): each action is bound to its remap if there
+-- is one, else to its default. When two actions land on one key string,
+-- KeyBind:receiveKey (:228-233) fires the first one pairs() happens to yield
+-- that has a handler, and returns -- the other never sees the key, and
+-- nothing says so. These functions find that state from the two tables,
+-- passed in as plain data, so the check runs under busted as well as in the
+-- game. They only read: the addon never rebinds anything (advisory only).
+-- ---------------------------------------------------------------------------
+
+-- What an action is bound to, the way bindKeys() decides it.
+local function boundKeys(defs, remap, t)
+    local def = defs[t]
+    if not def then return {} end
+    return remap[t] or def.default or {}
+end
+
+--- The addon's actions that share a key string with another action.
+-- @param defs   KeyBind.binds_def: type -> { default = {ks, ...}, name = ... }
+-- @param remap  KeyBind.binds_remap: type -> {ks, ...}, replacing the default
+--               for that type; nil when there are no remaps
+-- @param ours   the addon's action types, in the order to report them
+-- @return a list, possibly empty, of { type=, keystring=, others={type, ...} }:
+--         one entry per (our action, key string) pair that another action is
+--         also bound to, others sorted by name. An action with no binding,
+--         or one that is not defined at all, collides with nothing.
+function M.collisions(defs, remap, ours)
+    remap = remap or {}
+    local byKey = {}
+    for t in pairs(defs) do
+        for _, ks in ipairs(boundKeys(defs, remap, t)) do
+            byKey[ks] = byKey[ks] or {}
+            byKey[ks][t] = true
+        end
+    end
+
+    local out = {}
+    for _, t in ipairs(ours) do
+        local seen = {}
+        for _, ks in ipairs(boundKeys(defs, remap, t)) do
+            if not seen[ks] then
+                seen[ks] = true
+                local others = {}
+                for o in pairs(byKey[ks] or {}) do
+                    if o ~= t then others[#others + 1] = o end
+                end
+                if #others > 0 then
+                    table.sort(others)
+                    out[#out + 1] = { type = t, keystring = ks, others = others }
+                end
+            end
+        end
+    end
+    return out
+end
+
+--- The menu's status line for `n` collisions: "Keybinds: OK", or
+--- "Keybinds: N collision(s) (see log)".
+function M.summary(n)
+    n = tonumber(n) or 0
+    if n <= 0 then return "Keybinds: OK" end
+    return ("Keybinds: %d collision%s (see log)"):format(n, n == 1 and "" or "s")
+end
+
+--- One collision as the player reads it: the key, then every action bound
+--- to it with ours first -- `Shift+F3: "Toggle SkooBot: Reclauded" and
+--- "Switch control to character 3"`.
+-- @param c       an entry from collisions()
+-- @param keyname the key, rendered (describe(), or the engine's formatter)
+-- @param nameOf  function(type) -> the action's display name
+function M.collisionText(c, keyname, nameOf)
+    local names = { '"' .. tostring(nameOf(c.type)) .. '"' }
+    for _, o in ipairs(c.others) do names[#names + 1] = '"' .. tostring(nameOf(o)) .. '"' end
+    local list
+    if #names == 2 then
+        list = names[1] .. " and " .. names[2]
+    else
+        list = table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names]
+    end
+    return tostring(keyname) .. ": " .. list
 end
 
 return M

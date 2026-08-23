@@ -18,6 +18,7 @@ require "engine.ui.Dialog"
 local List = require "engine.ui.List"
 
 local PickOneDialog = require "mod.dialogs.skoobot_reclauded.PickOneDialog"
+local keys = dofile("/data-skoobot_reclauded/keys.lua")
 
 module(..., package.seeall, class.inherit(engine.ui.Dialog))
 
@@ -32,7 +33,16 @@ function _M:init()
 	-- from a safe over-estimate of the row height, so the dialog never exceeds the
 	-- screen whatever the font; the full list stays reachable by wheel and arrows.
 	local maxRows = math.max(6, math.floor(game.h * 0.8 / 25))
-	local list = List.new{width=400, nb_items=math.min(#self.list, maxRows),
+	-- #50: a collision row names two actions and a key, which can run past
+	-- the 400 the action rows fit in; widen to the longest row, within the
+	-- screen, rather than let List clip it.
+	local width = 400
+	for _, item in ipairs(self.list) do
+		local w = self.font:size(tostring(item.name):removeColorCodes())
+		if w + 16 > width then width = w + 16 end
+	end
+	width = math.min(width, math.floor(game.w * 0.9))
+	local list = List.new{width=width, nb_items=math.min(#self.list, maxRows),
 		scrollbar=#self.list > maxRows, list=self.list, fct=function(item) self:use(item) end}
 
 	self:loadUI{
@@ -83,11 +93,33 @@ local menuActions = {
 }
 
 function _M:use(item)
-	if not item then return end
+	-- A status row (#50) is information, not a choice: selecting it does nothing
+	-- and the menu stays open.
+	if not item or item.info then return end
 	game:unregisterDialog(self)
 	print("[SKOOBOT] [Menu] option chosen: '" .. item.name .. "' with order code: " .. item.order)
 
 	if menuActions[item.order] then menuActions[item.order]() end
+end
+
+-- #50: the keybind status, recomputed on every open so a rebind made
+-- mid-game shows at once. One line -- "Keybinds: OK", or how many
+-- collisions -- then one line per collision naming the key and both
+-- actions. Orange when there is something to look at, grey when not. The
+-- check lives on the runtime table (hooks/load.lua).
+local OK_COLOUR        = {160, 160, 160}
+local COLLISION_COLOUR = {255, 153, 0}
+
+local function keybindRows()
+	local kb = skoobot_reclauded.keybinds
+	if not kb then return {} end
+	local list = kb.collisions()
+	local colour = #list == 0 and OK_COLOUR or COLLISION_COLOUR
+	local rows = { {info=true, name=keys.summary(#list), color=colour} }
+	for _, c in ipairs(list) do
+		rows[#rows + 1] = {info=true, name=c.text, color=colour}
+	end
+	return rows
 end
 
 function _M:generateList()
@@ -96,6 +128,9 @@ function _M:generateList()
 		{2,   name="Activate/Deactivate Bot Stop Conditions",  order="botstopconditions"},
 		{999, name="Cancel",                                    order="donothing"},
 	}
+	-- The status rows go last, so the choices keep their letters and their
+	-- positions whatever the keybind state.
+	for _, row in ipairs(keybindRows()) do raw[#raw + 1] = row end
 
 	-- Build a fresh display list rather than prefixing `raw` in place. This
 	-- menu builds its own list each open so it never accumulated, but the same
@@ -103,13 +138,19 @@ function _M:generateList()
 	-- (see PickOneDialog, T-016).
 	local list = {}
 	local chars = {}
+	local choices = 0
 	for i, v in ipairs(raw) do
-		local ch = self:makeKeyChar(i)
 		local item = {}
 		for k, val in pairs(v) do item[k] = val end
-		item.name = ch .. ") " .. v.name
+		if v.info then
+			item.name = "   " .. v.name
+		else
+			choices = choices + 1
+			local ch = self:makeKeyChar(choices)
+			item.name = ch .. ") " .. v.name
+			chars[ch] = i
+		end
 		list[i] = item
-		chars[ch] = i
 	end
 	list.chars = chars
 

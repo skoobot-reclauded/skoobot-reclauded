@@ -21,6 +21,89 @@ local Textzone = require "engine.ui.Textzone"
 local KeyBind = require "engine.KeyBind"
 local GetQuantity = require "engine.dialogs.GetQuantity"
 
+-- ---------------------------------------------------------------------------
+-- Keybind collisions (#50)
+--
+-- Another addon, or the player's own remap, can put a second action on one of
+-- this addon's keys. The engine then fires whichever of the two pairs()
+-- yields first (engine/KeyBind.lua:228-233) and says nothing. This detects
+-- that state and tells the player; it never rebinds anything.
+--
+-- Where the check can run is decided by three engine facts, found in the
+-- 1.7.6 source rather than assumed:
+--   * every addon's defineAction lands in the one class-level table,
+--     KeyBind.binds_def, and every remap in KeyBind.binds_remap -- so the
+--     check reads those two, never game.key.binds, which is built once in
+--     Game:init/loaded and is stale until UserChat's bindKeys() after run();
+--   * ToME:run hooks fire in addon weight order, so an addon that loads its
+--     keybinds in its own ToME:run hook -- the original SkooBot does, at the
+--     same weight as this one -- may not have done so when ours runs. All
+--     of them have by ToME:runDone;
+--   * game.log is a no-op (engine/Game.lua:56) until uiset:activate() inside
+--     runReal, so a message-log line from ToME:run is silently dropped.
+-- Hence the notice is raised from ToME:runDone, and the menu's status line
+-- recomputes on every open, so a rebind made mid-game shows at once.
+-- ---------------------------------------------------------------------------
+
+local keys = dofile("/data-skoobot_reclauded/keys.lua")
+
+-- This addon's actions, in the keybind file's order: the order collisions
+-- are reported in.
+local ACTIONS = {
+    "TOGGLE_SKOOBOT_RECLAUDED", "STOP_SKOOBOT_RECLAUDED", "RUNONCE_SKOOBOT_RECLAUDED",
+    "ASK_SKOOBOT_RECLAUDED", "MENU_SKOOBOT_RECLAUDED",
+}
+
+-- A key string as the player reads it, rendered the way keyFor() does (#57).
+local function describeKey(ks)
+    local function symname(sym)
+        local code = tonumber(sym) or KeyBind[sym]
+        if not code or not core.key.symName then return nil end
+        return core.key.symName(code)
+    end
+    return keys.describe(ks, symname)
+        or (game.key and game.key:formatKeyString(ks))
+        or tostring(ks)
+end
+
+local function actionName(t)
+    local def = KeyBind.binds_def[t]
+    return def and def.name or t
+end
+
+--- Every collision between one of this addon's actions and another bound
+--- action, as of now. Each entry is keys.collisions()'s {type, keystring,
+--- others} plus `key` (rendered) and `text` (the one-line wording).
+local function keyCollisions()
+    local list = keys.collisions(KeyBind.binds_def, KeyBind.binds_remap, ACTIONS)
+    for _, c in ipairs(list) do
+        c.key = describeKey(c.keystring)
+        c.text = keys.collisionText(c, c.key, actionName)
+    end
+    return list
+end
+
+--- Announce each collision once per game session: one [SKOOBOT] line in the
+--- engine log and one line in the message log. Returns how many were new.
+local announced = {}
+local function keyCollisionNotice()
+    local fresh = 0
+    for _, c in ipairs(keyCollisions()) do
+        local sig = c.type .. "|" .. c.keystring .. "|" .. table.concat(c.others, ",")
+        if not announced[sig] then
+            announced[sig] = true
+            fresh = fresh + 1
+            print("[SKOOBOT] [Keybinds] collision: " .. c.text
+                .. " (" .. c.type .. " and " .. table.concat(c.others, ", ") .. ")")
+            -- As an argument, never as the format string: an action name may
+            -- carry a '%'.
+            game.log("%s", "#ORANGE##{bold}#" .. skoobot_reclauded.notice.PREFIX .. "#{normal}# " .. c.text
+                .. " -- only one of them will answer that key. Change either under Escape > Key Bindings.")
+        end
+    end
+    return fresh
+end
+
 class:bindHook("ToME:run", function()
     KeyBind:load("skoobot-reclauded")
     game.key:addBinds {
@@ -54,6 +137,21 @@ class:bindHook("ToME:run", function()
     local bot = skoobot_reclauded
     print("[SKOOBOT] ready; " .. bot.keyFor("TOGGLE_SKOOBOT_RECLAUDED") .. " toggles, "
         .. bot.keyFor("MENU_SKOOBOT_RECLAUDED") .. " opens the menu")
+
+    -- #50: the menu and the harness read collisions through the runtime
+    -- table. rawset, because .luacheckrc declares `skoobot_reclauded`
+    -- read-only so its name can never be rebound; the table itself has no
+    -- metatable, so this is an ordinary field write.
+    rawset(bot, "keybinds", { collisions = keyCollisions, notice = keyCollisionNotice })
+end)
+
+-- After every addon's ToME:run hook and after uiset:activate(): the bind
+-- tables are complete and the message log is live (see the note above).
+class:bindHook("ToME:runDone", function()
+    local list = keyCollisions()
+    print(("[SKOOBOT] [Keybinds] checked %d actions: %s"):format(#ACTIONS,
+        #list == 0 and "no collisions" or (#list .. " collision(s)")))
+    keyCollisionNotice()
 end)
 
 dofile("/data-skoobot_reclauded/settings.lua")
