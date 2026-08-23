@@ -66,10 +66,11 @@ This addon is a derivative work. Its lineage, oldest first:
 Development tooling
 -------------------
 
-Everything under `tools/` -- the PowerShell harness and scenario scripts, the
-packer, the release gate, the git hooks, and the two devbridge addons -- is
-original work of this project. The directory is the list; adding a file there
-adds it to this statement.
+Everything under `tools/` -- the PowerShell harness with its lease, setup,
+scenario and self-test scripts, the packer, the release gate, the git hooks,
+and the two devbridge addons -- is original work of this project. The directory
+is the list, not this sentence: adding a file there adds it to this statement
+without any edit here.
 
 Copyright (C) 2026 SkoobyDoo <skoobot.reclauded@proton.me>
 

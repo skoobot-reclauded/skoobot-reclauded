@@ -28,7 +28,7 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
    [docs/github-workflow.md](docs/github-workflow.md) §2.1.
 2. **Never run `gh auth login`.** `gh` is logged out on purpose. Automated work authenticates
    as the machine account `skoobot-reclauded-bot` via a token read from the vault, never as
-   the human owner. See §2.2.
+   the human owner. See [docs/github-workflow.md](docs/github-workflow.md) §2.2.
 3. **Never print a credential** into a log, a commit, a file, or the conversation. Verify by
    using the value, or by its length or fingerprint.
 4. **`tools/` must never ship.** The devbridge executes arbitrary Lua from disk by design.
