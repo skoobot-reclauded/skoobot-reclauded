@@ -876,9 +876,23 @@ end
 -- Checks
 -------------------------------------------------------------------------------
 
+--- The player's own power level as the stop conditions compare it (#62,
+--- salvage-mishander.md item 3): the heuristic's figure scaled by the
+--- fraction of life left, so a character at half life reads as half as
+--- strong. Linear, as mishander wrote it, and probably not right: a
+--- character at 51% life is worse off than half-strength because it has
+--- fewer turns of margin. The curve is #11's to choose, with the score it
+--- feeds; this only makes the comparison look at life at all. The figure
+--- v1 compared -- and the tooltip still shows -- ignored life entirely.
+local function ownPowerLevel(p)
+    local fraction = (p.max_life and p.max_life > 0) and (p.life / p.max_life) or 1
+    return power.level(p, p.global_speed) * fraction
+end
+
 local function checkPowerLevel()
-    local myPowerLevel = power.level(game.player, game.player.global_speed)
     local p = game.player
+    local myPowerLevel = ownPowerLevel(p)
+    local mine = ("%.1f"):format(myPowerLevel)
     if checkStop(p, "SCOUTER_BIGENEMY",
         bot.loop.maxVisibleEnemyPower > cfg("MAX_INDIVIDUAL_POWER"),
         "an enemy's power level, " .. bot.loop.maxVisibleEnemyPower .. ", is above MAX_INDIVIDUAL_POWER") then
@@ -887,7 +901,7 @@ local function checkPowerLevel()
     if checkStop(p, "SCOUTER_STRONGERENEMY",
         bot.loop.maxVisibleEnemyPower > myPowerLevel + cfg("MAX_DIFF_POWER"),
         "an enemy's power level, " .. bot.loop.maxVisibleEnemyPower
-            .. ", is more than MAX_DIFF_POWER above yours (" .. myPowerLevel .. ")") then
+            .. ", is more than MAX_DIFF_POWER above yours (" .. mine .. " at current life)") then
         return true
     end
     if checkStop(p, "SCOUTER_CROWDPOWER",
