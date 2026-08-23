@@ -452,13 +452,105 @@ and `-Remove` is exactly the inverse T-035 needs.
 | `tools/devbridge/` | tome tier: pump, injection, interference detection |
 | `tools/devbridge-boot/` | boot tier: pump and injection at the main menu |
 | `tools/setup-dev.ps1` | creates/removes the three junctions and `resolution.cfg`; refuses under another host's lease |
-| `tools/harness.ps1` | `Start-Game`, `Load-Save`, `Invoke-Bridge`, `Stop-Game`, `Wait-LogLine`, `Show-LoadDiagnostics` |
+| `tools/harness.ps1` | `Start-Game`, `Load-Save`, `Invoke-Bridge`, `Stop-Game`, `Wait-LogLine`, `Show-LoadDiagnostics`; the assertions `Assert-Result`, `Assert-Turns`, and `Write-ScenarioResult` (§7) |
 | `tools/harness-lease.ps1` | whose the game is: the lease, and which checkout the junctions point at (§4.1) |
 | `tools/smoke-test.ps1` | proves the loop end to end |
 | `tools/test-unfocused.ps1` | proves the pump survives a minimised window |
 | `tools/test-relaunch.ps1` | proves a relaunch cannot be satisfied by the previous run's log |
 | `tools/test-occupancy.ps1` | proves one live host owns the game and a dead one is taken over |
-| `tools/new-character.ps1` | creates and saves a character with no human input |
+| `tools/new-character.ps1` | creates and saves a character with no human input; `-Class`/`-Race` make a fixture (§7) |
+| `tools/scenario-*.ps1` | the scenario library (#4): one complaint or one fix each, exit 0 pass · 1 fail · 2 tainted · 3 inconclusive |
+| `tools/scenario-t010-marked-target.ps1` | the #5 repro #4 deferred: a Combat talent the game refuses (Rockswallow, unmarked target) falls through to the next priority in real combat, on the fixture |
+| `tools/run-scenarios.ps1` | runs the library in sequence, one child process per scenario, one JSON line per run under `build/results/`, re-runs a tainted one once, prints the table (§7) |
+| `tools/soak.ps1` | the unattended long run (#61): the bot on the fixture with a counted resume policy, a stop histogram and a JSON summary (§7) |
+| save `fixture-berserker` | the fixture: a Cornac Berserker made by `new-character.ps1 -Class Berserker`, on disk as `save/fixture_berserker/` (§7) |
 
-Character creation drives the Birther's own `randomBirth()`, so no descriptor knowledge is
-hardcoded here and nothing breaks when ToME adds a class.
+Character creation drives the Birther's own `randomBirth()` by default, so no descriptor
+knowledge is hardcoded here and nothing breaks when ToME adds a class. A fixture is made the
+same way with the choice forced: `-Class` and `-Race` are resolved against the Birther's own
+`all_races`/`all_classes` trees and selected through `raceUse()`/`classUse()`, which is what a
+click calls, so a locked or disallowed choice fails loudly instead of producing a different
+character. Either way birth is then *finished* through the dialogs' own `EXIT` binds — the
+birth level-up dialog with nothing allocated, then the welcome text — because the rest of birth
+(the starting quest, `onBirth`, `creating_player = false`; mod/class/Game.lua:322-377) runs from
+those callbacks. Saving under the open dialogs, as the first version of the script did, worked
+only because `creating_player` is not a saved field; the quest was simply never granted.
+
+---
+
+## 7. Fixtures and results
+
+**Fixtures are saves with a known character.** The `harness` save is a random-class character
+(it rolled a Halfling Rogue, 2026-08-21 local time) shared by every scenario that does not
+care what it is, and it is never regenerated casually, since every lane relies on it; a scenario that
+needs a particular talent set names a fixture instead. Fixtures are named `fixture-<subclass>`
+and created by `tools/new-character.ps1 -Name fixture-<subclass> -Class <Subclass>`, with the
+race left to the Birther's default (Human / Cornac) unless the scenario needs otherwise. The
+first and so far only one is **`fixture-berserker`**: a melee class with no ranged or
+marked-target talent of its own, chosen so that a scenario which needs such a talent learns it
+explicitly (`p:learnTalent(tid, true, 1)`) and knows it is the only one — that is what
+`scenario-t010-marked-target.ps1` does with Rockswallow. One trap, now handled in
+`Get-SaveDirName`: the engine stores a save under `name:gsub("[^a-zA-Z0-9_-.]", "_"):lower()`
+(engine/Savefile.lua:46), and in a Lua set `_-.` is an empty range, so the hyphen is replaced
+too — `fixture-berserker` loads by that name and lives in `save/fixture_berserker/`.
+A fixture is regenerated with the same command when the addon set changes (§4), and is never
+written by a scenario: nothing a scenario learns, equips or configures is saved.
+
+**One JSON line per run, under `build/results/`.** `run-scenarios.ps1` runs every
+`tools/scenario-*.ps1` as its own `powershell -ExecutionPolicy Bypass -File` child — the unit
+the lease works at (§4.1), so two sessions interleave at scenario granularity — and appends
+`{scenario, status, exit, seconds, tainted, attempts, summary, lines[], when}` to
+`build/results/<yyyy-MM-dd>.jsonl` through `Write-ScenarioResult`. The file is append-only: a
+re-run is a second line with `attempts=2`, never an edit of the first, so the day's file is the
+day's history. `build/` is gitignored, so nothing here reaches the repository. Two scenarios are
+excluded by default and the runner says so: `scenario-baseline-v1` needs the original SkooBot
+0.0.12 installed and its own save, and `scenario-walking-skeleton` is superseded by the
+per-issue scenarios. Before each scenario the runner runs `setup-dev.ps1` from its own checkout,
+so the junctions point at the tree under test even when another worktree ran last; if the game
+is another live host's it waits and retries rather than recording a failure that is nobody's.
+
+**Tainted is not OK, and is re-run once.** A scenario that exits 2 was touched by a human
+mid-run (§3): its result is void, so the runner runs it again, once, and records both lines.
+A second taint stays `TAINTED` — at that point the machine is in use and the answer is to run
+later, not to keep trying. `-NoRetryOnTaint` records the first taint and moves on. An exit 3,
+`INCONCLUSIVE`, is a scenario that could not build the situation it wanted to measure: it is
+listed as such, and it is neither a pass nor a product failure; the runner's own exit code is 1
+only for `FAIL`, `CRASHED`, `TIMEOUT` or a game that stayed `BUSY`.
+
+**The soak's resume policy is a measuring device, never product behaviour.** `soak.ps1` (#61)
+runs the bot on the fixture for `-MaxMinutes` (or to `-MaxLevel`, `-MaxTurns`, death, or
+stuck) and counts what it meets. The bot stops on purpose and often — that is its design
+(design-stop-conditions.md) — so a run that ended at the first stop would measure nothing; a
+small policy restarts it, and **every restart is counted and reported** so a number in the
+summary can be read for what it is. The policy: (a) a dialog is open → close it through its own
+`EXIT` bind (the level-up dialog closes with nothing allocated; the death dialog is never
+touched); one with `ACCEPT` but no `EXIT` gets `ACCEPT` (`accept-dialog`); a `Chat` has no binds
+at all and cannot be escaped — the Trollmire 3 arrival opens one — so its *first* answer is given
+through the dialog's own `use()`, the method typing the answer's letter calls, and the answer's
+text is reported (`answer-chat`); (b) "standing on a level change" → stairs down or into another non-wilderness zone:
+the game's own `CHANGE_LEVEL` bind, once; stairs up or into the wilderness: one real move off the
+tile, because the bot cannot run in the wilderness and up is not progress; (c) the same reason
+five times in a row with no turn taken → the `REST` bind once; if it recurs, up to three real
+moves away, once, to a tile with no vault door beside it — the engine's own auto-explore
+re-targets a vault door whenever the player stands *next* to it, diagonals included
+(PlayerExplore.lua:1861), so a bot restarted where it handed back at the door prompt walks into
+the same prompt forever, and a single step onto the door's other neighbour changes nothing; if
+it still recurs, `STUCK <reason>` ends the run; (d) the player is dead → record the killer
+(`game.player.killedBy`, set by `onPartyDeath`; there is no `died_from` in 1.7.6) and end;
+(e) anything else → `skoobot_reclauded.start()` again. Nothing in it spends a point, writes a
+stat or moves the player except through the game's own binds and a few ordinary moves. It
+fills the fixture's Combat/Sustain/Recovery rules from what the character knows
+(`-NoAutoRules` to skip), since a fresh fixture has none and could not fight — a player would
+do that from the talent screen, and the crude rule set is part of what is measured. The
+player's own stop-condition knobs can be set for the run (`-Conditions
+"SCOUTER_STRONGERENEMY=WARN,…"`, through the product's conditions API, recorded in the
+summary): the power-level conditions are `STOP` by default, and a `STOP` whose cause stays in
+view stops every restart on the spot, by design, so a default run ends `STUCK` at the first
+enemy above `MAX_DIFF_POWER` — which is a measurement, not a fault. The game autosaves on a
+zone change under `game.save_name`, so the soak re-points that at `soak-scratch` right after
+loading and the fixture is never overwritten. The output is a JSON summary — levels, turns,
+wall-clock, deaths and killer, the stop histogram sorted by count, the resumes by action, the
+Lua errors the engine logged, the conditions set — plus a markdown twin and the same table
+printed. **None of this is how the product should behave**: a player who wants the bot to walk
+through stops has the WARN/STOP/IGNORE policy for that, and anything the soak's histogram says
+is worth changing is changed in the product under its own issue, with a scenario.
