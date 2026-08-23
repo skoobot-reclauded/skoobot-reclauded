@@ -238,12 +238,37 @@ Three honest options, in increasing cost:
 
 1. **Stop and let the player play it.** What v1 does. Costs nothing, always correct, gives up
    automation exactly where automation is hardest. This stays the default.
-2. **Per-talent suppression flag.** Since #56 each rule is an entry table in an ordered
-   section (`data/rules.lua`), and extra fields on an entry survive every move; a flag —
-   *"hold while impaired"* — lets the player encode "don't waste Execution while stunned"
-   declaratively. Consistent with the existing philosophy of pushing
-   irreducible judgement to the player rather than guessing. Only useful to players who set
-   stun to `WARN`/`IGNORE`, so it is a refinement, not a replacement.
+2. **Per-entry hold flag — built (#15, 2026-08-23).** Since #56 each rule is an entry table in
+   an ordered section (`data/rules.lua`), each placement its own table, and extra fields on an
+   entry survive every move; the flag is one such field, `hold = true`, on a **Combat**
+   placement only, and needed no migration. What was built, and where it stops short of the
+   paragraph above:
+   - **Toggle.** In the talent screen, Space on a Combat row, or *Hold while impaired* in the
+     row's action menu. The row shows `, held` in its Kind column and the pane carries the
+     flag's prose (`rules.HOLD_DESCRIPTION`). An add or a move into another section drops the
+     flag there; it belongs to the Combat placement. Both entry kinds take it — a talent, an
+     item, or a flee action (#59).
+   - **Read.** `getCombatRotation()` in the act loop leaves a held entry out while the
+     character is **impaired** — `attr("stunned")`, `attr("dazed")`, `attr("confused")` or
+     `attr("frozen")`, the capability counters, never `== 1` — so the rotation falls through to
+     the next entry exactly as it does for a talent on cooldown. Only Combat reads it; the
+     Damage Prevention and Recovery triggers do not.
+   - **Not "one turn of stun left".** The paragraph above describes a tempo decision keyed on
+     the *remaining* duration. The built form is the simple one: any impairment holds. It errs
+     toward holding — a held hit waits for the whole stun rather than firing on its last turn
+     — because reading remaining durations per effect is the lookahead this section says a
+     heuristic should not pretend to have. The remaining-duration reading is filed as its own
+     issue (a refinement on top of this flag, after the condition framework #12 gives it the
+     effect list), not carried here as a to-do.
+   - **Who it is for.** Only a player who has set `DEBUFF_STUNNED` (or DAZED / CONFUSED /
+     FROZEN) to `WARN` or `IGNORE` ever sees it act: at `STOP` the bot has handed back before
+     the rotation runs. The flag's prose says so. It is a refinement of option 1, not a
+     replacement, and the default stop is untouched.
+   - **Verified** by `spec/rules_spec.lua` (the flag survives normalize, a v1 migration, a
+     reposition, a shift, a move out and back, and lands on its own table on an add) and
+     `tools/scenario-hold.ps1` (on the fixture: a held talent first and an unheld second;
+     stunned with the stop at `IGNORE`, the bot would use the second; the stun gone, the
+     first).
 3. **Effectiveness-aware scoring.** T-020 territory, and genuinely hard: it needs expected
    value over remaining effect duration. Not a v0.1 goal, and possibly never worth it.
 
