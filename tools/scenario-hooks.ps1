@@ -2,14 +2,15 @@
     #14: the superload surface, in the game.
 
     spec/surface_spec.lua holds the source to its shape: one superload file,
-    two one-line wrappers, nothing added to either class, the tooltip line
+    ONE one-line wrapper, nothing added to either class, the tooltip line
     bound as a hook. What only a running game can show is that the engine
     sees the same thing and the behaviour is unchanged through the new
     plumbing:
 
-      1. the surface the engine loaded: mod.class.Player's act and
-         postUseTalent are this addon's wrappers (by their source file) and
-         the ONLY functions this addon put on either class; Actor:tooltip is
+      1. the surface the engine loaded: mod.class.Player's act is this
+         addon's wrapper (by its source file) and the ONLY function this
+         addon put on either class; postUseTalent is NOT ours any more (#76)
+         and still resolves through the class chain; Actor:tooltip is
          not this addon's; loadPrevious handed each superload the class it
          names (_NAME, api-surface Remediation 8); none of the six
          names the original leaked (reduce, recSum, aiStop, skoobot_act,
@@ -19,10 +20,12 @@
          now sitting after the stats block where the hook fires rather than
          at the very end -- checked on the player and on another actor of
          the level;
-      3. postUseTalent: a talent whose action was refused (postUseTalent
-         returned nil) is still marked failed for the iteration, the nil
-         still travels back to useTalent, and a refusal outside an
-         activation is ignored rather than an error;
+      3. the refusal without a wrapper (#76): useTalent reports a refused
+         talent as FALSE and not nil, both before the coroutine (on cooldown)
+         and in the case no hook can see (the talent's own action returns
+         nil, so postUseTalent returns nil) -- which is the fact
+         SAI_useTalent now reads in place of the wrapper. The bot ACTING on
+         it is scenario-t010-marked-target's job;
       4. act: with the bot toggled on, the per-turn driver runs from
          Player:act -- its trace line is printed -- game.turn advances and
          actions are taken.
@@ -255,18 +258,20 @@ local leaked = {}
 for _, name in ipairs{"reduce", "recSum", "aiStop", "skoobot_act", "checkForAdditionalAction", "getUnspentTotal"} do
   if rawget(_G, name) ~= nil then leaked[#leaked + 1] = name end
 end
-return ("player=%s actor=%s | act=%s postUseTalent=%s | ours_on_player=[%s] ours_on_actor=[%s] | actor_tooltip=%s player_tooltip=%s | leaked=[%s] runtime=%s"):format(
+return ("player=%s actor=%s | act=%s postUseTalent_ours=%s postUseTalent_resolves=%s | ours_on_player=[%s] ours_on_actor=[%s] | actor_tooltip=%s player_tooltip=%s | leaked=[%s] runtime=%s"):format(
   tostring(P._NAME), tostring(A._NAME),
   tostring(hk.source(rawget(P, "act")):find(hk.OURS, 1, true) ~= nil),
   tostring(hk.source(rawget(P, "postUseTalent")):find(hk.OURS, 1, true) ~= nil),
+  tostring(type(P.postUseTalent) == "function"),
   hk.oursOn(P), hk.oursOn(A),
   hk.source(rawget(A, "tooltip")), hk.source(rawget(P, "tooltip")),
   table.concat(leaked, ","), type(rawget(_G, "skoobot_reclauded")))
 '@ -TimeoutSec 30
     Write-Host "  $($surface.Result)"
-    $null = Assert-Result $surface 'loadPrevious handed the superload the class it names (_NAME)' -Match '^player=mod\.class\.Player actor=mod\.class\.Actor '
-    $null = Assert-Result $surface "the engine's Player:act and Player:postUseTalent are this addon's wrappers" -Match '\| act=true postUseTalent=true \|'
-    $null = Assert-Result $surface 'they are the only functions this addon put on mod.class.Player' -Match 'ours_on_player=\[act,postUseTalent\]'
+    $null = Assert-Result $surface "the engine's Player:act is this addon's wrapper" -Match '\| act=true '
+    $null = Assert-Result $surface "Player:postUseTalent is NOT (the wrapper went with #76)" -Match ' postUseTalent_ours=false '
+    $null = Assert-Result $surface 'and still resolves through the class chain, so nothing was broken taking it off' -Match ' postUseTalent_resolves=true \|'
+    $null = Assert-Result $surface 'act is the only function this addon put on mod.class.Player' -Match 'ours_on_player=\[act\]'
     $null = Assert-Result $surface 'and none on mod.class.Actor' -Match 'ours_on_actor=\[\]'
     $null = Assert-Result $surface "Actor:tooltip is not this addon's (the line is a hook)" -Match 'actor_tooltip=(?![^ ]*skoobot_reclauded)[^ ]+ '
     $null = Assert-Result $surface "nor is Player:tooltip" -Match 'player_tooltip=(?![^ ]*skoobot_reclauded)[^ ]+ '
@@ -296,38 +301,54 @@ return ("[%s] %s"):format(tostring(a.name), hk.tooltip(a, nil))
     $null = Assert-Result $to 'with its own figure' -Match 'figure=(-?\d+) expected=\1 '
 
     # -----------------------------------------------------------------------
-    # 3. postUseTalent
+    # 3. the refusal, without a wrapper
     # -----------------------------------------------------------------------
     Write-Host ''
-    Write-Host '  --- 3. postUseTalent: a refused talent is marked for the iteration'
+    Write-Host '  --- 3. useTalent reports a refusal, so no postUseTalent wrapper is needed'
     $quiet = Invoke-Bridge -Lua 'hk.reset() return tostring(hk.findQuiet())' -TimeoutSec 120
     if ($quiet.Result -ne 'True') { Inconclusive 'no spot with nothing in sight to decide from' }
     $put = Invoke-Bridge -Lua @'
-local b = skoobot_reclauded
 local p = game.player
+local T = require "engine.interface.ActorTalents"
 hk.reset()
 local t = p:getTalentFromId("T_ATTACK")
--- outside an activation: nothing to mark, and no error
-local okNo, rNo = pcall(p.postUseTalent, p, t, nil)
--- inside one: query mode builds the activation and its loop scratch and,
--- on a quiet tile, leaves them in place
-local before = game.turn
-b.query()
-local loop = b.loop ~= nil
-local ok, r = pcall(p.postUseTalent, p, t, nil)
-local marked = loop and b.loop.talentfailed[t.id] == true
-local okF, rF = pcall(p.postUseTalent, p, t, false)
+
+-- (a) refused before the coroutine: on cooldown, with ignore_cd off. The
+-- engine returns false at engine/interface/ActorTalents.lua:171.
+local hadCd = p.talents_cd and p.talents_cd[t.id]
+p.talents_cd = p.talents_cd or {}
+p.talents_cd[t.id] = 5
+local cd = p:useTalent(t.id, nil, nil, false, nil, true, true)
+p.talents_cd[t.id] = hadCd
+
+-- (b) THE case no hook sees: the talent's own action refuses, so
+-- postUseTalent returns nil (mod/class/Actor.lua: `if not ret then return
+-- end`) and useTalent returns false at :197. Reproduced by stubbing the
+-- action for exactly one call -- a measurement may do that; the product
+-- may not -- and putting it straight back.
+local def = T.talents_def[t.id]
+local realAction = def.action
+def.action = function() return nil end
+local ok, refused = pcall(p.useTalent, p, t.id, nil, nil, true, nil, true, true)
+def.action = realAction
+
 hk.reset()
-return ("noloop=%s/%s | dturn=%d loop=%s ret=%s/%s marked=%s | false_ret=%s/%s"):format(
-  tostring(okNo), tostring(rNo), game.turn - before, tostring(loop), tostring(ok), tostring(r), tostring(marked),
-  tostring(okF), tostring(rF))
+return ("cooldown=%s(%s) | refused_ok=%s refused=%s(%s) | action_restored=%s"):format(
+  tostring(cd), type(cd), tostring(ok), tostring(refused), type(refused),
+  tostring(def.action == realAction))
 '@ -TimeoutSec 60
     Write-Host "  $($put.Result)"
-    $null = Assert-Result $put 'a refusal outside an activation is ignored, not an error' -Match '^noloop=true/nil '
-    $null = Assert-Result $put 'the query-mode decision spent no game time and left the loop scratch' -Match '\| dturn=0 loop=true '
-    $null = Assert-Result $put 'postUseTalent(t, nil) still returns nil through the wrapper' -Match ' ret=true/nil '
-    $null = Assert-Result $put 'and the talent is marked failed for the iteration' -Match ' marked=true '
-    $null = Assert-Result $put 'a false result travels back as falsy too' -Match '\| false_ret=true/nil$'
+    # false, never nil: SAI_useTalent tests `ret == false` and not falsiness,
+    # because nil is a talent suspended awaiting targeting, which may yet
+    # fire. If the engine ever returned nil for a refusal instead, the bot
+    # would stop marking refusals and this is where that shows.
+    $null = Assert-Result $put 'a talent on cooldown is refused with false, not nil' -Match '^cooldown=false\(boolean\) '
+    $null = Assert-Result $put "a talent whose own action refuses does not raise" -Match ' refused_ok=true '
+    $null = Assert-Result $put '...and is also reported as false -- the case no hook can see' -Match ' refused=false\(boolean\) '
+    $null = Assert-Result $put 'the stubbed action was put back' -Match ' action_restored=true$'
+    # What this pair does NOT show is the bot acting on it: that a refused
+    # talent is skipped and the next priority tried inside one iteration is
+    # scenario-t010-marked-target, with a real marked-target talent.
 
     # -----------------------------------------------------------------------
     # 4. act: the driver runs from Player:act

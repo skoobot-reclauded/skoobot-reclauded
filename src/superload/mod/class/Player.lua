@@ -23,8 +23,8 @@
 --
 -- What did change, and why:
 --
--- * Nothing is added to mod.class.Player except the two wrapped methods at
---   the bottom (act, postUseTalent). The original added a dozen methods to
+-- * Nothing is added to mod.class.Player except the ONE wrapped method at
+--   the bottom (act). The original added a dozen methods to
 --   the class -- checkStop, tryStop, getStopConditionList, ... -- and the
 --   original is still installed by real people. Two addons defining the same
 --   method on the same class means the one loaded last silently wins, so
@@ -499,10 +499,28 @@ local function SAI_useTalent(tid, who, force_level, ignore_cd, target)
     -- confirmation or interactive targeting opened a prompt with no human to
     -- answer it -- the rotation stalled instead of falling through to the next
     -- priority (old #49, every marked-target class). With no_confirm and a
-    -- forced target, such a talent instead refuses cleanly (returns false),
-    -- postUseTalent marks it failed, and filterFailedTalents drops it so the
-    -- next priority is tried. T-001 remediation 3; the scored rotation is T-020.
-    return game.player:useTalent(tid, who, force_level, ignore_cd, target, false, true)
+    -- forced target, such a talent instead refuses cleanly, and the refusal is
+    -- read here (#76) so filterFailedTalents drops it and the next priority is
+    -- tried. T-001 remediation 3; the scored rotation is T-020.
+    --
+    -- FALSE is the refusal. The engine returns it from every failing path in
+    -- useTalent -- talent not usable, preUseTalent refused, or postUseTalent
+    -- returned nil because the talent's own action refused (engine/interface/
+    -- ActorTalents.lua :171 :176 :197 :207 :213 :236 :282). NIL is NOT a
+    -- refusal: it is a talent still suspended in its coroutine waiting for
+    -- targeting or a confirm, which no_confirm and a forced target are meant
+    -- to prevent, and which must not be recorded as failed if it happens
+    -- anyway -- the talent may yet fire. So this tests `== false`, not
+    -- falsiness.
+    --
+    -- The mark has to land before the caller's checkForAdditionalAction(),
+    -- and it does: fireTier calls this, then returns, then re-enters
+    -- skoobot_act(true) -- noAction, so loopInit does NOT run and the mark
+    -- survives into the retry. That is what lets Attack follow a refused
+    -- Rockswallow inside one iteration (scenario-t010-marked-target).
+    local ret = game.player:useTalent(tid, who, force_level, ignore_cd, target, false, true)
+    if ret == false and bot.loop then bot.loop.talentfailed[tid] = true end
+    return ret
 end
 
 local function SAI_movePlayer(x, y)
@@ -1865,19 +1883,6 @@ local function afterAct(self, ...)
     return ...
 end
 
---- After the engine's postUseTalent (#14): a talent that failed to fire is
---- not retried in the same iteration. Irreducible by hook: the engine's
---- "Actor:postUseTalent" hook fires only once `ret` has passed the
---- function's first line (`if not ret then return end`), so the one case
---- this watches -- the talent's action refused, postUseTalent returned nil
---- -- is the case no hook sees. The same fact reaches the bot as
---- useTalent's `false` return in SAI_useTalent; reading it there would
---- retire this wrapper, and is #11's to do with the rotation it rewrites.
-local function afterPostUseTalent(self, talent, ...)
-    if not (...) and game.player == self and bot.loop then bot.loop.talentfailed[talent.id] = true end
-    return ...
-end
-
 --- What the bot COUNTS an actor for, given its raw power level, and why,
 --- in words (#11): an enemy's raw figure times its rank-band weight (#62),
 --- the player's own scaled by the life left. Both come from data/score.lua's
@@ -1924,12 +1929,18 @@ end
 
 -- The superload surface. `loadPrevious(...)` at the top of this file is
 -- the loader's chain (game/loader/init.lua:137-177): each addon's superload
--- of a class gets the previous one's table, so these wrap whatever the
+-- of a class gets the previous one's table, so this wraps whatever the
 -- original SkooBot wrapped when both are installed, in either order.
+--
+-- ONE wrapper (#76). `postUseTalent` was the second, and the only reason for
+-- it was to see a talent that refused: the engine's "Actor:postUseTalent"
+-- hook fires only after `ret` has passed `if not ret then return end`
+-- (mod/class/Actor.lua:6329), so the refusal is exactly the case no hook
+-- sees. But it is not the only way to learn the fact -- useTalent returns
+-- false for it, and SAI_useTalent had that return in hand and threw it away.
+-- It reads it now, and this class is down to `act`, which has no hook
+-- equivalent in 1.7.6 and stays.
 local old_act = _M.act
 function _M:act(...) return afterAct(self, old_act(self, ...)) end
-
-local old_postUseTalent = _M.postUseTalent
-function _M:postUseTalent(talent, ...) return afterPostUseTalent(self, talent, old_postUseTalent(self, talent, ...)) end
 
 return _M

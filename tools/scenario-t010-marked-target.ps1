@@ -8,8 +8,9 @@
     SAI_useTalent passed the target but never no_confirm (old #49). The fix
     in src/superload/mod/class/Player.lua ("FIXED (T-010)") passes
     no_confirm and a forced target, so such a talent refuses cleanly: its
-    action returns nil, postUseTalent marks it failed for this iteration, and
-    filterFailedTalents drops it so the next priority is tried.
+    action returns nil, so useTalent returns false, SAI_useTalent marks it
+    failed for this iteration (#76 -- it was a postUseTalent wrapper before),
+    and filterFailedTalents drops it so the next priority is tried.
 
     This is the scenario #4 deferred "to a class with a suitable targeted
     talent and real (non-query) combat". Query mode cannot show it -- in query

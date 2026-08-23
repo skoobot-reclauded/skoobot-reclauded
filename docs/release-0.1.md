@@ -20,11 +20,11 @@ release is then cut is [releasing.md](releasing.md).
 
 ## 2. The three non-negotiables, honestly
 
-1. **Minimised superload surface (#14) — done for 0.1's shape.** The addon superloads one
-   class, `mod.class.Player`, for two one-line wrappers (`act`, `postUseTalent`); the tooltip
-   line is the engine's `Actor:tooltip` hook; nothing is added to either class and nothing
-   leaks into `_G`. `Player:act` has no hook equivalent in 1.7.6 and stays; `postUseTalent`
-   goes when the rotation reads `useTalent`'s return (#76).
+1. **Minimised superload surface (#14, finished by #76) — done.** The addon superloads one
+   class, `mod.class.Player`, for **one** one-line wrapper (`act`); the tooltip line is the
+   engine's `Actor:tooltip` hook; nothing is added to either class and nothing leaks into
+   `_G`. `Player:act` has no hook equivalent in 1.7.6 and stays. `postUseTalent` went when
+   the rotation started reading `useTalent`'s return, which carries the same refusal (#76).
 2. **A contribution path that survives a year without the maintainer (#17).** The original
    died of exactly this, with two working fixes unmerged. A 0.1 prerequisite.
 3. **The judgement bar** in §1.

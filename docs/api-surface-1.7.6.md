@@ -85,7 +85,7 @@ tick; `tooltip` is optional UI sugar. A collision sweep of every v1-defined name
 | symbol | v1 use | 1.7.6 | status | note |
 |---|---|---|---|---|
 | `preUseTalent(t, true, true)` | P:477, :484 | T/mod/class/Actor.lua:5742–6013 (base E/interface/ActorTalents.lua:401) | ok | 4th param `ignore_ressources` added — 3-arg call fine, **never pass true there** (dry run would report unaffordable talents as usable). `fake` skips only the energy gate (:5805) and random-failure rolls; hard gates (forbid, feared, silence, sleep-without-lucid-dreamer :5800, on_pre_use :6002) and resource sufficiency (:5836) still apply — exactly what v1 wants. Same idiom as the engine's own `automaticTalents` (E/ActorTalents.lua:1128). |
-| `postUseTalent(t, ret, silent)` — **wrapped** | P:506–511 | T/mod/class/Actor.lua:6328–6595 | ok | Returns **nil** (not false) on failure (:6329) — keep v1's truthiness test, never tighten to `== false`. Fires for sustain **deactivation** too (E/ActorTalents.lua:282); failure bookkeeping must ignore that path (check `self.deactivating_sustain_talent`). |
+| `postUseTalent(t, ret, silent)` — **wrapped** | P:506–511 | T/mod/class/Actor.lua:6328–6595 | ok | Returns **nil** (not false) on failure (:6329) — keep v1's truthiness test, never tighten to `== false` — this is `postUseTalent`'s OWN return, not `useTalent`'s, which is a real `false` (Remediation 3). Fires for sustain **deactivation** too (E/ActorTalents.lua:282); failure bookkeeping must ignore that path (check `self.deactivating_sustain_talent`). |
 | status fields `confused` `dazed` `stunned` `frozen` `sleep` `lucid_dreamer` `undead` | P:240, :245, :250, :255, :260, :642 | see [Value-domain notes](#value-domain-notes-the-status-attributes) | **changed** / ok† mix | Every `== 1` comparison is wrong (temp values are additive counters, E/Entity.lua:925). Three are outright changed: `confused` is a 0–50 **percentage**, `frozen` has two unrelated sources, `lucid_dreamer` is a 5–25+ power. `undead` no longer decides breathing. Remediation 4–5. |
 | `unused_stats/-talents/-generics/-talents_types/-prodigies` | P:274 | T/mod/class/Actor.lua:191–195 | ok | All five numeric on every actor at init. |
 | `sight` | P:282, :302, :334 | T/mod/class/Actor.lua:199 | ok | Same `self.sight or 10` idiom as 1.7.6's own spotHostiles (T/Player.lua:920). |
@@ -261,8 +261,9 @@ findings; 7–8 the uncertains; 9–13 concrete corrections the surface check su
    activated talents always pass `force_target` (5th arg) and `no_confirm = true` (7th arg) —
    including the Recovery/DamagePrevention self-casts at P:712/:724, or interactive targeting
    opens under the bot. `false` = refused-without-acting for *any* reason (not just cooldown);
-   `nil` = pending (targeting/confirm coroutine yield) or fallthrough. Detect failure via the
-   postUseTalent hook (already wrapped, P:507–511, ignoring the sustain-deactivation path) and
+   `nil` = pending (targeting/confirm coroutine yield) or fallthrough. Detect failure by
+   reading `useTalent`'s own return in the call site (`== false`, never `not ret`) — the
+   0.1 addon wrapped `postUseTalent` for this and no longer needs to (#76) — and
    treat a pending talent (targeting mode active, `#game.dialogs` grew) as a hard stop.
 4. **Status attributes are additive counters, three with changed domains** *(changed:
    confused, frozen, lucid_dreamer)*. Never `== 1`. `confused` is a 0–50 **percentage** —
@@ -421,7 +422,7 @@ to a function of the addon's own.
 | 0.1 wrapper | hook at the same point? | information | outcome |
 |---|---|---|---|
 | `Actor:tooltip` | **yes** — `Actor:tooltip` (T/mod/class/Actor.lua:2133) | `{ts, x, y, seen_by}`, `self` the actor. `ts` **is** the tstring the method returns; fires for every actor including the player (`Player:tooltip` calls `Actor.tooltip` by class reference, T/Player.lua:441–442); does not fire for an unseen actor (:2009), which is exactly when the wrapper returned nil. | **Replaced.** `hooks/load.lua` binds the hook to `bot.tooltip`; `src/superload/mod/class/Actor.lua` deleted. One visible change: the line lands after the stats block (:2132, after *M. save*), where the hook fires, not at the very end. |
-| `Player:postUseTalent` | **no** — `Actor:postUseTalent` (T/Actor.lua:6520–6523) and `callbackOnTalentPost` (:6525) both fire **after** `if not ret then return end` (:6329), i.e. on success only; `Actor:preUseTalent` (:5946) is a veto point before the action runs, not an observer of its result | the wrapper watches the one path no hook sees: `postUseTalent` returning nil because the talent's action refused | **Irreducible by hook; thinned** to one line → `afterPostUseTalent`. The same fact reaches the bot as `useTalent`'s `false` return (E/interface/ActorTalents.lua:197/:236/:282 → :304–318 → :356); reading it in `SAI_useTalent` would retire the wrapper — filed as a follow-up on the rotation rewrite (#11), because it is decision-loop code, not plumbing. |
+| `Player:postUseTalent` | **no** — `Actor:postUseTalent` (T/Actor.lua:6520–6523) and `callbackOnTalentPost` (:6525) both fire **after** `if not ret then return end` (:6329), i.e. on success only; `Actor:preUseTalent` (:5946) is a veto point before the action runs, not an observer of its result | the wrapper watched the one path no hook sees: `postUseTalent` returning nil because the talent's action refused | **RETIRED (#76).** Irreducible by *hook*, but not the only route to the fact: `useTalent` returns `false` whenever `postUseTalent` returned nil (E/interface/ActorTalents.lua:197/:236/:282 → :304–318 → :356), and `SAI_useTalent` already had that return and discarded it. It reads it now (`ret == false`, never `not ret` — nil is a suspended coroutine awaiting targeting, which may yet fire). Two things improve with it: the mark is made from the bot's own call site, so the **sustain-deactivation path :282 is structurally excluded** rather than needing the `deactivating_sustain_talent` guard row 88 asks for and the wrapper never had; and a refusal by an *engine* auto-use is no longer marked, which is harmless — `bot.loop.talentfailed` is rebuilt every iteration and only the bot's own calls are what the rotation skips. |
 | `Player:act` | **no** — `Player:act` (T/Player.lua:383–431) fires no hook. `callbackOnAct` (T/Actor.lua:806) runs inside `Actor:act` **before** the rest/run stepping (T/Player.lua:417–421) and the wait-for-input pause (:424), and must be registered on a talent, effect, object or a *self* definition (`registerCallbacks`, :6145; the *self* kind is written into the actor and so into the save, T/mod/resolvers.lua:864–865). `Actor:actBase:Effects` (T/Actor.lua:645) fires once per base turn for every actor, not when the player has energy to act. `game:onTickEnd` is per tick and dies on level-change capture (design-harness.md §4.1). | the driver must run after the engine has done the player's turn-start and any run or rest step, while the player still has energy — the `act` wrapper's exact position | **Irreducible; thinned** to one line → `afterAct`. Also passes the engine's argument through and returns the original's return unchanged (Remediation 1). |
 
 **Function superloads are not a smaller surface.** `hooks/load.lua` receives a `superload(bname,
@@ -440,10 +441,10 @@ one chunk chain per class: the base file, then each addon's superload in
 whatever the previous addon left — the original's `act`/`postUseTalent` wrappers when it loads
 first, ours when it loads second — and neither clobbers the other. `Player.lua` does exactly
 that (`spec/surface_spec.lua` holds it to it), and `scenario-hooks.ps1` asserts at runtime
-that the engine's `Player.act` and `Player.postUseTalent` are ours and the only functions
-ours on either class. With both addons installed a creature's tooltip carries two *Power
-Level* lines (first-run.md F12): the original's wrapper appends at the end, our hook sits
-after the stats.
+that the engine's `Player.act` is ours and the only function ours on either class, and that
+`Player.postUseTalent` is **not** ours since #76 while still resolving through the chain.
+With both addons installed a creature's tooltip carries two *Power Level* lines
+(first-run.md F12): the original's wrapper appends at the end, our hook sits after the stats.
 
 **The leaked globals.** The same loader runs every superload chunk under
 `setmetatable({loadPrevious = …}, {__index = _G})` (:171–177), so v1's bare `reduce`,

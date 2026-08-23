@@ -1,16 +1,17 @@
 -- luacheck: std luajit+busted
 
--- The superload surface, held to what #14 left: one file, two one-line
--- wrappers, nothing added to either class. Monkey-patching Player and Actor
--- is why the original broke on every ToME release, so growing this surface
--- is a decision, and this spec makes it one -- a third wrapper, a method
--- added to the class, or a wrapper that grows a body fails here until the
--- spec is changed with it. The tooltip line, the third wrapper 0.1 shipped,
--- is an engine hook now. What only a running game can show -- that the
--- wrappers are the ones the engine calls and the hook fires -- is
--- tools/scenario-hooks.ps1.
+-- The superload surface, held to what #14 left and #76 finished: one file,
+-- ONE one-line wrapper, nothing added to either class. Monkey-patching
+-- Player and Actor is why the original broke on every ToME release, so
+-- growing this surface is a decision, and this spec makes it one -- a second
+-- wrapper, a method added to the class, or a wrapper that grows a body fails
+-- here until the spec is changed with it. The tooltip line, the third
+-- wrapper 0.1 started with, is an engine hook now; postUseTalent, the
+-- second, is useTalent's return read where the bot already had it. What only
+-- a running game can show -- that the wrapper is the one the engine calls
+-- and the hook fires -- is tools/scenario-hooks.ps1.
 --
--- #14.
+-- #14, #76.
 
 local manifest = require "spec.support.manifest"
 
@@ -70,7 +71,14 @@ describe("the superload surface (#14)", function()
     assert.is_truthy(src:match("\nreturn _M%s*$"), "the file does not end with `return _M`")
   end)
 
-  it("wraps exactly act and postUseTalent, each on one line", function()
+  -- ONE wrapper since #76. postUseTalent existed only to see a talent that
+  -- refused -- the one case the engine's Actor:postUseTalent hook cannot see,
+  -- because it fires after `if not ret then return end` -- and the same fact
+  -- is in useTalent's `false` return, which SAI_useTalent already had. `act`
+  -- has no hook equivalent in 1.7.6 and stays.
+  --
+  -- Growing this list back is a decision, and this is where it is made.
+  it("wraps exactly act, on one line", function()
     local names, bodies = {}, {}
     for _, line in ipairs(lines) do
       local name = line:match("^function _M[:%.]([%w_]+)")
@@ -79,7 +87,7 @@ describe("the superload surface (#14)", function()
         bodies[name] = line
       end
     end
-    assert.are.same({ "act", "postUseTalent" }, names)
+    assert.are.same({ "act" }, names)
     for name, line in pairs(bodies) do
       assert.is_truthy(line:match("%send$"),
         "the " .. name .. " wrapper is no longer one line: " .. line)
@@ -88,10 +96,23 @@ describe("the superload surface (#14)", function()
     end
   end)
 
+  -- The replacement, asserted positively so that deleting the wrapper
+  -- without reading the return would fail here rather than pass quietly.
+  it("reads useTalent's refusal in SAI_useTalent instead (#76)", function()
+    assert.is_truthy(src:find("local ret = game.player:useTalent(", 1, true),
+      "SAI_useTalent no longer keeps useTalent's return")
+    assert.is_truthy(src:find("if ret == false and bot.loop then bot.loop.talentfailed[tid] = true end", 1, true),
+      "SAI_useTalent does not mark a refused talent from useTalent's return")
+    -- `== false`, never `not ret`: nil is a talent still suspended awaiting
+    -- targeting, which may yet fire and must not be recorded as failed.
+    assert.is_nil(src:match("if%s+not%s+ret%s+.-talentfailed"),
+      "a nil return is being treated as a refusal; nil is pending, not failed")
+  end)
+
   it("adds nothing else to the class", function()
     for i, line in ipairs(lines) do
       assert.is_nil(line:match("^%s*_M[%.%[]"),
-        "the class is written outside the two wrappers, at line " .. i .. ": " .. line)
+        "the class is written outside the wrapper, at line " .. i .. ": " .. line)
     end
   end)
 

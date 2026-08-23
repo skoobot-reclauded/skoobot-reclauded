@@ -89,8 +89,8 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   thing to know (enable it before creating the character); the options are named in the words
   the stops use (*Maximum Enemy Power*, *Maximum Enemy Power Above Yours*, the ratios explained);
   the menu says how to start and what IGNORE / WARN / STOP mean when a stop condition is set.
-- **Less of the game patched** (#14). The addon now replaces two methods of the player class,
-  each a one-line wrapper, and adds the *Power Level* tooltip line through the engine's own
+- **Less of the game patched** (#14, #76). The addon now replaces one method of the player class,
+  a one-line wrapper, and adds the *Power Level* tooltip line through the engine's own
   hook instead of patching every creature's tooltip. The line sits with the creature's stats
   (after M. save) rather than at the bottom of the tooltip.
 - **The options say what they will take** (#74). Every numerical option used to open with
