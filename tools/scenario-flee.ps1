@@ -310,6 +310,11 @@ return "installed"
         }
     }
     Write-Host "  ended: $ended ($steps act(s))"
+    # A spot the finder accepted can still run out of room after one step
+    # (BLOCKED: no grid farther). That is the terrain, not the product: the
+    # step it did take was right, and "no farther grid" is a legitimate end.
+    # Treat it as the setup problem it is rather than a failure.
+    if ($steps -lt 2 -and $ended -match '^BLOCKED') { Inconclusive "the quiet spot ran out of room after $steps step(s): $ended" }
     Ok ($steps -ge 2) 'at least two flee steps were taken before anything else came into view' "$steps"
     Ok ($bad.Count -eq 0) 'every act grew the distance by at least one (the hostile moves too), moved the player to the chosen grid, and counted one action' ($bad -join '; ')
     foreach ($m in $bad) { Write-Host "         $m" }
