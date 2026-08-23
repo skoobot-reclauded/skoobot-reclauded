@@ -519,3 +519,28 @@ counted one is what the terms and the stop reasons carry. Ctrl still shows the c
   fired that very step. It now reads `h.power` — the weighted figure spotHostiles records on
   every entry — with the same `or 0` and the same nearer-on-tie rule as `score.lua`, so the
   two cannot pick different enemies.
+
+### 5.6 Grids the player must consent to enter (#64)
+
+A sealed vault door, a locked door and a loose rock all set `door_player_check` — walking into
+one opens a yes/no popup (`mod/class/Grid.lua:65`) — and **none of them sets `block_move`**. So
+the engine's own passability says yes, and `Astar` routes straight through. With a hostile past
+one, the FIGHT branch's path ran into the door, the popup opened, and a dialog is a hand-back by
+design. The player closes it, restarts the bot, and it walks back in within two to five turns.
+The first long soak (#61, 2026-08-23) measured **65 of 66 stops in ten minutes** as exactly this
+— the single largest source of hand-backs the bot produced, ahead of everything the stop
+conditions do.
+
+The rule is not "remember what was refused". **A grid the player must be asked about is not a
+grid the bot may decide to enter**, whether or not it has been asked yet, so the bot's pathing
+excludes them outright (`Astar:calc`'s `add_check`) and `fleeStep` will not step onto one. The
+ask itself still hands back: the player keeps the decision about vaults, which is the point.
+If a door is the only way to a hostile, *"no path to <name>"* is the honest answer, and opening
+it deliberately is unaffected — the player walks in themselves.
+
+Auto-explore is a **second** way in and is not fixed here. `PlayerExplore:autoExplore()` takes
+no exclusion, so shutting it out would mean a superload, which #14 and #76 spent effort
+removing. The engine has its own memory for it — `autoexplore_ignore`, set when a run stops at
+such a door (`PlayerExplore.lua:2454`) and honoured except when the player is standing next to
+it (`:1866`) — and the durable answer to standing next to it is the explored-level routing in
+#86, not another wrapper.

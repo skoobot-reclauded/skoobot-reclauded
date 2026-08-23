@@ -135,6 +135,14 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   considers only grids that still have line of sight to that hostile, and picks among them by
   the same rule. It is its own row, so it can sit above a plain flee: keep sight if you can,
   break it if you must.
+- **The bot no longer walks into vault doors** (#64). A sealed vault door does not block
+  movement as far as the game is concerned, so the bot's pathing ran straight through one: it
+  walked into the door, the *"This door seems to have been sealed off"* prompt opened, and the
+  bot handed back — and then did it again a few turns after you restarted it. An unattended
+  ten-minute run measured 65 of its 66 stops as exactly that loop. The bot now treats any grid
+  you would be *asked* about — sealed doors, locked doors, loose rocks — as somewhere it may
+  not route through or flee into. You can still walk into one yourself, and it still hands back
+  when the prompt opens, because the vault is your decision.
 
 ### Fixed
 

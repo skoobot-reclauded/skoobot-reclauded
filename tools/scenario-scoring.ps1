@@ -27,7 +27,13 @@
          CROWDPOWER at IGNORE: posture HOLD, the bot would wait for them to
          come into reach rather than walk into them;
       F. a 5% scratch while exploring at 50% life with nothing in view: the
-         T-011 stop fires with the explore-damage term as the threat.
+         T-011 stop fires with the explore-damage term as the threat;
+      G. a grid the player must consent to enter -- a clone of the terrain
+         between the bot and a hostile, with door_player_check set -- is not
+         a route: the bot goes round it or says there is no path, and never
+         steps onto it (#64). A sealed vault door sets no block_move, so
+         Astar treated it as passable and the bot walked into its own
+         yes/no popup, over and over.
 
     The SCOUTER_* conditions are STOP and LIFE_LOWLIFE / LIFE_BIGLOSS are
     IGNORE for the probes unless a probe says otherwise; Combat is [Attack]
@@ -41,7 +47,7 @@
     Run:
         powershell -ExecutionPolicy Bypass -File .\tools\scenario-scoring.ps1
 
-    #11, #62, #27.
+    #11, #62, #64, #81, #27.
 #>
 [CmdletBinding()]
 param(
@@ -290,6 +296,56 @@ function sc.probe(o)
   return ("QUERY dturn=%d hostiles=%d life=%d/%d mine=%.1f %s reason=%s log=%s"):format(game.turn - before,
     sc.hostiles(), p.life, p.max_life, mine, v, tostring(b.last_reason), newLog(nlog))
 end
+-- #64: seal one grid and see the bot refuse to route through it.
+--
+-- A sealed vault door sets no block_move, so Astar treats it as passable
+-- for the player: with a hostile past one, the FIGHT branch's path ran
+-- straight into it, the yes/no popup opened, and a dialog is a hand-back.
+-- The first long soak measured 65 of 66 stops in ten minutes as exactly
+-- this loop.
+--
+-- Made deterministic here rather than waiting for a vault: the grid between
+-- the player and a hostile two squares away gets a CLONE of its own terrain
+-- with door_player_check set -- a clone, because the terrain entity is a
+-- shared prototype and writing on it would seal every grid of that kind on
+-- the level -- and the original is put back afterwards.
+function sc.sealed()
+  local p = game.player
+  sc.reset(13)
+  local dx, dy = sc.line(3)
+  if not dx then return "SETUP no free line" end
+  local bx, by = p.x + dx, p.y + dy               -- the grid to seal
+  local m, err = spawnAt(p.x + dx * 2, p.y + dy * 2, 0, 2)
+  if not m then return err or "SETUP no actor to spawn" end
+  p:playerFOV()
+
+  local Map = engine.Map
+  local was = game.level.map(bx, by, Map.TERRAIN)
+  if not was then return "SETUP no terrain to clone" end
+  local seal = was:clone()
+  seal.door_player_check = "TEST seal"
+  game.level.map(bx, by, Map.TERRAIN, seal)
+  game.level.map:updateMap(bx, by)
+
+  local consentHere = b.needsConsent(bx, by)
+  local consentAway = b.needsConsent(p.x - dx, p.y - dy)
+  local ld = game.uiset and game.uiset.logdisplay
+  local nlog = ld and ld.log and #ld.log or 0
+  local turn0, x0, y0 = game.turn, p.x, p.y
+  b.query()
+  -- The direction of the sealed grid, so the check can say "not that way"
+  -- without knowing the geometry it happened to get.
+  local sealdir = game.level.map:compassDirection(dx, dy)
+  local out = ("SEALED consent=%s consent_elsewhere=%s sealdir=%s dturn=%d moved=%s reason=%s log=%s"):format(
+    tostring(consentHere), tostring(consentAway), tostring(sealdir), game.turn - turn0,
+    tostring(p.x ~= x0 or p.y ~= y0), tostring(b.last_reason), newLog(nlog))
+
+  game.level.map(bx, by, Map.TERRAIN, was)
+  game.level.map:updateMap(bx, by)
+  sc.unspawn()
+  sc.reset(13)
+  return out .. (" restored=%s"):format(tostring(game.level.map(bx, by, Map.TERRAIN) == was))
+end
 -- The T-011 situation: an EXPLORE decision that took a 5% loss this turn
 -- at 'life' (a fraction), nothing in view.
 function sc.scratch(life)
@@ -429,6 +485,27 @@ return "installed"
     $null = Assert-Result $e2 'and the posture says HANDBACK' -Match 'posture=handback '
     $null = Probe 'return sc.unspawn()'
 
+
+    # ----- G: a sealed grid is not a route (#64) ------------------------------------------
+    Write-Host ''
+    Write-Host '  --- G. the bot does not path through a grid the player must consent to enter'
+    $g = Probe 'return sc.sealed()' 90
+    Write-Host "  $($g.Result)"
+    if ($g.Result -match '^SETUP') { Inconclusive $g.Result }
+    $null = Assert-Result $g 'the sealed grid needs consent, and an ordinary one does not' -Match '^SEALED consent=true consent_elsewhere=false '
+    $null = Assert-Result $g 'query advances no game turn and moves nothing' -Match ' dturn=0 moved=false '
+    # The point: the only straight route to the hostile is sealed, so the bot
+    # must go round it or say there is no path -- never step onto it. Before
+    # #64 the path ran through, the yes/no popup opened, and the bot handed
+    # back on its own dialog; the first soak measured that as 65 of 66 stops
+    # in ten minutes, the single largest source of hand-backs it produced.
+    if ($g.Result -match ' sealdir=(\w+) ') {
+        $dir = $Matches[1]
+        Ok ($g.Result -notmatch "AI would move to the $dir\b") "it does not step into the sealed grid (would have been $dir)" $g.Result
+    } else {
+        Ok $false 'the probe reported which way the sealed grid was' $g.Result
+    }
+    $null = Assert-Result $g 'the terrain clone was put back' -Match ' restored=true$'
     # ----- F: explore damage as a term ----------------------------------------------------
     Write-Host ''
     Write-Host '  --- F. a 5% scratch while exploring at 50% life, nothing in view: the T-011 stop with the explore-damage term'

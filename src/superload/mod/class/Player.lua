@@ -1235,7 +1235,11 @@ local function fleeStep(entry, hostiles)
     local bx, by, bmap, bdist
     for _, dir in ipairs(util.adjacentDirs()) do
         local sx, sy = util.coordAddDir(p.x, p.y, dir)
-        if p:canMove(sx, sy) and (not keepLos or p:hasLOS(a.x, a.y, nil, nil, sx, sy)) then
+        -- #64: a grid the player must consent to enter is not a step the
+        -- bot may take either -- fleeing into a sealed door opens its popup
+        -- just as surely as pathing into one.
+        if p:canMove(sx, sy) and not needsConsent(sx, sy)
+           and (not keepLos or p:hasLOS(a.x, a.y, nil, nil, sx, sy)) then
             local dist = core.fov.distance(sx, sy, a.x, a.y)
             local cmap, better
             if here then
