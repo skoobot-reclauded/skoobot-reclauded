@@ -20,10 +20,11 @@ release is then cut is [releasing.md](releasing.md).
 
 ## 2. The three non-negotiables, honestly
 
-1. **Minimised superload surface (#14) — post-0.1.** 0.1 ships the ported surface: three
-   wrapper methods across two classes (`Player:act`, `Player:postUseTalent`,
-   `Actor:tooltip`), nothing added to either class, no leaked globals. Smaller than
-   0.0.12's, and not the #14 end state. Stated as the exception it is.
+1. **Minimised superload surface (#14) — done for 0.1's shape.** The addon superloads one
+   class, `mod.class.Player`, for two one-line wrappers (`act`, `postUseTalent`); the tooltip
+   line is the engine's `Actor:tooltip` hook; nothing is added to either class and nothing
+   leaks into `_G`. `Player:act` has no hook equivalent in 1.7.6 and stays; `postUseTalent`
+   goes when the rotation reads `useTalent`'s return (#76).
 2. **A contribution path that survives a year without the maintainer (#17).** The original
    died of exactly this, with two working fixes unmerged. A 0.1 prerequisite.
 3. **The judgement bar** in §1.
@@ -56,7 +57,7 @@ All green on the release commit, in this order; a tainted harness result is void
 | Parse in the game's dialect | `luajit -bl <file> /dev/null` over every `.lua` under `src/` and `spec/` |
 | Lint clean | `luacheck .` — 0 warnings |
 | Unit tests green under LuaJIT | `busted` (`.busted` pins the interpreter; `spec/dialect_spec.lua` fails it otherwise) |
-| Harness scenarios pass, untainted | `scenario-surface.ps1` (every entry point, parity with the port) · `scenario-talent-screen.ps1` (#56, #55) · `scenario-stop-notices.ps1` (#57, #58) · `scenario-t011-trivial-damage.ps1` (#6) · `scenario-t012-freeze.ps1` (#7) · `scenario-t013-glowing-chest.ps1` (#8) · `scenario-t015-drowning.ps1` (#10) · `scenario-t016-label-accumulation.ps1` (#51) · `scenario-t019-stale-conditions.ps1` (#52). `scenario-baseline-v1.ps1` measures the *original* and is not a gate on this addon. Added 2026-08-23 and part of the gate: `scenario-t010-marked-target.ps1` (#5, real combat) · `scenario-keybinds.ps1` (#50) · `scenario-loadout.ps1` (#18) · `scenario-salvage-power.ps1` and `scenario-salvage-entrance.ps1` (#62) · `scenario-first-run.ps1` (#54) · `scenario-debug-channel.ps1` (#46) · `scenario-liveness.ps1` (#13) · `scenario-flee.ps1` (#59) · `scenario-hold.ps1` (#15). **Run the whole set with `tools/run-scenarios.ps1`**, which records one JSON line per scenario under `build/results/` and re-runs a tainted one once; `scenario-walking-skeleton.ps1` is excluded as superseded. |
+| Harness scenarios pass, untainted | `scenario-surface.ps1` (every entry point, parity with the port) · `scenario-talent-screen.ps1` (#56, #55) · `scenario-stop-notices.ps1` (#57, #58) · `scenario-t011-trivial-damage.ps1` (#6) · `scenario-t012-freeze.ps1` (#7) · `scenario-t013-glowing-chest.ps1` (#8) · `scenario-t015-drowning.ps1` (#10) · `scenario-t016-label-accumulation.ps1` (#51) · `scenario-t019-stale-conditions.ps1` (#52). `scenario-baseline-v1.ps1` measures the *original* and is not a gate on this addon. Added 2026-08-23 and part of the gate: `scenario-t010-marked-target.ps1` (#5, real combat) · `scenario-keybinds.ps1` (#50) · `scenario-loadout.ps1` (#18) · `scenario-salvage-power.ps1` and `scenario-salvage-entrance.ps1` (#62) · `scenario-first-run.ps1` (#54) · `scenario-debug-channel.ps1` (#46) · `scenario-liveness.ps1` (#13) · `scenario-flee.ps1` (#59) · `scenario-hold.ps1` (#15) · `scenario-conditions.ps1` (#12) · `scenario-scoring.ps1` (#11) · `scenario-hooks.ps1` (#14). **Run the whole set with `tools/run-scenarios.ps1`**, which records one JSON line per scenario under `build/results/` and re-runs a tainted one once; `scenario-walking-skeleton.ps1` is excluded as superseded. |
 | The packed artifact loads standalone | `tools/pack.ps1 -Release`, then `tools/clean-build.ps1 -SkipPack` |
 | #54 first-run pass done, #50 done, #18 done | #50 and #18 closed; #54's pass is done and its must-fix findings (#71 #72 #73) are closed or explicitly deferred by the owner |
 | **The judgement gate** | The owner plays the release candidate against 0.0.12 with the complaint themes in hand — marked-target talents stalling the rotation, stops on trivial damage, the pin / dominate / sleep freeze, glowing chests walked past, the talent menu overflowing, drowning while resting, configuration nobody could discover — and records the verdict on #32. |
@@ -70,8 +71,9 @@ for the judgement gate, not a condition of release.
 
 ## 6. Explicitly deferred
 
-- **M2 Core model**, after 0.1: #11 scored evaluation (T-020), #12 condition framework, #14
-  superload minimisation. (#13, the progress invariant, and #46, the debug channel, were built
-  on 2026-08-23 as small, regression-netted pieces and are in.)
+- **M2 Core model**: nothing left deferred. #11 scored evaluation (T-020), #12 condition
+  framework and #14 superload minimisation were folded into `main` on 2026-08-23 (owner:
+  *all code from builds A/B/C can be merged*), after #13, the progress invariant, and #46, the
+  debug channel, earlier the same day. Their follow-ups are tracked as their own issues.
 - **M5 Post-0.1**: #15 tempo-aware holding and #59 flee are *built* (see §3) but stay M5 until
   the owner rules them into 0.1; #67 #68 #69 #75 are their follow-ups.

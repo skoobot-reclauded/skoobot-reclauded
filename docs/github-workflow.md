@@ -138,6 +138,12 @@ Practical consequences:
   were rewritten to the machine account on 2026-08-21, while the repo was still unpushed and
   the fix was free.
 
+  On the development machine a global-gitconfig `includeIf` applies the machine-account
+  identity to any checkout under `Documents\skoobot-reclauded*`, so worktrees and fresh
+  clones there get it without the two commands above. And the tracked pre-commit hook
+  refuses a commit whose author is not the machine account (#39), so a clone that missed
+  both is stopped at the first commit rather than found at push time.
+
 - **Point git at the tracked hooks, in every clone**, in the same breath:
 
   ```bash

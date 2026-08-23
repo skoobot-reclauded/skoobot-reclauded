@@ -364,7 +364,8 @@ skoobot_devbridge, skoobot_reclauded`).
 - **No Lua error** with both bound.
 - **One visible overlap:** `power_level_lines=2` — both superload `Actor:tooltip` and each adds
   a *Power Level* line, so a creature's tooltip carries it twice. Cosmetic, only with both
-  installed, and the same formula (power.lua is the port of the original's).
+  installed, and the same formula (power.lua is the port of the original's). Since #14 ours
+  is the engine's `Actor:tooltip` hook rather than a superload; the count is unchanged.
 
 **Findings.** F12 (note) — the doubled tooltip line; not worth a guard for a configuration
 nobody should keep.
