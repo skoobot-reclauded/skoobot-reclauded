@@ -16,23 +16,40 @@
 require "engine.class"
 require "engine.ui.Dialog"
 local List = require "engine.ui.List"
+local Textzone = require "engine.ui.Textzone"
 
 local PickOneDialog = require "mod.dialogs.skoobot_reclauded.PickOneDialog"
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
 
 module(..., package.seeall, class.inherit(engine.ui.Dialog))
 
+-- #54: what a player who has never read anything sees first. Under the
+-- choices, one short paragraph says how to get the bot doing something and
+-- what each key does, with every key looked up from the live binding (#57)
+-- so a remap shows here too. It is a text zone, not list rows, so the
+-- choices keep their letters and the keybind status rows (#50) stay where
+-- the harness expects them.
+local function helpText()
+	local bot = skoobot_reclauded
+	local function k(virtual)
+		return "#LIGHT_BLUE#" .. (bot.keyFor and bot.keyFor(virtual) or "?") .. "#WHITE#"
+	end
+	return "#GOLD#How to start:#WHITE# a) put the talents the bot may use in its sections "
+		.. "(or let its first row suggest a loadout), then press " .. k("TOGGLE_SKOOBOT_RECLAUDED")
+		.. " on the map. It rests, explores and fights, and hands back with a #{bold}#[SkooBot]#{normal}# "
+		.. "line saying why.\n"
+		.. "#GOLD#Keys:#WHITE# " .. k("TOGGLE_SKOOBOT_RECLAUDED") .. " start or stop, "
+		.. k("STOP_SKOOBOT_RECLAUDED") .. " stop, "
+		.. k("RUNONCE_SKOOBOT_RECLAUDED") .. " one action, "
+		.. k("ASK_SKOOBOT_RECLAUDED") .. " say what it would do next, "
+		.. k("MENU_SKOOBOT_RECLAUDED") .. " this menu. Change them under Escape > Key Bindings; "
+		.. "the thresholds are under Escape > Options > [SkooBot: Reclauded]."
+end
+
 function _M:init()
 	self:generateList()
 	engine.ui.Dialog.init(self, "SkooBot: Reclauded", 1, 1)
 
-	-- T-014: bound the visible rows and scroll the rest, so a character with many
-	-- talents can still reach the first and last entries. The original gave the
-	-- list one row per entry with no scrollbar, so on a short screen (1366x768 was
-	-- the report) the ends fell off. Rows are sized to ~80%% of the screen height
-	-- from a safe over-estimate of the row height, so the dialog never exceeds the
-	-- screen whatever the font; the full list stays reachable by wheel and arrows.
-	local maxRows = math.max(6, math.floor(game.h * 0.8 / 25))
 	-- #50: a collision row names two actions and a key, which can run past
 	-- the 400 the action rows fit in; widen to the longest row, within the
 	-- screen, rather than let List clip it.
@@ -42,11 +59,24 @@ function _M:init()
 		if w + 16 > width then width = w + 16 end
 	end
 	width = math.min(width, math.floor(game.w * 0.9))
+
+	-- #54: the help paragraph, wrapped to the list's width.
+	local help = Textzone.new{width=width, auto_height=true, text=helpText()}
+
+	-- T-014: bound the visible rows and scroll the rest, so a character with many
+	-- talents can still reach the first and last entries. The original gave the
+	-- list one row per entry with no scrollbar, so on a short screen (1366x768 was
+	-- the report) the ends fell off. Rows are sized to ~80%% of the screen height
+	-- less the help text, from a safe over-estimate of the row height, so the
+	-- dialog never exceeds the screen whatever the font; the full list stays
+	-- reachable by wheel and arrows.
+	local maxRows = math.max(6, math.floor((game.h * 0.8 - help.h) / 25))
 	local list = List.new{width=width, nb_items=math.min(#self.list, maxRows),
 		scrollbar=#self.list > maxRows, list=self.list, fct=function(item) self:use(item) end}
 
 	self:loadUI{
 		{left=0, top=0, ui=list},
+		{left=0, top=list, padding_h=6, ui=help},
 	}
 	self:setupUI(true, true)
 
@@ -77,10 +107,20 @@ local menuActions = {
 			dialoglist[#dialoglist + 1] = {name=v.label .. " - " .. v.stoptype, value=v.code}
 		end
 
-		local d = PickOneDialog.new("Pick a condition to customize", dialoglist,
+		-- #54: the three answers say what they do, in the order v1 had them,
+		-- and the second dialog names the condition by its label rather than
+		-- its code. The semantics are checkStop's (Player superload): WARN
+		-- stops once and is remembered until the condition clears, STOP stops
+		-- on every decision it holds for, IGNORE never stops.
+		local d = PickOneDialog.new("Stop conditions: pick one to change", dialoglist,
 			function(code)
-				local d2 = PickOneDialog.new("Pick a stop condition for: " .. code,
-					{{name="IGNORE", value="IGNORE"}, {name="WARN", value="WARN"}, {name="STOP", value="STOP"}},
+				local cond = conditions.get(code)
+				local d2 = PickOneDialog.new((cond and cond.label or code) .. " -- what should the bot do?",
+					{
+						{name="IGNORE -- never stop for this", value="IGNORE"},
+						{name="WARN -- stop once, then carry on if restarted", value="WARN"},
+						{name="STOP -- stop every time it applies", value="STOP"},
+					},
 					function(stoptype)
 						conditions.set(code, stoptype)
 					end
