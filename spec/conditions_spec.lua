@@ -227,28 +227,29 @@ describe("data/conditions.lua", function()
       assert.same({}, d.blocks)          -- it reports a past state, blocks nothing
     end)
 
-    -- One player turn is ten game turns at normal speed. A gap of a few is
-    -- ordinary -- a fast enemy, a haste, the rounding of a turn -- so the
-    -- threshold is "more than one turn", not "more than none".
-    it("fires only above one player turn", function()
-      assert.is_false(d.detect(actor(), context({ turnGap = 0 })))
-      assert.is_false(d.detect(actor(), context({ turnGap = 10 })))
-      assert.is_true(d.detect(actor(), context({ turnGap = 11 })))
-      assert.is_true(d.detect(actor(), context({ turnGap = 300 })))
-      assert.equals(10, C.BLACKOUT_TURNS)
+    -- ctx.turnsLost is WHOLE TURNS the character never got, already
+    -- normalised for its own speed by the act wrapper. It is deliberately
+    -- not a game.turn figure: the first build counted game turns off the
+    -- BOT's decision clock, which does not move during a rest or a run, and
+    -- so announced a blackout after every rest.
+    it("fires from one lost turn, and not before", function()
+      assert.is_false(d.detect(actor(), context({ turnsLost = 0 })))
+      assert.is_true(d.detect(actor(), context({ turnsLost = 1 })))
+      assert.is_true(d.detect(actor(), context({ turnsLost = 30 })))
+      assert.equals(1, C.BLACKOUT_TURNS)
     end)
 
     -- Missing is not zero by accident: a ctx built before an activation
-    -- exists has no turnGap at all, and that must read as "no blackout"
+    -- exists has no turnsLost at all, and that must read as "no blackout"
     -- rather than as an error.
-    it("treats an absent gap as none", function()
+    it("treats an absent count as none", function()
       assert.is_false(d.detect(actor(), context({})))
     end)
 
-    it("says how many whole turns went by", function()
-      assert.equals("lost 1 turn while unable to act",   C.message(d, actor(), context({ turnGap = 11 })))
-      assert.equals("lost 3 turns while unable to act",  C.message(d, actor(), context({ turnGap = 30 })))
-      assert.equals("lost 12 turns while unable to act", C.message(d, actor(), context({ turnGap = 125 })))
+    it("says how many turns went by", function()
+      assert.equals("lost 1 turn while unable to act",   C.message(d, actor(), context({ turnsLost = 1 })))
+      assert.equals("lost 3 turns while unable to act",  C.message(d, actor(), context({ turnsLost = 3 })))
+      assert.equals("lost 12 turns while unable to act", C.message(d, actor(), context({ turnsLost = 12 })))
     end)
   end)
   describe("the power conditions read the situation score (#11)", function()

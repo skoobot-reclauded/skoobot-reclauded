@@ -147,8 +147,10 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   stuns take turns away without the bot ever getting one — it cannot notice while it is
   happening, because the game never asks it what to do. On the first turn it gets back it now
   says *lost N turns while unable to act*, so a fight that has moved on while you looked away
-  is explained rather than mysterious. Set it to IGNORE if you would rather not hear about it.
-  Your existing WARN/STOP/IGNORE choices are untouched: the other thirteen keep their order.
+  is explained rather than mysterious. It counts turns the character never got, at the
+  character's own speed, so an ordinary rest is not a blackout and neither is being slowed. Set
+  it to IGNORE if you would rather not hear about it. Your existing WARN/STOP/IGNORE choices are
+  untouched: the other thirteen keep their order.
 - **Being hurt counts for more than it did** (#79). Your own power level was scaled straight
   down by the life you had left, so half life read as exactly half strength. It is a curve now:
   half life counts for about a third, and a quarter life for about a sixth — a character at 51%

@@ -32,11 +32,11 @@
         legitimate hand-back (a dialog, a level change, unspent points, a
         stop condition) is noted and the bot restarted, as the soak does,
         until 1000+ game turns have passed or the deadline. Asserted: the
-        invariant never fired; every hand-back carried a reason; the run
-        advanced at least -TargetTurns. A run that ends short of the
-        target without a trip -- the character died, or kept stopping for
-        the same cause in view -- is INCONCLUSIVE, not a failure: it
-        measured nothing about liveness.
+        invariant never fired; every hand-back carried a reason; no rest was
+        reported as a blackout (#77); the run advanced at least -TargetTurns.
+        A run that ends short of the target without a trip -- the character
+        died, or kept stopping for the same cause in view -- is
+        INCONCLUSIVE, not a failure: it measured nothing about liveness.
 
     Query mode is not used for (a): the invariant lives in the per-turn
     driver, which a real activation reaches and a query does not. The game
@@ -50,7 +50,7 @@
     Run:
         powershell -ExecutionPolicy Bypass -File .\tools\scenario-liveness.ps1
 
-    #13 (T-027), #7 (T-012), #46, #27.
+    #13 (T-027), #7 (T-012), #46, #77, #27.
 #>
 [CmdletBinding()]
 param(
@@ -417,6 +417,19 @@ return "installed"
 
     $null = Assert-Result ([pscustomobject]@{ Status = 'OK'; Result = "tripped=$tripped"; Tainted = $false }) "the invariant never fired across $adv game turns" -Match 'tripped=False'
     $null = Assert-Result ([pscustomobject]@{ Status = 'OK'; Result = "noreason=$noReason"; Tainted = $false }) 'every hand-back carried a reason' -Match 'noreason=0'
+    # #77: a blackout is a stun that cost the character turns, not an
+    # ordinary rest. The first build measured the gap on the BOT's decision
+    # clock, which does not move while the engine is resting or running the
+    # player -- so every rest ended with "lost N turns while unable to act",
+    # and the owner hit it on the first live test. This run rests repeatedly
+    # over $TargetTurns turns, so it is the honest place to say so.
+    #
+    # A real blackout here would be legitimate, but nothing in this run
+    # paralyses the character; if this ever fires on a healthy run, the count
+    # is what to look at.
+    $blackouts = 0
+    foreach ($k in $handbacks.Keys) { if ($k -match 'while unable to act') { $blackouts += $handbacks[$k] } }
+    $null = Assert-Result ([pscustomobject]@{ Status = 'OK'; Result = "blackouts=$blackouts"; Tainted = $false }) 'no rest or run was reported as turns lost while unable to act (#77)' -Match 'blackouts=0'
     $null = Invoke-Bridge -Lua 'return lv.clearRules()' -TimeoutSec 30
     if (-not $tripped -and $adv -lt $TargetTurns) {
         Inconclusive "the healthy run advanced only $adv of $TargetTurns game turns ($endedWhy); nothing about liveness was measured"

@@ -18,11 +18,11 @@
          the saved list and the menu; the liveness entries (CANNOT_MOVE,
          ENCASED) are in the definition list and in neither.
      0b. BLACKOUT (#77), after the quiet spot is found so nothing is in view:
-         the fourteenth entry, staged by writing the turn gap
-         onto the activation -- query mode takes no turn, so the driver that
-         computes the gap never runs. A gap of exactly one player turn is not
-         a blackout; more than one hands back with "lost N turns while unable
-         to act", singular at one, and the player is told in the message log.
+         the fourteenth entry, staged by writing the lost-turn count onto the
+         activation -- query mode takes no turn, so the act wrapper that
+         counts the loss never runs. Nothing lost is not a blackout; one or
+         more hands back with "lost N turns while unable to act", singular at
+         one, and the player is told in the message log.
       1. FIGHT, pinned, a hostile adjacent: the bot attacks rather than
          stopping -- "cannot move" does not mean "cannot fight".
       2. FIGHT, pinned, the hostile two grids away: no talent reaches and
@@ -262,7 +262,7 @@ end
 -- point last_turn is refreshed. What it does cover is everything after it:
 -- that conditionContext carries turnGap, that the fourteenth entry reads it,
 -- and that the wording reaches the player.
-function cd.blackout(gap)
+function cd.blackout(lost)
   local p = game.player
   cd.reset()
   b.state = 13
@@ -270,12 +270,12 @@ function cd.blackout(gap)
   if not b.activation then return "SETUP no activation after a query" end
   local primed = tostring(b.last_reason)
   b.activation.from_query = nil
-  b.activation.turn_gap = gap
+  b.activation.turns_lost = lost
   b.data(p).stopwarn = {}
-  -- The gap as the activation held it just BEFORE the measured decision.
+  -- The count as the activation held it just BEFORE the measured decision.
   -- Read after, it is always nil: a stop clears the activation, so the
-  -- read-back would say "no gap" on exactly the runs where the gap worked.
-  local held = b.activation and b.activation.turn_gap
+  -- read-back would say "nothing lost" on exactly the runs where it worked.
+  local held = b.activation and b.activation.turns_lost
   local before = game.turn
   local ld = game.uiset and game.uiset.logdisplay
   local nlog = ld and ld.log and #ld.log or 0
@@ -285,8 +285,8 @@ function cd.blackout(gap)
   -- in the list, so anything wandering into view answers with its own reason
   -- and this probe measures nothing -- which is how it flaked once in a full
   -- library run, before part 0b was moved after the quiet spot.
-  return ("BLACKOUT gap=%d held=%s hostiles=%d primed=%s dturn=%d reason=%s log=%s"):format(
-    gap, tostring(held), cd.hostiles(), primed, game.turn - before,
+  return ("BLACKOUT lost=%d held=%s hostiles=%d primed=%s dturn=%d reason=%s log=%s"):format(
+    lost, tostring(held), cd.hostiles(), primed, game.turn - before,
     tostring(b.last_reason), cd.newLog(nlog))
 end
 function cd.describe()
@@ -333,25 +333,18 @@ return "installed"
     $b0 = Probe 'return cd.blackout(0)'
     Write-Host "  $($b0.Result)"
     if ($b0.Result -match '^SETUP') { Inconclusive $b0.Result }
-    $null = Assert-Result $b0 'no gap, no stop' -Match ' dturn=0 reason=nil'
-    $b1 = Probe 'return cd.blackout(10)'
-    Write-Host "  $($b1.Result)"
-    $null = Assert-Result $b1 'a gap of exactly one player turn is not a blackout' -Match ' dturn=0 reason=nil'
-    # Singular BEFORE plural. Both hand back, and BLACKOUT is a WARN, so
-    # running them in the other order made the second depend on the first's
-    # acknowledgement being cleared -- which it is, by cd.reset, but that is
-    # a dependency the assertions did not need to carry. (One flake in a full
-    # library run, 2026-08-23; both cases pass alone.)
-    $b3 = Probe 'return cd.blackout(11)'
+    $null = Assert-Result $b0 'nothing lost, no stop' -Match ' dturn=0 reason=nil'
+    # Singular before plural, so neither depends on the other's WARN
+    # acknowledgement having been cleared.
+    $b3 = Probe 'return cd.blackout(1)'
     Write-Host "  $($b3.Result)"
-    $null = Assert-Result $b3 'the gap reached the condition intact, on a clear field' -Match ' held=11 hostiles=0 primed=nil '
+    $null = Assert-Result $b3 'the count reached the condition intact, on a clear field' -Match ' held=1 hostiles=0 primed=nil '
     $null = Assert-Result $b3 'one turn is singular' -Match 'reason=Handed back: lost 1 turn while unable to act'
-    $b2 = Probe 'return cd.blackout(35)'
+    $b2 = Probe 'return cd.blackout(3)'
     Write-Host "  $($b2.Result)"
     $null = Assert-Result $b2 'more than one turn hands back' -Match 'reason=Handed back: lost 3 turns while unable to act'
     $null = Assert-Result $b2 'and the player is told in the message log' -Match 'log=.*lost 3 turns while unable to act'
     $null = Assert-Result $b2 'reading it advances no game turn' -Match ' dturn=0 '
-
 
     # ----- 1: pinned, FIGHT, adjacent ------------------------------------------
     Write-Host ''

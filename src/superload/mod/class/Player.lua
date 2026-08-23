@@ -398,6 +398,12 @@ local function activationInit()
         -- per-turn driver has run this activation; last_turn is game.turn
         -- at the last one; stalled is how many in a row found it unchanged.
         iterations = 0, last_turn = game.turn, stalled = 0,
+        -- #77: the last game.turn the ENGINE gave the player a turn, and the
+        -- whole turns it never got. Tracked separately from last_turn above,
+        -- which counts DECISIONS -- during a rest or a run the bot makes
+        -- none, and reading a blackout off that clock reported the whole
+        -- rest as time lost, every rest.
+        last_act_turn = game.turn, turns_lost = 0,
         -- #78: steps spent walking to a glowing chest, so a chest across
         -- the level is not chased for ever. Reset whenever the walk ends.
         seeks = 0,
@@ -1470,10 +1476,11 @@ function conditionContext(p, hostiles)
         hostiles    = #hostiles,
         cfg         = cfg,
         chestInView = glowingChestInView,
-        -- #77: turns lost while the character could not act, recorded by the
-        -- per-turn driver. nil outside an activation, and 0 on its first
-        -- iteration -- activationInit starts last_turn at game.turn.
-        turnGap     = (bot.activation and bot.activation.turn_gap) or 0,
+        -- #77: whole turns the character never got, counted by the act
+        -- wrapper against the engine's own clock rather than the bot's
+        -- decision clock -- a rest is not a blackout. nil outside an
+        -- activation, and 0 on its first turn.
+        turnsLost   = (bot.activation and bot.activation.turns_lost) or 0,
     }
     ctx.caps = conditions.capabilities(p, ctx)
     ctx.score = evaluateSituation(p, hostiles, ctx.caps, false)
@@ -2174,13 +2181,6 @@ local function playerActions()
             if game.turn == act.last_turn then
                 act.stalled = act.stalled + 1
             else
-                act.stalled = 0
-                -- #77: the turns that went by since the bot last acted, kept
-                -- before last_turn is overwritten. While the character could
-                -- not act at all the engine gave the player no turn, so this
-                -- is the only place the blackout is visible: as a gap, on the
-                -- first turn back.
-                act.turn_gap = game.turn - act.last_turn
                 act.last_turn = game.turn
             end
             chan.trace("[PlayerActions] iteration %d at game turn %d, stalled %d",
@@ -2239,7 +2239,41 @@ end
 --- hook -- run before the rest and run stepping, on every actor, and need a
 --- talent, effect or object to hang on. The original's return travels
 --- through untouched (it returns nothing on every path in 1.7.6).
+
+--- How long one of this character's turns is, in game.turn units. ToME gives
+--- an actor a turn every ten ticks at speed 1, and proportionally sooner or
+--- later as global_speed moves: ten for a normal character, twenty at half
+--- speed, five when hasted to double. Without this a slowed character would
+--- read as blacked out on every single turn (#77).
+local function turnLength(p)
+    local s = tonumber(p.global_speed) or 1
+    if s <= 0 then s = 1 end
+    return 10 / s
+end
+
 local function afterAct(self, ...)
+    if game.player == self then
+        -- #77: the turns the character never got. This runs BEFORE the
+        -- rest/run gate below, because Player:act fires on every turn the
+        -- engine hands the player -- including the ones a rest or an
+        -- auto-explore run spends. The bot makes no decision on those, so
+        -- the decision clock (#13's last_turn) does not move, and reading a
+        -- blackout off it reported an entire rest as time lost. Every rest.
+        --
+        -- A blackout is the opposite case: the engine gives the player NO
+        -- turn at all -- paralysis, stoning, a time stun -- so act() itself
+        -- does not fire and the gap is visible here when it resumes.
+        local act = bot.activation
+        if act then
+            local gap = game.turn - (act.last_act_turn or game.turn)
+            act.last_act_turn = game.turn
+            -- floor, not round: one turn's worth of gap is the turn just
+            -- taken, and anything short of a whole extra turn is jitter --
+            -- energy does not divide exactly and speed can change mid-gap.
+            -- Erring toward silence is right for a WARN nobody can act on.
+            act.turns_lost = math.max(0, math.floor(gap / turnLength(self)) - 1)
+        end
+    end
     if game.player == self and (not self.running) and (not self.resting) and bot.active then
         if not self:enoughEnergy() then
             chan.debug("[PlayerActions] act called with insufficient energy; waiting for the next turn")

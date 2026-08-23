@@ -79,8 +79,8 @@ real turn after it:
 
 ```lua
 { code = "TURNS_BLACKOUT", label = "Turns: BLACKOUT", default = "WARN",
-  detect = function(_, ctx) return (ctx.turnGap or 0) > 10 end,   -- more than one player turn
-  msg    = "lost %d turns while unable to act" }                  -- built as written, #77
+  detect = function(_, ctx) return (ctx.turnsLost or 0) >= 1 end,   -- one of ITS turns
+  msg    = "lost %d turns while unable to act" }                    -- built, #77; see 3.1
 ```
 
 That belongs in §2, not §1 — it's information for a decision, not a liveness guard.
@@ -368,11 +368,24 @@ explains the block — so the T-012 and stop-notice scenarios read the same text
 
 **Built (#77).** `TURNS_BLACKOUT` is the fourteenth policy entry: WARN by default, HANDED_BACK
 rather than STOPPED because it is news and not danger, and worded "lost N turns while unable to
-act". The turn gap it reads is kept by the per-turn driver, which records `game.turn -
-act.last_turn` before overwriting `last_turn` -- that subtraction is the only place a blackout
-is visible, because while it lasts the engine gives the player no turn and the act loop is not
-running at all. Adding it moved nothing: v1's thirteen keep their codes, labels, defaults and
-relative order, so a saved list still reconciles without losing a choice.
+act". Adding it moved nothing: v1's thirteen keep their codes, labels, defaults and relative
+order, so a saved list still reconciles without losing a choice.
+
+**Which clock it reads matters, and the first build read the wrong one.** It counted `game.turn`
+between the bot's *decisions* — but the bot makes no decision while the engine is resting the
+player or running auto-explore, so a rest of eighty turns looked exactly like eighty turns of
+paralysis. It announced a blackout after **every rest**; the owner hit it on the first live
+test. The gap is counted in the `Player:act` wrapper now, *before* its rest/run gate, because
+`act` fires on every turn the engine hands the player whether or not the bot decides on it. A
+blackout is the opposite case: the engine gives the player **no** turn at all, so `act` itself
+does not fire and the gap is visible when it resumes.
+
+The count is also normalised for the character's own speed — one turn is ten `game.turn` ticks
+at speed 1 and twenty at half, so a fixed threshold would have left a slowed character
+permanently blacked out. `ctx.turnsLost` is therefore whole turns the character *never got*,
+and the condition is a plain `>= 1` with no game-clock arithmetic in it at all. It floors
+rather than rounds: anything short of a whole extra turn is jitter, and erring toward silence
+is right for a WARN nobody can act on.
 
 ### 3.2 Reconcile on access
 
