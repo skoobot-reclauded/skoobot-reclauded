@@ -290,6 +290,11 @@ return "installed"
             $txt = "$($r.Result)"
             if ($txt -match '^WAIT') { Start-Sleep -Seconds 2; $i--; continue }
             if ($txt -match '^(OUTOFSIGHT|BLOCKED)') { $script:ended = $txt; break }
+            # Real game time passes between acts and the level is alive: once a
+            # wandering hostile has come into view the bot is correctly fleeing
+            # from whichever is nearest, and this test of "one hostile, one step
+            # away per act" is over. Interference, not a failure.
+            if ($txt -match 'from=' -and $txt -notmatch 'from=lone ') { $script:ended = "INTERFERENCE ($txt)"; break }
             Write-Host "  act $i`: $txt"
             $script:steps++
             if ($txt -match 'd0=(\d+) d1=(\d+)') {
@@ -305,10 +310,10 @@ return "installed"
         }
     }
     Write-Host "  ended: $ended ($steps act(s))"
-    Ok ($steps -ge 1) 'at least one flee step was taken' "$steps"
+    Ok ($steps -ge 2) 'at least two flee steps were taken before anything else came into view' "$steps"
     Ok ($bad.Count -eq 0) 'every act grew the distance by at least one (the hostile moves too), moved the player to the chosen grid, and counted one action' ($bad -join '; ')
     foreach ($m in $bad) { Write-Host "         $m" }
-    Ok ($ended -match '^(OUTOFSIGHT|BLOCKED)' -or $steps -eq $MaxSteps) 'the acts ended by the hostile leaving view or no farther grid (never a stop)' $ended
+    Ok ($ended -match '^(OUTOFSIGHT|BLOCKED|INTERFERENCE)' -or $steps -eq $MaxSteps) 'the acts ended by the hostile leaving view, no farther grid, or another hostile arriving (never a stop)' $ended
     Ok ($turns.Delta -ge 10 * $steps) "game.turn advanced at least 10 per act ($($turns.Delta) for $steps)"
     $log = Get-GameLogLines
     $fleeLines = @($log | Where-Object { $_ -match '\[SKOOBOT\] \[Action\] Fleeing from lone ' })

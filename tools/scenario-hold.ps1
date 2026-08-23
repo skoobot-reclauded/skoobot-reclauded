@@ -263,7 +263,8 @@ return "installed level=" .. tostring(ho.logLevelWas) .. "->" .. tostring(lvl)
     $null = Assert-Result $s 'the bot would use Attack -- the second' -Match 'AI would use the talent Attack'
     $null = Assert-Result $s 'the bot does not stop (the stun is IGNORE)' -Match 'reason=nil'
     $log = Get-GameLogLines
-    $heldLines = @($log | Where-Object { $_ -match "\[SKOOBOT\] \[Combat\] Holding tid:$Held while impaired" })
+    # The channel tags every level but info: "[SKOOBOT] [debug] [Combat] ..." (#46).
+    $heldLines = @($log | Where-Object { $_ -match "\[SKOOBOT\] (\[debug\] )?\[Combat\] Holding tid:$Held while impaired" })
     Ok ($heldLines.Count -gt 0) 'the log says the held entry was held' "$($heldLines.Count) line(s)"
 
     # ----- 4: stunned, STOP -----------------------------------------------
