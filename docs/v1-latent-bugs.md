@@ -1,8 +1,9 @@
 # Latent bugs in SkooBot v1, found by static analysis
 
 **Date:** 2026-08-21 · Found while triaging for the rebuild, against SkooBot 0.0.12
-(`reference/skoobot-upstream`). Both were live in every released build and in the copy still
-published on te4.org and the Steam Workshop today.
+([SkoobyDoo/tome4-SkooBot](https://github.com/SkoobyDoo/tome4-SkooBot) at commit `ad23dea`).
+Both were live in every released build and in the copy still published on te4.org and the
+Steam Workshop today.
 
 Both are the **same defect class**: Lua binds `not` tighter than the relational operators, so
 `not x == 1` parses as `(not x) == 1` — a boolean compared to a number, which is *always
