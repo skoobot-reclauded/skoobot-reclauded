@@ -37,6 +37,12 @@
 -- Ctrl+Up/Down belong to the list widget itself, which sees every key before
 -- this dialog does (engine/ui/Dialog.lua keyEvent).
 --
+-- BUILT-IN ACTIONS (#59). Available also lists the two flee rows -- "Flee
+-- from the nearest hostile", "Flee from the strongest hostile" -- from
+-- data/rules.lua's ACTIONS. They place like a talent, into Combat only
+-- (rules.allowed typing), both may be placed, and their description is the
+-- module's fixed prose.
+--
 -- SUGGESTED LOADOUTS (#18). The first row of the list, "Suggest a loadout",
 -- carries the count of talents the bot could place that are in no section,
 -- and activating it (Enter or a click) swaps the list for a PROPOSAL built by
@@ -69,7 +75,11 @@ local DRAG_KIND = "skoobot_reclauded_rule"
 
 local AVAILABLE = "Available"
 
-local KIND_LABELS = { sustained = "Sustained", activated = "Activated", object = "Item" }
+local KIND_LABELS = { sustained = "Sustained", activated = "Activated", object = "Item", action = "Action" }
+
+-- The order kinds are listed in under Available: the character's own talents
+-- first, the built-in actions (#59) last.
+local KIND_ORDER = { activated = 1, object = 2, sustained = 3, action = 4 }
 
 local TUTORIAL = table.concat({
 	"Talents the bot may use, by role. Order within a section is priority: the first one that can be used " ..
@@ -77,7 +87,8 @@ local TUTORIAL = table.concat({
 	"Drag from Available into a section to add a talent; drag it from one section to another to move it, " ..
 		"or onto another talent to put it before that one. Keyboard: Enter or the letter opens the actions; " ..
 		"1-4 add (from Available) or move (from a section) the selected talent; 0 or Delete removes it from " ..
-		"its section; Shift+Up/Down reorders it. Sustained talents only go in Sustain.",
+		"its section; Shift+Up/Down reorders it. Sustained talents only go in Sustain; the flee actions at " ..
+		"the end of Available only go in Combat.",
 	"Not sure where to start? The first row suggests a loadout from the game's own talent data; nothing " ..
 		"is written until you choose Merge or Replace.",
 }, "\n") .. "\n"
@@ -268,13 +279,20 @@ function _M:generateList()
 			end
 		end
 	end
+	-- The built-in actions (#59), after the character's own talents: a fresh
+	-- entry each, never the module's definition table.
+	for _, a in ipairs(rm.ACTIONS) do
+		avail[#avail + 1] = self:row(rm.actionEntry(a), nil, rules)
+	end
 	table.sort(avail, function(a, b)
-		if a.ekind ~= b.ekind then return a.ekind < b.ekind end
+		local ka, kb = KIND_ORDER[a.ekind] or 99, KIND_ORDER[b.ekind] or 99
+		if ka ~= kb then return ka < kb end
 		return a.cname < b.cname
 	end)
 	tree[#tree + 1] = header(nil, AVAILABLE,
-		"Every talent and worn item the bot could use, whether or not it is in a section above. Move one into a " ..
-		"section to add it; the In column shows the sections it is already in. A talent can be in more than one.",
+		"Every talent and worn item the bot could use, whether or not it is in a section above, and the bot's " ..
+		"own built-in actions -- the flee moves -- last. Move one into a section to add it; the In column shows " ..
+		"the sections it is already in. A talent can be in more than one; a flee goes in Combat only.",
 		avail, not self.folded[AVAILABLE])
 
 	local letter = 1

@@ -788,7 +788,9 @@ local function getRules(p)
         end
     end
     local removed = rules.prune(r, function(e)
-        if e.object then return true end
+        -- An item rule waits for its item; a built-in action (#59) has no
+        -- talent to lose.
+        if e.object or rules.isAction(e) then return true end
         return p:knowTalent(e.tid) and true or false
     end)
     for _, e in ipairs(removed) do
@@ -817,7 +819,23 @@ local function getAutoTalents(section)
     return rules.tids(getRules(p), section, function(e) return resolveRule(p, e) end)
 end
 
-local function getCombatTalents()     return getAutoTalents("Combat") end
+--- The Combat rotation as the act loop walks it (#59): a talent id for a
+--- talent or a live item, the entry itself for a built-in action, in the
+--- player's order.
+local function getCombatRotation()
+    local p = game.player
+    local out = {}
+    for _, e in ipairs(getRules(p).Combat) do
+        if rules.isAction(e) then
+            out[#out + 1] = e
+        else
+            local tid = resolveRule(p, e)
+            if tid then out[#out + 1] = tid end
+        end
+    end
+    return out
+end
+
 local function getPreventionTalents() return getAutoTalents("DamagePrevention") end
 local function getRecoveryTalents()   return getAutoTalents("Recovery") end
 local function getSustainTalents()    return getAutoTalents("Sustain") end
@@ -833,6 +851,7 @@ local function entryFor(p, t)
 end
 
 local function ruleKind(p, e)
+    if rules.isAction(e) then return "action" end
     if e.object then return "object" end
     local t = e.tid and p:getTalentFromId(e.tid)
     if t and t.is_object_use then return "object" end
@@ -857,7 +876,14 @@ end
 
 local function describeRule(p, e)
     local d = { entry = e, key = rules.key(e), kind = ruleKind(p, e) }
-    if e.object then
+    if d.kind == "action" then
+        -- A built-in action (#59): always live, fixed prose, no talent.
+        local a = rules.describeAction(e)
+        d.live = true
+        d.name = a.name
+        d.tree = "Built-in action"
+        d.desc = a.desc
+    elseif e.object then
         d.tid = liveObjectTid(p, e.object)
         d.t = d.tid and p:getTalentFromId(d.tid) or nil
         d.live = d.t ~= nil
@@ -972,8 +998,131 @@ bot.loadout = {
     end,
 }
 
+-------------------------------------------------------------------------------
+-- The flee action (#59)
+-------------------------------------------------------------------------------
+
+--- The hostile a flee entry runs from: the nearest, or for from="strongest"
+--- the highest bot.power -- the figure the stop conditions compare and the
+--- Ctrl-hover tooltip shows, so the choice is explainable -- with the nearer
+--- one on a tie. `hostiles` is spotHostiles' list (actors only).
+local function fleeTarget(entry, hostiles)
+    local p = game.player
+    local best, bestPower, bestDist
+    for _, h in ipairs(hostiles) do
+        if h.actor then
+            local dist = core.fov.distance(p.x, p.y, h.x, h.y)
+            local pw = entry.from == "strongest" and bot.power(h.actor) or 0
+            if not best or pw > bestPower or (pw == bestPower and dist < bestDist) then
+                best, bestPower, bestDist = h, pw, dist
+            end
+        end
+    end
+    return best
+end
+
+--- The grid one flee step would take, or nil and the reason in words.
+---
+--- Ported from the engine's own flee AIs (engine/ai/simple.lua, flee_dmap
+--- with flee_simple as its fallback; Nicolas Casalini, GPL-3.0). Every ToME
+--- actor keeps a distance map (engine/interface/ActorFOV.lua): at each grid
+--- it has seen, `game.turn + radius - distance` as of the last time it saw
+--- it -- so the value is HIGHER where the hostile looked more recently and
+--- from closer, and nil where it never looked. Among the eight neighbours the
+--- player can move to, the one with the lowest value wins -- nil lowest of
+--- all, so a grid out of the hostile's view beats one merely farther away --
+--- and only a grid scoring below where the player stands counts as a step
+--- away at all. When the hostile's map has no value for the player's own
+--- grid (it has not looked yet -- a fresh spawn, or a hostile that has not
+--- acted since arriving), plain distance decides instead: the neighbour
+--- farthest from it, and only one farther than here. Ties either way go to
+--- the farther grid, then to the first in the engine's direction order.
+--- A character who cannot move (never_move: pinned, held, overloaded) has no
+--- step; attempting the impossible is the liveness bug T-012 fixed.
+local function fleeStep(entry, hostiles)
+    local p = game.player
+    if not p.x then return nil, nil, "no position" end
+    if p:attr("never_move") then return nil, nil, "cannot move" end
+    local h = fleeTarget(entry, hostiles)
+    if not h then return nil, nil, "no hostile in view" end
+    local a = h.actor
+    local here = a.distanceMap and a:distanceMap(p.x, p.y) or nil
+    local hereDist = core.fov.distance(p.x, p.y, a.x, a.y)
+    local bx, by, bmap, bdist
+    for _, dir in ipairs(util.adjacentDirs()) do
+        local sx, sy = util.coordAddDir(p.x, p.y, dir)
+        if p:canMove(sx, sy) then
+            local dist = core.fov.distance(sx, sy, a.x, a.y)
+            local cmap, better
+            if here then
+                cmap = a:distanceMap(sx, sy)
+                better = cmap == nil or cmap < here
+            else
+                better = dist > hereDist
+            end
+            if better then
+                local wins
+                if not bx then
+                    wins = true
+                elseif here and (cmap == nil) ~= (bmap == nil) then
+                    wins = cmap == nil
+                elseif here and cmap ~= nil and cmap ~= bmap then
+                    wins = cmap < bmap
+                else
+                    wins = dist > bdist
+                end
+                if wins then bx, by, bmap, bdist = sx, sy, cmap, dist end
+            end
+        end
+    end
+    if not bx then return nil, nil, "no grid farther from " .. tostring(h.name) end
+    return bx, by, h
+end
+
+--- One step away from a hostile (#59): the flee action of the Combat
+--- rotation. In query mode it says what it would do; otherwise it takes the
+--- step through the player's own move(), which spends the turn. A flee that
+--- has no step reports "not available" and returns false so the rotation
+--- moves on -- like a talent on cooldown -- and it never stops the bot by
+--- itself. Each attempt counts toward bot.actions like every other action,
+--- so a circle around a pillar is counted by the same guards as anything
+--- else. A step the engine then refuses (move() returned false: the grid
+--- changed under us) is marked failed for this iteration like a refused
+--- talent, so it is not retried until the next turn.
+local function SAI_flee(entry, hostiles)
+    local x, y, h = fleeStep(entry, hostiles)
+    if not x then
+        log("[Combat] [Flee] Not available (" .. tostring(h) .. "): " .. tostring(rules.key(entry)))
+        return false
+    end
+    local dir = game.level.map:compassDirection(x - game.player.x, y - game.player.y)
+    if bot.do_nothing then
+        game.log("[SkooBot] AI would flee from " .. tostring(h.name) .. " to the " .. tostring(dir))
+        return true
+    end
+    log("[Action] Fleeing from " .. tostring(h.name) .. " to the " .. tostring(dir))
+    bot.actions = bot.actions + 1
+    local moved = game.player:move(x, y)
+    if not moved then
+        log("[Combat] [Flee] The step was refused; not retrying this turn")
+        bot.loop.talentfailed[rules.key(entry)] = true
+        return false
+    end
+    return true
+end
+
+bot.rules.flee = function(entry, p)
+    p = p or game.player
+    return fleeStep(entry, spotHostiles(p, true))
+end
+bot.rules.rotation = function() return getCombatRotation() end
+
 -- TODO (v1): exclude enemies in LOS but not LOE -- cannot Rush over pits, and
 -- someone standing in front of the target blocks a non-piercing attack.
+--
+-- `talentsToUse` is a rotation list: talent ids, and (#59) built-in action
+-- entries, which have no talent to check and are passed over here -- whether
+-- a flee has a step is the rotation's question, not a target's.
 local function getAvailableTalents(target, talentsToUse)
     local avail = {}
     local tx, ty
@@ -982,35 +1131,44 @@ local function getAvailableTalents(target, talentsToUse)
         ty = target.y
     end
     local theseTalents = talentsToUse or getTalents()
-    for _, tid in pairs(theseTalents) do
-        local t = game.player:getTalentFromId(tid)
-        -- For dumb AI assume we need range and LOS; no special check for bolts.
-        local total_range = (game.player:getTalentRange(t) or 0) + (game.player:getTalentRadius(t) or 0)
-        local tg = {type=util.getval(t.direct_hit, game.player, t) and "hit" or "bolt", range=total_range}
-        if t.mode == "activated" and not t.no_npc_use and not t.no_dumb_use and
-           not game.player:isTalentCoolingDown(t) and game.player:preUseTalent(t, true, true) and
-           (target ~= nil and not game.player:getTalentRequiresTarget(t) or game.player:canProject(tg, tx, ty))
-           then
-            avail[#avail + 1] = tid
-            chan.trace("[AvailableTalentFilter] %s can use %s %s", game.player.name, t.name, tid)
-        elseif t.mode == "sustained" and not t.no_npc_use and not t.no_dumb_use and
-           not game.player:isTalentCoolingDown(t) and
-           not game.player:isTalentActive(t.id) and
-           game.player:preUseTalent(t, true, true)
-           then
-            avail[#avail + 1] = tid
+    for _, tid in ipairs(theseTalents) do
+        local t = type(tid) == "string" and game.player:getTalentFromId(tid) or nil
+        if not t then
+            chan.trace("[AvailableTalentFilter] Passing over a non-talent entry: %s", tostring(rules.key(tid) or tid))
         else
-            chan.trace("[AvailableTalentFilter] Excluding talent: %s, cannot be used on %s",
-                tid, target ~= nil and target.name or "nil")
+            -- For dumb AI assume we need range and LOS; no special check for bolts.
+            local total_range = (game.player:getTalentRange(t) or 0) + (game.player:getTalentRadius(t) or 0)
+            local tg = {type=util.getval(t.direct_hit, game.player, t) and "hit" or "bolt", range=total_range}
+            if t.mode == "activated" and not t.no_npc_use and not t.no_dumb_use and
+               not game.player:isTalentCoolingDown(t) and game.player:preUseTalent(t, true, true) and
+               (target ~= nil and not game.player:getTalentRequiresTarget(t) or game.player:canProject(tg, tx, ty))
+               then
+                avail[#avail + 1] = tid
+                chan.trace("[AvailableTalentFilter] %s can use %s %s", game.player.name, t.name, tid)
+            elseif t.mode == "sustained" and not t.no_npc_use and not t.no_dumb_use and
+               not game.player:isTalentCoolingDown(t) and
+               not game.player:isTalentActive(t.id) and
+               game.player:preUseTalent(t, true, true)
+               then
+                avail[#avail + 1] = tid
+            else
+                chan.trace("[AvailableTalentFilter] Excluding talent: %s, cannot be used on %s",
+                    tid, target ~= nil and target.name or "nil")
+            end
         end
     end
     return avail
 end
 
+--- Drop what cannot be tried this iteration: a talent on cooldown or one
+--- that already failed, and (#59) a built-in action whose step was refused.
 local function filterFailedTalents(t)
     local out = {}
-    for _, v in pairs(t) do
-        if not game.player:isTalentCoolingDown(game.player:getTalentFromId(v)) and bot.loop.talentfailed[v] == nil then
+    for _, v in ipairs(t) do
+        if type(v) == "table" then
+            if bot.loop.talentfailed[rules.key(v)] == nil then out[#out + 1] = v end
+        elseif not game.player:isTalentCoolingDown(game.player:getTalentFromId(v))
+               and bot.loop.talentfailed[v] == nil then
             out[#out + 1] = v
         end
     end
@@ -1279,7 +1437,7 @@ function skoobot_act(noAction)
             return skoobot_act(true)
         end
 
-        local combatTalents = filterFailedTalents(getCombatTalents())
+        local combatTalents = filterFailedTalents(getCombatRotation())
 
         if #combatTalents > 0 then
             local picks = {getLowestHealthEnemy(targets), getNearestHostile()}
@@ -1314,18 +1472,39 @@ function skoobot_act(noAction)
                 end
             end
 
-            for _, enemy in pairs(picks) do
-                log("[Combat] Target selected: " .. enemy.name)
-                talents = filterFailedTalents(getAvailableTalents(enemy, combatTalents))
-                local tid = talents[1]
-                if tid ~= nil then
-                    log("[Combat] Using talent: " .. tid .. " on target " .. enemy.name)
-                    game.player:setTarget(enemy.actor)
-                    SAI_useTalent(tid, nil, nil, nil, enemy.actor)
-                    checkForAdditionalAction()
-                    return
+            -- The rotation, in the player's order. A talent is tried on the
+            -- picks -- the lowest-life enemy, then the nearest -- and the first
+            -- usable one fires, as v1 did. A flee (#59) is tried on the field,
+            -- not on a pick, so it splits the list into tiers: every talent
+            -- above it is tried on both picks first, then the flee, then the
+            -- talents below it. Placed first it fires whenever anything is in
+            -- view; placed last it is the "nothing else to do" move.
+            local tier = {}
+            local function fireTier()
+                if #tier == 0 then return false end
+                for _, enemy in pairs(picks) do
+                    log("[Combat] Target selected: " .. enemy.name)
+                    talents = filterFailedTalents(getAvailableTalents(enemy, tier))
+                    local tid = talents[1]
+                    if tid ~= nil then
+                        log("[Combat] Using talent: " .. tid .. " on target " .. enemy.name)
+                        game.player:setTarget(enemy.actor)
+                        SAI_useTalent(tid, nil, nil, nil, enemy.actor)
+                        return true
+                    end
+                end
+                tier = {}
+                return false
+            end
+            for _, item in ipairs(combatTalents) do
+                if type(item) == "table" then
+                    if fireTier() then checkForAdditionalAction() return end
+                    if SAI_flee(item, hostiles) then checkForAdditionalAction() return end
+                else
+                    tier[#tier + 1] = item
                 end
             end
+            if fireTier() then checkForAdditionalAction() return end
 
             -- no legal target: get closer
             local a = Astar.new(game.level.map, game.player)

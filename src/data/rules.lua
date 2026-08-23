@@ -21,15 +21,19 @@
 --   { Combat = { entry, ... }, DamagePrevention = { ... },
 --     Recovery = { ... },      Sustain = { ... } }
 --
--- An entry is {tid = "T_..."} for a talent, or {object = "<item name>"} for an
+-- An entry is {tid = "T_..."} for a talent, {object = "<item name>"} for an
 -- activatable item -- items are keyed by name, the way ToME's own inventory
--- hotkeys are, because their talent id is a rotating slot (#55). Order within
+-- hotkeys are, because their talent id is a rotating slot (#55) -- or
+-- {action = "flee", from = "nearest" | "strongest"} for a built-in action
+-- (#59): a move the bot itself knows, placed in the rotation like a talent,
+-- with `from` as its one parameter. The kind is discriminated by which field
+-- is set, so a later built-in action needs no migration either. Order within
 -- a section IS priority: the first entry is tried first. A rule appears at
 -- most once in a section, but may be in several sections -- a healing
 -- infusion as both Damage Prevention and Recovery, as v1 allowed (owner test
--- of #56). Each placement is its own table, so extra fields on an entry stay
--- with that placement; a later per-rule flag (#15's "hold while impaired")
--- needs no migration.
+-- of #56). Each placement is its own table -- place() copies on an add --
+-- so extra fields on an entry stay with that placement; a later per-rule
+-- flag (#15's "hold while impaired") needs no migration.
 --
 -- v1, and the port until #56, saved a flat list of {tid=, usetype=, priority=}
 -- in the same field. normalize() migrates that in place, once.
@@ -37,6 +41,34 @@
 local M = {}
 
 M.SECTIONS = { "Combat", "DamagePrevention", "Recovery", "Sustain" }
+
+-- The `from` a flee action may name. A flee is one step away from that
+-- hostile; "strongest" is by the bot's own power figure, ties by distance.
+M.FLEE_FROM = { "nearest", "strongest" }
+local FLEE_FROM_SET = {}
+for _, f in ipairs(M.FLEE_FROM) do FLEE_FROM_SET[f] = true end
+
+-- The built-in actions the talent screen lists beside the character's talents
+-- (#59). Fixed prose: an action has no talent description to show.
+M.ACTIONS = {
+    { action = "flee", from = "nearest",
+      name = "Flee from the nearest hostile",
+      desc = "One step away from the nearest hostile in view, then the turn ends. The step is the neighbouring "
+          .. "grid that hostile has the least sight of -- out of its view if there is one, else simply farther "
+          .. "from it. Where the rotation reaches this is when it fires: first in Combat, the character backs away "
+          .. "whenever anything is in view; last, it is what the bot does when nothing else can be used. When no "
+          .. "such step exists the rotation moves on as if a talent were on cooldown; a flee never stops the bot "
+          .. "by itself." },
+    { action = "flee", from = "strongest",
+      name = "Flee from the strongest hostile",
+      desc = "One step away from the strongest hostile in view -- the highest power level, the figure the "
+          .. "power-level stop conditions and the Ctrl-hover tooltip use, nearest on a tie -- then the turn ends. "
+          .. "The step is the neighbouring grid that hostile has the least sight of -- out of its view if there "
+          .. "is one, else simply farther from it. Where the rotation reaches this is when it fires. When no such "
+          .. "step exists the rotation moves on as if a talent were on cooldown; a flee never stops the bot by "
+          .. "itself. Both flee rows may be placed: \"from the strongest, failing that from the nearest\" is a "
+          .. "legitimate rotation." },
+}
 
 M.LABELS = {
     Combat           = "Combat",
@@ -62,13 +94,35 @@ function M.isSection(name)
     return SECTION_SET[name] == true
 end
 
+--- Is this entry a built-in action (#59)? Only a flee with a known `from`
+--- counts: an action the module does not know is not a rule at all.
+function M.isAction(entry)
+    return type(entry) == "table" and entry.action == "flee" and FLEE_FROM_SET[entry.from] == true
+end
+
 --- The identity of an entry: what makes two entries the same rule.
 -- @return a string, or nil for anything that is not a rule
 function M.key(entry)
     if type(entry) ~= "table" then return nil end
     if type(entry.tid) == "string" and entry.tid ~= "" then return "tid:" .. entry.tid end
     if type(entry.object) == "string" and entry.object ~= "" then return "object:" .. entry.object end
+    if M.isAction(entry) then return "action:" .. entry.action .. ":" .. entry.from end
     return nil
+end
+
+--- The fixed name and description of a built-in action, or nil.
+function M.describeAction(entry)
+    if not M.isAction(entry) then return nil end
+    for _, a in ipairs(M.ACTIONS) do
+        if a.action == entry.action and a.from == entry.from then return a end
+    end
+    return nil
+end
+
+--- A fresh entry for a built-in action row: a copy, never the table in
+--- M.ACTIONS, so a placement can carry its own fields.
+function M.actionEntry(a)
+    return { action = a.action, from = a.from }
 end
 
 function M.same(a, b)
@@ -84,14 +138,19 @@ function M.new()
 end
 
 --- May an entry of this kind live in this section?
--- @param kind "sustained" for a sustained talent; anything else ("activated",
---   "object") for one that is fired
+-- @param kind "sustained" for a sustained talent; "action" for a built-in
+--   action (#59), which is a move in the rotation and so Combat only;
+--   anything else ("activated", "object") for one that is fired
 -- @return true, or false and the reason in words
 function M.allowed(kind, section)
     if not SECTION_SET[section] then return false, "No such section." end
     if kind == "sustained" then
         if section == "Sustain" then return true end
         return false, "A sustained talent can only go in Sustain: used anywhere else, it would be switched off."
+    end
+    if kind == "action" then
+        if section == "Combat" then return true end
+        return false, "A flee is a move in the combat rotation: it can only go in Combat."
     end
     if section == "Sustain" then
         return false, "Only sustained talents go in Sustain."
@@ -209,13 +268,23 @@ function M.removeAll(t, entry)
     return n
 end
 
+--- A shallow copy of an entry: its own table, same fields.
+local function copyEntry(entry)
+    local e = {}
+    for field, value in pairs(entry) do e[field] = value end
+    return e
+end
+
 --- Put a rule in `section`: before `before` (an entry of that section), or at
 --- the end. If `from` names a section, the rule leaves it -- a move; without
 --- `from` the rule keeps its other placements -- an add, which is how the
 --- same talent gets into two sections. Within `section` a rule is placed
 --- once: if it is already there and no position is asked for, it stays where
 --- it is; with `before` it is repositioned. The stored table is what moves,
---- so extra fields on it survive a move.
+--- so extra fields on it survive a move; an add stores a COPY of what it was
+--- given, so two placements never share a table (the talent screen's "Also
+--- add to" hands over the stored entry of another section, and a per-entry
+--- field set in one section must not appear in the other).
 -- @return the index it is at; or nil and a reason
 function M.place(t, entry, section, before, from)
     if not SECTION_SET[section] then return nil, "No such section." end
@@ -226,7 +295,7 @@ function M.place(t, entry, section, before, from)
     local idx = M.indexIn(t, section, entry)
     if idx and (not before or M.key(before) == k) then return idx end
     local here = idx and table.remove(t[section], idx) or nil
-    local e = here or moved or entry
+    local e = here or moved or copyEntry(entry)
     local list = t[section]
     local at = #list + 1
     if before then

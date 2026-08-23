@@ -15,7 +15,10 @@ end
 
 local function tids(list)
   local out = {}
-  for i, e in ipairs(list) do out[i] = e.tid or ("@" .. tostring(e.object)) end
+  for i, e in ipairs(list) do
+    out[i] = e.tid or (e.object and ("@" .. tostring(e.object)))
+      or ("!" .. tostring(e.action) .. ":" .. tostring(e.from))
+  end
   return out
 end
 
@@ -26,7 +29,8 @@ describe("data/rules.lua", function()
 
   it("is a pure module exposing the list operations", function()
     for _, f in ipairs({ "new", "normalize", "key", "same", "indexIn", "where", "remove", "removeAll",
-                         "place", "shift", "prune", "tids", "count", "allowed", "isSection" }) do
+                         "place", "shift", "prune", "tids", "count", "allowed", "isSection",
+                         "isAction", "describeAction", "actionEntry" }) do
       assert.is_function(R[f], f)
     end
     assert.are.same({ "Combat", "DamagePrevention", "Recovery", "Sustain" }, R.SECTIONS)
@@ -53,6 +57,53 @@ describe("data/rules.lua", function()
       assert.is_nil(R.key({ tid = "" }))
       assert.is_nil(R.key({ usetype = "Combat", priority = 1 }))
       assert.is_false(R.same({}, {}))
+    end)
+
+    it("identifies a flee action by what it flees from (#59)", function()
+      assert.are.equal("action:flee:nearest", R.key({ action = "flee", from = "nearest" }))
+      assert.are.equal("action:flee:strongest", R.key({ action = "flee", from = "strongest" }))
+      assert.is_true(R.same({ action = "flee", from = "nearest", hold = true }, { action = "flee", from = "nearest" }))
+      assert.is_false(R.same({ action = "flee", from = "nearest" }, { action = "flee", from = "strongest" }))
+      assert.is_true(R.isAction({ action = "flee", from = "strongest" }))
+      assert.is_false(R.isAction({ tid = "T_RUSH" }))
+    end)
+
+    it("gives an unknown action or an unknown `from` no identity", function()
+      assert.is_nil(R.key({ action = "flee" }))
+      assert.is_nil(R.key({ action = "flee", from = "weakest" }))
+      assert.is_nil(R.key({ action = "charge", from = "nearest" }))
+      assert.is_false(R.isAction({ action = "flee", from = "weakest" }))
+    end)
+  end)
+
+  describe("the built-in actions (#59)", function()
+    it("lists a flee from the nearest and from the strongest, each with fixed prose", function()
+      assert.are.equal(2, #R.ACTIONS)
+      assert.are.same({ "nearest", "strongest" }, R.FLEE_FROM)
+      for i, a in ipairs(R.ACTIONS) do
+        assert.are.equal("flee", a.action)
+        assert.are.equal(R.FLEE_FROM[i], a.from)
+        assert.is_string(a.name)
+        assert.is_string(a.desc)
+        assert.is_true(#a.desc > 40)
+      end
+    end)
+
+    it("describes a flee entry by its fixed prose, and nothing else", function()
+      local d = R.describeAction({ action = "flee", from = "strongest", hold = true })
+      assert.are.equal("Flee from the strongest hostile", d.name)
+      assert.are.equal(R.ACTIONS[2].desc, d.desc)
+      assert.are.equal("Flee from the nearest hostile", R.describeAction({ action = "flee", from = "nearest" }).name)
+      assert.is_nil(R.describeAction({ tid = "T_RUSH" }))
+      assert.is_nil(R.describeAction({ action = "flee", from = "weakest" }))
+    end)
+
+    it("hands out a fresh entry for a palette row, never the definition itself", function()
+      local e = R.actionEntry(R.ACTIONS[1])
+      assert.are.same({ action = "flee", from = "nearest" }, e)
+      assert.are_not.equal(R.ACTIONS[1], e)
+      e.hold = true
+      assert.is_nil(R.ACTIONS[1].hold)
     end)
   end)
 
@@ -172,6 +223,38 @@ describe("data/rules.lua", function()
       assert.are.same(before, tids(t.Combat))
       assert.are.same({ migrated = 0, dropped = 0 }, report)
     end)
+
+    it("leaves a flee action in Combat alone, fields and all (#59)", function()
+      local flee = { action = "flee", from = "strongest", extra = true }
+      local t = { Combat = { { tid = "T_A" }, flee, { tid = "T_B" } } }
+      local _, report = R.normalize(t)
+      assert.are.same({ "T_A", "!flee:strongest", "T_B" }, tids(t.Combat))
+      assert.are.equal(flee, t.Combat[2], "the same table")
+      assert.is_true(t.Combat[2].extra)
+      assert.are.same({ migrated = 0, dropped = 0 }, report)
+    end)
+
+    it("migrates a v1-shaped flee by its usetype like any rule, and drops one it does not know", function()
+      local t = {
+        { action = "flee", from = "nearest", usetype = "Combat", priority = 3 },
+        { tid = "T_A", usetype = "Combat", priority = 1 },
+        { action = "flee", from = "weakest", usetype = "Combat", priority = 9 },   -- no such `from`
+      }
+      local _, report = R.normalize(t)
+      assert.are.same({ "!flee:nearest", "T_A" }, tids(t.Combat))
+      assert.is_nil(t.Combat[1].usetype)
+      assert.is_nil(t.Combat[1].priority)
+      assert.are.equal(2, report.migrated)
+      assert.are.equal(1, report.dropped)
+    end)
+
+    it("dedupes a flee within a section like any rule", function()
+      local t = { Combat = { { action = "flee", from = "nearest" }, { tid = "T_A" },
+                             { action = "flee", from = "nearest" } } }
+      local _, report = R.normalize(t)
+      assert.are.same({ "!flee:nearest", "T_A" }, tids(t.Combat))
+      assert.are.equal(1, report.dropped)
+    end)
   end)
 
   describe("allowed", function()
@@ -188,6 +271,15 @@ describe("data/rules.lua", function()
       assert.is_false(ok)
       assert.is_string(why)
       assert.is_false((R.allowed("activated", "Available")))
+    end)
+
+    it("confines a built-in action to Combat (#59)", function()
+      assert.is_true(R.allowed("action", "Combat"))
+      for _, s in ipairs({ "DamagePrevention", "Recovery", "Sustain" }) do
+        local ok, why = R.allowed("action", s)
+        assert.is_false(ok, s)
+        assert.is_string(why)
+      end
     end)
   end)
 
@@ -287,6 +379,46 @@ describe("data/rules.lua", function()
       assert.are.equal(1, R.place(t, { object = "wand of fire" }, "Combat", { tid = "T_A" }))
       assert.are.same({ "@wand of fire", "T_A", "T_B", "T_C" }, tids(t.Combat))
     end)
+
+    it("places a flee action like any rule: at the end, before a talent, once per section (#59)", function()
+      local flee = { action = "flee", from = "nearest" }
+      assert.are.equal(4, R.place(t, flee, "Combat"))
+      assert.are.equal(2, R.place(t, flee, "Combat", { tid = "T_B" }))
+      assert.are.same({ "T_A", "!flee:nearest", "T_B", "T_C" }, tids(t.Combat))
+      assert.are.equal(2, R.place(t, { action = "flee", from = "nearest" }, "Combat"), "a repeat add stays put")
+      assert.are.equal(5, R.place(t, { action = "flee", from = "strongest" }, "Combat"), "both flee rows may be placed")
+      assert.are.equal(5, R.count(t))
+      assert.are.same({ { section = "Combat", index = 2 } }, R.where(t, flee))
+    end)
+
+    it("stores its own copy on an add, so two placements never share a table", function()
+      -- The talent screen's "Also add to" hands over the stored entry of the
+      -- section the row is in (#56); a per-placement field set afterwards in
+      -- one section must not appear in the other.
+      local stored = t.Combat[2]
+      assert.are.equal(1, R.place(t, stored, "Recovery"))
+      assert.are_not.equal(stored, t.Recovery[1])
+      assert.are.same({ tid = "T_B" }, t.Recovery[1])
+      t.Combat[2].extra = true
+      assert.is_nil(t.Recovery[1].extra, "a field set in one section does not appear in the other")
+      local given = { tid = "T_X", extra = true }
+      R.place(t, given, "Combat")
+      assert.are_not.equal(given, t.Combat[4])
+      assert.is_true(t.Combat[4].extra, "the copy carries the fields it was given")
+    end)
+
+    it("keeps a flee's extra fields through a reposition and a shift (#59)", function()
+      local flee = { action = "flee", from = "strongest", extra = true }
+      R.place(t, flee, "Combat")
+      local stored = t.Combat[4]
+      assert.is_true(stored.extra)
+      R.place(t, { action = "flee", from = "strongest" }, "Combat", { tid = "T_A" })
+      assert.are.equal(stored, t.Combat[1], "repositioned in place: the same table")
+      assert.is_true(t.Combat[1].extra)
+      assert.are.equal(3, R.shift(t, { action = "flee", from = "strongest" }, "Combat", 2))
+      assert.is_true(t.Combat[3].extra)
+      assert.are.same({ "T_A", "T_B", "!flee:strongest", "T_C" }, tids(t.Combat))
+    end)
   end)
 
   describe("remove and removeAll", function()
@@ -340,6 +472,28 @@ describe("data/rules.lua", function()
       assert.is_nil(R.shift(t, { tid = "T_X" }, "Recovery", 1))
       assert.is_nil(R.shift(t, { tid = "T_A" }, "Combat", 1))
     end)
+
+  end)
+
+  describe("remove, removeAll and prune with a flee (#59)", function()
+    it("remove a flee by identity and leave the talents", function()
+      local t = R.new()
+      t.Combat = { { action = "flee", from = "nearest", extra = true }, { tid = "T_A" },
+                   { action = "flee", from = "strongest" } }
+      local e = R.remove(t, { action = "flee", from = "nearest" }, "Combat")
+      assert.are.same({ action = "flee", from = "nearest", extra = true }, e)
+      assert.are.same({ "T_A", "!flee:strongest" }, tids(t.Combat))
+      assert.are.equal(1, R.removeAll(t, { action = "flee", from = "strongest" }))
+      assert.are.same({ "T_A" }, tids(t.Combat))
+    end)
+
+    it("prune keeps a flee when the predicate does, whatever the character knows", function()
+      local t = R.new()
+      t.Combat = { { action = "flee", from = "nearest" }, { tid = "T_GONE" } }
+      local removed = R.prune(t, function(e) return e.action ~= nil end)
+      assert.are.same({ "!flee:nearest" }, tids(t.Combat))
+      assert.are.equal(1, #removed)
+    end)
   end)
 
   describe("prune and tids", function()
@@ -362,6 +516,12 @@ describe("data/rules.lua", function()
         R.tids(t, "Combat", function(e) return e.tid or live[e.object] end))
       assert.are.same({}, R.tids(t, "Recovery"))
       assert.are.same({}, R.tids(t, "Nowhere"))
+    end)
+
+    it("skips a flee action when listing talent ids: it has none (#59)", function()
+      local t = R.new()
+      t.Combat = { { action = "flee", from = "nearest" }, { tid = "T_A" } }
+      assert.are.same({ "T_A" }, R.tids(t, "Combat"))
     end)
   end)
 end)
