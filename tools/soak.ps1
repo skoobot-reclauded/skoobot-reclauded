@@ -39,6 +39,67 @@
       (d) the player is dead record the killer (game.player.killedBy, which
                              onPartyDeath sets) and end.
       (e) anything else      skoobot_reclauded.start() again.
+      (f) DESCEND WHEN       the hand-back is on stairs UP or the wilderness
+          EXPLORED           exit, and either the level is explored or this is
+                             the -DescendAfter'th such hand-back on this level
+                             (the first long run spent 271 of 338 stops there:
+                             once a level is explored the engine's auto-explore
+                             targets an exit and keeps that target, so (b)'s
+                             step-off restarted a bot that walked straight
+                             back). If a DOWN staircase the player has SEEN is
+                             reachable through tiles the player has seen, walk
+                             to it -- the engine's own A* (engine.Astar, the
+                             same call the bot's combat pathing makes), one
+                             real move per poll, spending turns like a player,
+                             handing back to the bot the moment a hostile is
+                             in view -- and take it with CHANGE_LEVEL. Counted
+                             as "descend"; every move is counted too. No seen
+                             down staircase: fall through to (b).
+                             -NoDescend turns the rung off.
+                             The same trigger also fires on a LOOP the soak
+                             cannot step out of: one hand-back reason recurring
+                             -LoopAfter times on one level (the second
+                             validation run spent all 12 minutes and 78 of 79
+                             stops in #64's sealed-door loop, one tile from the
+                             door, because (c)'s step-away moves one tile and
+                             the bot's own pathing walks back). A walk started
+                             that way hands back only for an ADJACENT hostile:
+                             one merely in view, that the bot cannot reach, is
+                             what the loop is made of.
+      (g) NEXT ZONE          the level is the zone's last (game.zone.max_level)
+                             and (f)'s trigger holds, or the hand-back is on
+                             the wilderness exit of an explored level with no
+                             seen down staircase: the engine's own transition,
+                             game:changeLevel(1, zone) -- the call a step onto
+                             a zone entrance on the world map makes
+                             (Game.lua:2292) -- to the first zone of the list
+                             below not yet visited, whose level_range minimum
+                             is at most the character's level + 2. Counted as
+                             "next-zone". The wilderness is never entered: the
+                             bot cannot run there, by design. -Zones "a,b,c"
+                             replaces the list.
+    Either (f) or (g) may be refused by the engine for two turns after a kill
+    (changeLevelCheck); a turn is then passed through the MOVE_STAY bind and
+    counted as "wait".
+
+    THE ZONE LIST is a measurement carriage, not product: it is the order a
+    player of this level would usually take the early dungeons in, and it
+    exists only so a run can keep measuring past the first zone. Ids and
+    level ranges verified against data/zones/<id>/zone.lua in ToME 1.7.6
+    (2026-08-23), and re-read from the installed module at start: an id with
+    no zone.lua is dropped and reported. "kor-pul" is not a zone; the ruins
+    are "ruins-kor-pul".
+
+        trollmire            level_range 1-7    3 levels (alt layout: 3)
+        ruins-kor-pul        level_range 1-7    3 levels
+        norgos-lair          level_range 1-7    3 levels
+        scintillating-caves  level_range 1-7    5 levels (alt layout: 3)
+        rhaloren-camp        level_range 1-7    3 levels
+        old-forest           level_range 7-16   4 levels
+        daikara              level_range 7-16   4 levels
+        maze                 level_range 7-16   4 levels (alt layout: 2)
+        sandworm-lair        level_range 7-16   4 levels (no level connectivity:
+                                                the tunnellers dig the way)
 
     By default the fixture's Combat, Sustain and Recovery rules are filled
     from what the character knows (-NoAutoRules to skip): every usable
@@ -66,8 +127,9 @@
         powershell -ExecutionPolicy Bypass -File .\tools\soak.ps1 -MaxMinutes 6
         powershell -ExecutionPolicy Bypass -File .\tools\soak.ps1 -MaxMinutes 240 -MaxLevel 15
         powershell -ExecutionPolicy Bypass -File .\tools\soak.ps1 -Conditions "SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN"
+        powershell -ExecutionPolicy Bypass -File .\tools\soak.ps1 -NoDescend -Zones "trollmire,ruins-kor-pul"
 
-    The last form is for measuring past the product's own hand-back: the
+    The -Conditions form is for measuring past the product's own hand-back: the
     power-level conditions are STOP by default, and a STOP whose cause stays
     in view -- an enemy above MAX_DIFF_POWER -- stops every restart on the
     spot, by design, so a default run ends STUCK there. -Conditions sets the
@@ -92,11 +154,37 @@ param(
     [string]$Conditions,
     [string]$ScratchSave = 'soak-scratch',
     # (c): how many identical stops with no turn taken before REST is tried.
-    [int]$StuckAfter = 5
+    [int]$StuckAfter = 5,
+    # (f): off. The up-stairs hand-back is then stepped off as before.
+    [switch]$NoDescend,
+    # (f): the number of hand-backs on stairs up / the wilderness exit, on one
+    # level, after which the walk to a seen down staircase is tried even if
+    # the level does not report itself explored.
+    [int]$DescendAfter = 3,
+    # (f): one hand-back reason recurring this many times on one level is a
+    # loop the soak cannot step out of, and the walk is tried (again every
+    # time the count reaches a multiple). 0 turns this trigger off.
+    [int]$LoopAfter = 15,
+    # (f): seconds between moves while walking; the ordinary poll is for the
+    # bot's own turns, a move per poll needs no 4 s of thinking time.
+    [int]$WalkPollSec = 1,
+    # (f): a walk longer than this is abandoned (the map is 65x40 at most in
+    # the zones listed; a path cannot honestly be longer).
+    [int]$MaxWalkMoves = 400,
+    # (g): "a,b,c" of zone ids, replacing the list at the top of this file.
+    [string]$Zones
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'harness.ps1')
+
+# (g): the measurement carriage, in the order tried. Verified against ToME
+# 1.7.6 data/zones/<id>/zone.lua (see the header); the ranges are re-read
+# from the installed module at start and an id without a zone.lua is dropped.
+$DefaultZones = @('trollmire', 'ruins-kor-pul', 'norgos-lair', 'scintillating-caves', 'rhaloren-camp',
+                  'old-forest', 'daikara', 'maze', 'sandworm-lair')
+$ZoneIds = @(if ($Zones) { $Zones -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } } else { $DefaultZones })
+foreach ($z in $ZoneIds) { if ($z -notmatch '^[a-z0-9+-]+$') { throw "[soak] -Zones: '$z' is not a zone id" } }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 if (-not $OutFile) {
@@ -107,6 +195,7 @@ $MdFile = [IO.Path]::ChangeExtension($OutFile, '.md')
 
 Write-Host ''
 Write-Host "[soak] save=$SaveName max=${MaxMinutes}m level>=$MaxLevel turns>=$MaxTurns poll=${PollSec}s out=$OutFile"
+Write-Host "[soak] descend=$(if ($NoDescend) { 'off' } else { "after $DescendAfter or explored" }) zones=$($ZoneIds -join ',')"
 
 # ---------------------------------------------------------------------------
 # The record. Everything below is what the JSON summary is made of.
@@ -116,7 +205,7 @@ $endReason = $null
 $stops     = @{}        # reason -> @{count; severity; first_turn; last_turn}
 $resumes   = @{}        # action -> count
 $resumeLog = New-Object System.Collections.Generic.List[object]
-$zones     = New-Object System.Collections.Generic.List[string]
+$zoneTrail = New-Object System.Collections.Generic.List[string]   # NOT $zones: that is the [string] -Zones parameter, and names are case-insensitive
 $tainted   = $false
 $polls     = 0
 $bridgeMisses = 0
@@ -127,6 +216,17 @@ $deaths    = 0
 $killer    = $null
 $stuckLabel = $null
 $conditionsApplied = @()
+# (f) and (g). The two rung counters are rows of the resume table even at
+# zero, so a summary always says whether they fired.
+$resumes['descend'] = 0
+$resumes['next-zone'] = 0
+$descendWalks = 0; $descendMoves = 0; $descendAbandoned = 0; $waits = 0
+$levelHandbacks = @{}     # "zone:level" -> hand-backs on stairs up / the wilderness exit
+$levelLoops     = @{}     # "zone:level|reason" -> recurrences of one hand-back reason on one level
+$descendRetryAt = @{}     # "zone:level" -> hand-back count at which (f) may be tried again after "no path"
+$zoneList = @()           # [{id; min; max}] as verified against the installed module
+$zoneTransitions = New-Object System.Collections.Generic.List[string]
+$walk = $null             # the (f)/(g) state: @{action; phase; key; moves; waits; from}
 
 function Count-Resume($action, $s, $reason) {
     if ($resumes.ContainsKey($action)) { $resumes[$action]++ } else { $resumes[$action] = 1 }
@@ -148,10 +248,15 @@ function Parse-Status([string]$line) {
     foreach ($kv in ($head -split '\|')) {
         if ($kv -match '^([a-z_]+)=(.*)$') { $o[$Matches[1]] = $Matches[2] }
     }
-    foreach ($k in 'turn', 'level', 'zlevel', 'life', 'maxlife', 'ndialogs') {
+    foreach ($k in 'turn', 'level', 'zlevel', 'zmax', 'x', 'y', 'life', 'maxlife', 'ndialogs', 'downs') {
         if ($o.ContainsKey($k) -and $o[$k] -match '^-?\d+') { $o[$k] = [int]$Matches[0] } elseif ($o.ContainsKey($k)) { $o[$k] = -1 }
     }
     [pscustomobject]$o
+}
+
+function Bump-Count([hashtable]$t, [string]$k) {
+    if ($t.ContainsKey($k)) { $t[$k]++ } else { $t[$k] = 1 }
+    $t[$k]
 }
 
 $exit = 1
@@ -182,18 +287,25 @@ function sk.stairs()
   return "up"
 end
 
-function sk.status()
+-- One line of state. With step = "walk" or "walk-loop" a (f) walk step is
+-- taken FIRST and its result reported as walk=, so a move costs one round
+-- trip, not two.
+function sk.status(step)
   local p = game.player
-  if not p then return "turn=-1|level=-1|zone=none|zlevel=-1|life=-1|maxlife=-1|active=false|dead=false|killer=|ndialogs=0|dialog=|stairs=none|reason=no player" end
+  if not p then return "turn=-1|level=-1|zone=none|zlevel=-1|zmax=-1|x=-1|y=-1|life=-1|maxlife=-1|active=false|dead=false|killer=|ndialogs=0|dialog=|stairs=none|downs=0|explored=false|walk=|reason=no player" end
+  local walk = ""
+  if step then walk = (tostring(sk.walkStep(step == "walk-loop")):gsub("|", "/")) end
   local d = game.dialogs and game.dialogs[#game.dialogs]
   local dtitle = d and sk.dialogName(d) or ""
   local killer = ""
   if p.dead and p.killedBy then killer = tostring(p.killedBy.name or "?") end
-  return ("turn=%s|level=%s|zone=%s|zlevel=%s|life=%d|maxlife=%d|active=%s|dead=%s|killer=%s|ndialogs=%d|dialog=%s|stairs=%s|reason=%s"):format(
+  return ("turn=%s|level=%s|zone=%s|zlevel=%s|zmax=%s|x=%s|y=%s|life=%d|maxlife=%d|active=%s|dead=%s|killer=%s|ndialogs=%d|dialog=%s|stairs=%s|downs=%d|explored=%s|walk=%s|reason=%s"):format(
     tostring(game.turn), tostring(p.level), tostring(game.zone and game.zone.short_name or "none"),
-    tostring(game.level and game.level.level or -1), math.floor(p.life or -1), math.floor(p.max_life or -1),
+    tostring(game.level and game.level.level or -1), tostring(game.zone and game.zone.max_level or -1),
+    tostring(p.x or -1), tostring(p.y or -1), math.floor(p.life or -1), math.floor(p.max_life or -1),
     tostring(b.active), tostring(p.dead and true or false), killer:gsub("|", "/"),
-    game.dialogs and #game.dialogs or 0, dtitle:gsub("|", "/"), sk.stairs(), tostring(b.last_reason))
+    game.dialogs and #game.dialogs or 0, dtitle:gsub("|", "/"), sk.stairs(), #sk.downs(), tostring(sk.explored()),
+    walk, tostring(b.last_reason))
 end
 
 -- (a) the top dialog, through its own EXIT bind. Never the death dialog.
@@ -319,6 +431,158 @@ function sk.rules()
     table.concat(b.rules.tids(p, "Combat"), ","), table.concat(b.rules.tids(p, "Sustain"), ","),
     table.concat(b.rules.tids(p, "Recovery"), ","))
 end
+
+-- (f) DESCEND WHEN EXPLORED.
+-- A down staircase: change_level relative (or absolute with change_level_abs)
+-- landing deeper than here, and not a zone exit (data/general/grids/basic.lua).
+local function isDown(t)
+  if not t or not t.change_level or t.change_zone then return false end
+  local target = t.change_level_abs and t.change_level or (game.level.level + t.change_level)
+  return target > game.level.level
+end
+-- What the player knows: a tile seen or remembered (stairs and doors are
+-- always_remember, so a glimpse is enough). Never a vault door: the prompt
+-- behind it is the product's own sealed-door loop (#64), not a route.
+local function known(x, y)
+  local map = game.level.map
+  if not (map.remembers(x, y) or map.has_seens(x, y)) then return false end
+  local t = map(x, y, engine.Map.TERRAIN)
+  if t and (t.door_player_check or t.door_player_stop) then return false end
+  return true
+end
+-- Every seen down staircase, nearest first as the crow flies.
+function sk.downs()
+  local p, out = game.player, {}
+  if not p or not p.x or not game.level then return out end
+  local map = game.level.map
+  for x = 0, map.w - 1 do for y = 0, map.h - 1 do
+    if (map.remembers(x, y) or map.has_seens(x, y)) and isDown(map(x, y, engine.Map.TERRAIN)) then
+      out[#out+1] = { x = x, y = y, d = core.fov.distance(p.x, p.y, x, y) }
+    end
+  end end
+  table.sort(out, function(u, v) return u.d < v.d end)
+  return out
+end
+-- The engine's own A* (engine/Astar.lua), the call the bot's combat pathing
+-- makes, restricted to tiles the player knows. Nearest reachable wins.
+local Astar = require "engine.Astar"
+function sk.pathDown()
+  local p = game.player
+  local downs = sk.downs()
+  for _, c in ipairs(downs) do
+    local path = Astar.new(game.level.map, p):calc(p.x, p.y, c.x, c.y, nil, nil, known)
+    if path and #path > 0 then return path, c end
+  end
+  return nil, nil, #downs
+end
+-- Nothing left to explore, read from the engine's own auto-explore without
+-- running it: it targets an exit only when no unseen tile, item or door is
+-- reachable ("fully explored and we can go to the next level",
+-- mod/class/interface/PlayerExplore.lua:2299), and running_prev keeps that
+-- target until the level changes.
+function sk.explored()
+  local p = game.player
+  local r = p and p.running_prev
+  if r and r.explore == "exit" and r.levelstring == tostring(game.level) then return true end
+  return false
+end
+-- One step of the walk. Hands back to the bot (by returning "hostile") the
+-- moment anything hostile is in view; the walk never fights. Started on a
+-- loop (see the header), only an ADJACENT hostile hands back: one in view
+-- that the bot cannot reach is what the loop is made of.
+function sk.walkStep(loop)
+  local p = game.player
+  if not p or not p.x or not game.level then return "noplayer" end
+  local map = game.level.map
+  if game.dialogs and game.dialogs[1] then return "dialog" end
+  if b.active then return "active" end
+  local hostiles = p:spotHostiles(true)
+  if loop then
+    local near = 0
+    for _, h in ipairs(hostiles) do
+      if core.fov.distance(p.x, p.y, h.x, h.y) <= 1 then near = near + 1 end
+    end
+    if near > 0 then return "hostile " .. near .. " adjacent (" .. #hostiles .. " in view)" end
+  elseif #hostiles > 0 then
+    return "hostile " .. #hostiles
+  end
+  if isDown(map(p.x, p.y, engine.Map.TERRAIN)) then return "arrived" end
+  local path, target, n = sk.pathDown()
+  if not path then
+    if (n or 0) > 0 then return "nopath " .. n end
+    return "nostairs"
+  end
+  local nx, ny = path[1].x, path[1].y
+  local a = map(nx, ny, engine.Map.ACTOR)
+  if a then return "blocked by " .. tostring(a.name or "?") end
+  local ox, oy = p.x, p.y
+  local ok, err = pcall(p.move, p, nx, ny)
+  if not ok then return "error " .. tostring(err) end
+  p:playerFOV()
+  if p.x == ox and p.y == oy then
+    local t = map(nx, ny, engine.Map.TERRAIN)
+    if t and t.door_closed then return ("opened door %d,%d left=%d"):format(nx, ny, #path) end
+    return ("nomove %d,%d"):format(nx, ny)
+  end
+  return ("moved %d,%d left=%d to=%d,%d"):format(p.x, p.y, #path - 1, target.x, target.y)
+end
+function sk.where()
+  return tostring(game.zone and game.zone.short_name or "none") .. ":" .. tostring(game.level and game.level.level or -1)
+end
+-- The outcome of a change just asked for: "changed" when the zone or level
+-- differs (an arrival dialog may be open on top: (a) handles it), "dialog"
+-- when one is open and nothing changed yet -- the transmogrification chest
+-- asking first; the change happens when (a) closes it -- and "refused"
+-- otherwise, which is changeLevelCheck: two turns after a kill.
+local function outcome(before, note)
+  local after = sk.where()
+  local d = game.dialogs and game.dialogs[1] and (" (" .. sk.dialogName(game.dialogs[#game.dialogs]) .. " open)") or ""
+  if after ~= before then return "changed " .. after .. d end
+  if d ~= "" then return "dialog " .. sk.dialogName(game.dialogs[#game.dialogs]) end
+  return "refused at " .. after .. (note or "")
+end
+-- The game's own CHANGE_LEVEL bind, and what it did.
+function sk.takeStairs()
+  local before = sk.where()
+  local r = bridge.key("CHANGE_LEVEL")
+  return outcome(before, " (" .. tostring(r) .. ")")
+end
+
+-- (g) NEXT ZONE: the engine's own transition, the call a step onto a zone
+-- entrance on the world map makes (mod/class/Game.lua:2292). With a zone
+-- given the player lands on the new level's up staircase (old_lev is -1000
+-- there, Game.lua:1079 and :1294), exactly as when walking in.
+function sk.nextZone(id)
+  if game.zone and game.zone.short_name == id then return "already in " .. id end
+  local before = sk.where()
+  local ok, err = pcall(game.changeLevel, game, 1, id)
+  if not ok then return "error " .. tostring(err) end
+  return outcome(before)
+end
+-- The zone's level_range as the installed module declares it (some zones
+-- declare two layouts; the widest range is taken), or "missing".
+function sk.zoneInfo(id)
+  local path = "/data/zones/" .. id .. "/zone.lua"
+  if not fs.exists(path) then return "missing" end
+  local f = fs.open(path, "r")
+  if not f then return "unreadable" end
+  local text = f:read(10485760) or ""
+  f:close()
+  local min, max
+  for a, c in text:gmatch("level_range%s*=%s*{%s*(%d+)%s*,%s*(%d+)") do
+    a, c = tonumber(a), tonumber(c)
+    if not min or a < min then min = a end
+    if not max or c > max then max = c end
+  end
+  if not min then return "norange" end
+  return ("min=%d max=%d"):format(min, max)
+end
+function sk.visitedZones()
+  local out = {}
+  for k, v in pairs(game.visited_zones or {}) do if v then out[#out+1] = tostring(k) end end
+  table.sort(out)
+  return table.concat(out, ",")
+end
 return "installed save_name=" .. tostring(game.save_name)
 "@ -TimeoutSec 30
     if ($install.Status -ne 'OK' -or $install.Result -notmatch '^installed') {
@@ -350,6 +614,18 @@ return "installed save_name=" .. tostring(game.save_name)
         }
     }
 
+    # (g): the zone list, checked against the installed module. An id with no
+    # zone.lua is dropped here and reported, not discovered at the transition.
+    foreach ($z in $ZoneIds) {
+        $zi = Invoke-Bridge -Lua "return sk.zoneInfo('$z')" -TimeoutSec 30
+        if ($zi.Status -eq 'OK' -and $zi.Result -match '^min=(\d+) max=(\d+)') {
+            $zoneList += [pscustomobject]@{ id = $z; min = [int]$Matches[1]; max = [int]$Matches[2] }
+        } else {
+            Write-Host "  zone     DROPPED '$z' ($($zi.Status) $($zi.Result))"
+        }
+    }
+    Write-Host "  zones    $(($zoneList | ForEach-Object { "$($_.id)($($_.min)-$($_.max))" }) -join ' ')"
+
     # Any dialog left from the load is closed the way (a) closes them.
     $null = Invoke-Bridge -Lua 'local out = {} for i = 1, 5 do local r = sk.closeDialog() if r == "none" then break end out[#out+1] = r end return table.concat(out, "; ")' -TimeoutSec 30
 
@@ -357,14 +633,30 @@ return "installed save_name=" .. tostring(game.save_name)
     $lastReason = $null; $lastStopTurn = -1; $sameCount = 0; $stuckStage = 0
     $s = $null
 
+    # (f)/(g) helpers over the loop's state. A walk ends in one of three ways,
+    # each counted: the stairs or the zone taken, the bot handed the situation
+    # (a hostile, a blocked tile), or nothing to walk to.
+    function Start-Bot($s, $reason) {
+        $st = Invoke-Bridge -Lua 'return sk.start()' -TimeoutSec 30
+        if ($st.Tainted) { $script:tainted = $true }
+        Count-Resume 'restart' $s $reason
+    }
+    function Abandon-Walk($s, $why) {
+        if ($walk.action -eq 'descend') { $script:descendAbandoned++ }
+        Write-Host "  walk     abandoned $($walk.action) after $($walk.moves) move(s): $why"
+        $script:walk = $null
+    }
+
     $kick = Invoke-Bridge -Lua 'return sk.start()' -TimeoutSec 30
     Write-Host "  start    $($kick.Status) $($kick.Result)"
     if ($kick.Tainted) { $tainted = $true }
 
     while ($true) {
-        Start-Sleep -Seconds $PollSec
+        # A walking poll is short: the move is the only thing that happens.
+        $walking = ($walk -and $walk.phase -eq 'walking')
+        Start-Sleep -Seconds $(if ($walking) { $WalkPollSec } else { $PollSec })
         if (-not (Test-GameAlive)) { $endReason = 'CRASHED'; break }
-        $r = Invoke-Bridge -Lua 'return sk.status()' -TimeoutSec 30
+        $r = Invoke-Bridge -Lua $(if ($walking) { "return sk.status('$(if ($walk.loop) { 'walk-loop' } else { 'walk' })')" } else { 'return sk.status()' }) -TimeoutSec 30
         if ($r.Status -ne 'OK') {
             $bridgeMisses++
             Write-Host "  poll     $($r.Status) ($bridgeMisses in a row)"
@@ -380,8 +672,8 @@ return "installed save_name=" .. tostring(game.save_name)
         $last = $s
         if ($s.level -gt $peakLevel) { $peakLevel = $s.level }
         $zl = "$($s.zone):$($s.zlevel)"
-        if ($zones.Count -eq 0 -or $zones[$zones.Count - 1] -ne $zl) { $zones.Add($zl) }
-        Write-Host ('  poll     turn={0} L{1} {2} life={3}/{4} active={5} dialogs={6} {7}' -f $s.turn, $s.level, $zl, $s.life, $s.maxlife, $s.active, $s.ndialogs, $(if ($s.active -eq 'true') { '' } else { "reason=$($s.reason)" }))
+        if ($zoneTrail.Count -eq 0 -or $zoneTrail[$zoneTrail.Count - 1] -ne $zl) { $zoneTrail.Add($zl) }
+        Write-Host ('  poll     turn={0} L{1} {2} life={3}/{4} active={5} dialogs={6} {7}' -f $s.turn, $s.level, $zl, $s.life, $s.maxlife, $s.active, $s.ndialogs, $(if ($s.active -eq 'true') { '' } elseif ($walking) { "walk=$($s.walk)" } else { "reason=$($s.reason)" }))
 
         # ----- ends -----
         if ($s.dead -eq 'true') {
@@ -412,7 +704,89 @@ return "installed save_name=" .. tostring(game.save_name)
             continue
         }
 
-        if ($s.active -eq 'true') { continue }
+        if ($s.active -eq 'true') { $walk = $null; continue }
+
+        # ----- (f)/(g) in progress: a walk, or a change waiting to take -----
+        # These polls are the rung's own turns, not the bot's stops: nothing
+        # here is recorded in the histogram, and every move is counted.
+        if ($walk) {
+            $key = "$($s.zone):$($s.zlevel)"
+            if ($key -ne $walk.key) {
+                # The change took: the transmogrification chest finishes it
+                # when (a) closes the dialog, so it can land a poll later.
+                Count-Resume $walk.action $s "$($walk.key) -> $key after $($walk.moves) move(s) from $($walk.from) ($($walk.how))"
+                if ($walk.action -eq 'next-zone') { $zoneTransitions.Add("$($walk.key) -> $key") }
+                $walk = $null
+                Start-Sleep -Seconds $PollSec
+                Start-Bot $s "after $key"
+                continue
+            }
+            if ($walk.phase -eq 'walking') {
+                $w = "$($s.walk)"
+                if ($w -match '^(moved|opened door)') {
+                    $walk.moves++; $descendMoves++
+                    if ($walk.moves -gt $MaxWalkMoves) { Abandon-Walk $s "longer than $MaxWalkMoves moves"; Start-Bot $s 'walk abandoned' }
+                    continue
+                }
+                if ($w -eq 'arrived') {
+                    $walk.phase = 'taking'
+                    # fall through to the taking phase below, this poll
+                } elseif ($w -match '^(hostile|blocked|active|dialog)') {
+                    # The bot's situation, not the walk's. It is handed the
+                    # game; the trigger re-fires at the next hand-back, since
+                    # the level's hand-back count stands.
+                    Abandon-Walk $s $w
+                    if ($w -notmatch '^(active|dialog)') { Start-Bot $s "handed back during the walk: $w" }
+                    continue
+                } else {
+                    # nopath / nostairs / nomove / error: nothing to walk to
+                    # through what the player knows. The bot explores more;
+                    # (f) is not tried on this level until -DescendAfter more
+                    # hand-backs have accrued.
+                    $descendRetryAt[$walk.key] = $(if ($levelHandbacks.ContainsKey($walk.key)) { $levelHandbacks[$walk.key] } else { 0 }) + $DescendAfter
+                    Abandon-Walk $s $w
+                    Start-Bot $s "walk found nothing: $w"
+                    continue
+                }
+            }
+            if ($walk.phase -eq 'taking') {
+                if ($walk.action -eq 'descend' -and $s.stairs -ne 'down') {
+                    # Pushed off the stairs (a swap, a knockback): walk back.
+                    $walk.phase = 'walking'
+                    continue
+                }
+                if ($walk.action -eq 'descend') {
+                    $t = Invoke-Bridge -Lua 'return sk.takeStairs()' -TimeoutSec 120
+                } else {
+                    $t = Invoke-Bridge -Lua "return sk.nextZone('$($walk.target)')" -TimeoutSec 180
+                }
+                if ($t.Tainted) { $tainted = $true }
+                $walk.how = "$($t.Result)"
+                if ($t.Result -match '^changed') {
+                    $now = ($t.Result -replace '^changed ', '') -replace ' \(.*$', ''   # "zone:level", without the note about an arrival dialog
+                    Count-Resume $walk.action $s "$($walk.key) -> $now after $($walk.moves) move(s) from $($walk.from)"
+                    if ($walk.action -eq 'next-zone') { $zoneTransitions.Add("$($walk.key) -> $now") }
+                    $walk = $null
+                    # Level generation takes a moment; let the next poll find the new level.
+                    Start-Sleep -Seconds $PollSec
+                    Start-Bot $s 'after the change'
+                    continue
+                }
+                if ($t.Result -match '^dialog') { continue }   # (a) closes it; the change follows
+                # Refused: changeLevelCheck's two turns after a kill. One turn
+                # through the game's own MOVE_STAY bind, counted.
+                $walk.waits++
+                if ($walk.waits -gt 5 -or $t.Status -ne 'OK' -or $t.Result -match '^(error|already|noplayer)') {
+                    Abandon-Walk $s "the engine kept refusing: $($t.Status) $($t.Result)"
+                    Start-Bot $s 'change refused'
+                    continue
+                }
+                $null = Invoke-Bridge -Lua 'return bridge.key("MOVE_STAY")' -TimeoutSec 30
+                $waits++
+                Count-Resume 'wait' $s "$($walk.action) refused: $($t.Result)"
+                continue
+            }
+        }
 
         # ----- inactive: record the stop -----
         $reason = Normalize-Reason $s.reason
@@ -456,19 +830,77 @@ return "installed save_name=" .. tostring(game.save_name)
             $endReason = 'STUCK'; break
         }
 
-        # ----- (b) stairs -----
+        # ----- (f)/(g) on a loop: one reason, one level, -LoopAfter times -----
+        # (c) only sees a loop that spends no turns. One that spends a few --
+        # #64's sealed door: close, restart, the bot paths back through the
+        # door, prompt -- never trips it, and (b)'s step-away is one tile the
+        # bot undoes. The count is per level and per reason, so a genuinely
+        # recurring measurement on a new level starts from zero.
+        if ($LoopAfter -gt 0 -and $s.reason -notmatch 'standing on a level change') {
+            $key = "$($s.zone):$($s.zlevel)"
+            $loops = Bump-Count $levelLoops "$key|$reason"
+            if ($loops -ge $LoopAfter -and ($loops % $LoopAfter) -eq 0) {
+                $why = "loop: '$reason' x$loops on $key"
+                if (-not $NoDescend -and $s.downs -gt 0) {
+                    $walk = @{ action = 'descend'; phase = 'walking'; key = $key; moves = 0; waits = 0; from = "$($s.x),$($s.y)"; how = ''; target = $null; loop = $true }
+                    $descendWalks++
+                    Write-Host "  walk     descend from $key at $($s.x),$($s.y): $($s.downs) seen down staircase(s), $why"
+                    continue
+                }
+                if ($zoneList.Count -gt 0 -and $s.zmax -gt 0 -and $s.zlevel -ge $s.zmax) {
+                    $visited = @(((Invoke-Bridge -Lua 'return sk.visitedZones()' -TimeoutSec 30).Result -split ',') | Where-Object { $_ })
+                    $next = $zoneList | Where-Object { $_.id -ne $s.zone -and $_.id -notin $visited -and $_.min -le ($s.level + 2) } | Select-Object -First 1
+                    if ($next) {
+                        $walk = @{ action = 'next-zone'; phase = 'taking'; key = $key; moves = 0; waits = 0; from = "$($s.x),$($s.y)"; how = ''; target = $next.id; loop = $true }
+                        Write-Host "  walk     next-zone from $key (last level, $why) -> $($next.id) (level_range $($next.min)-$($next.max), character L$($s.level))"
+                        continue
+                    }
+                }
+                Write-Host "  loop     $why; no seen down staircase$(if ($NoDescend) { ' (descend off)' }), carrying on"
+            }
+        }
+
+        # ----- (b) stairs, and (f)/(g) on stairs up or the wilderness exit -----
         if ($s.reason -match 'standing on a level change') {
             if ($s.stairs -in @('down', 'zone')) {
                 $cl = Invoke-Bridge -Lua 'return bridge.key("CHANGE_LEVEL")' -TimeoutSec 60
                 Count-Resume "stairs-$($s.stairs)" $s "$($cl.Result)"
                 # Level generation takes a moment; let the next poll find the new level.
                 Start-Sleep -Seconds $PollSec
-            } else {
-                $so = Invoke-Bridge -Lua 'return sk.stepOff()' -TimeoutSec 30
-                Count-Resume "step-off-$($s.stairs)" $s "$($so.Result)"
+                Start-Bot $s $reason
+                continue
             }
-            $null = Invoke-Bridge -Lua 'return sk.start()' -TimeoutSec 30
-            Count-Resume 'restart' $s $reason
+
+            # Up, or the wilderness exit. The Nth hand-back here on this level,
+            # or a level with nothing left to explore, is the trigger for both
+            # rungs; (f) has priority, because a deeper level of this zone is
+            # the measurement the soak is after.
+            $key = "$($s.zone):$($s.zlevel)"
+            $n = Bump-Count $levelHandbacks $key
+            $explored = ($s.explored -eq 'true')
+            $ripe = $explored -or ($n -ge $DescendAfter)
+            $retryAt = $(if ($descendRetryAt.ContainsKey($key)) { $descendRetryAt[$key] } else { 0 })
+            if ($ripe -and -not $NoDescend -and $s.downs -gt 0 -and $n -ge $retryAt) {
+                $walk = @{ action = 'descend'; phase = 'walking'; key = $key; moves = 0; waits = 0; from = "$($s.x),$($s.y)"; how = ''; target = $null }
+                $descendWalks++
+                Write-Host "  walk     descend from $key at $($s.x),$($s.y): $($s.downs) seen down staircase(s), hand-back $n$(if ($explored) { ', explored' })"
+                continue
+            }
+            $lastLevel = ($s.zmax -gt 0 -and $s.zlevel -ge $s.zmax)
+            if ($ripe -and $zoneList.Count -gt 0 -and ($lastLevel -or ($s.stairs -eq 'wild' -and $explored -and $s.downs -eq 0))) {
+                $visited = @(((Invoke-Bridge -Lua 'return sk.visitedZones()' -TimeoutSec 30).Result -split ',') | Where-Object { $_ })
+                $next = $zoneList | Where-Object { $_.id -ne $s.zone -and $_.id -notin $visited -and $_.min -le ($s.level + 2) } | Select-Object -First 1
+                if ($next) {
+                    $walk = @{ action = 'next-zone'; phase = 'taking'; key = $key; moves = 0; waits = 0; from = "$($s.x),$($s.y)"; how = ''; target = $next.id }
+                    Write-Host "  walk     next-zone from $key ($(if ($lastLevel) { 'last level' } else { 'wilderness exit' }), $(if ($explored) { 'explored' } else { "hand-back $n" })) -> $($next.id) (level_range $($next.min)-$($next.max), character L$($s.level))"
+                    continue
+                }
+                Write-Host "  walk     next-zone: nothing left in the list for L$($s.level) (visited: $($visited -join ','))"
+            }
+
+            $so = Invoke-Bridge -Lua 'return sk.stepOff()' -TimeoutSec 30
+            Count-Resume "step-off-$($s.stairs)" $s "$($so.Result)"
+            Start-Bot $s $reason
             continue
         }
 
@@ -510,12 +942,18 @@ finally {
         limits       = [ordered]@{ max_minutes = $MaxMinutes; max_level = $MaxLevel; max_turns = $MaxTurns }
         turns        = [ordered]@{ start = $(if ($first) { $first.turn } else { -1 }); end = $(if ($last) { $last.turn } else { -1 }); delta = $(if ($first -and $last) { $last.turn - $first.turn } else { 0 }) }
         level        = [ordered]@{ start = $(if ($first) { $first.level } else { -1 }); end = $(if ($last) { $last.level } else { -1 }); max = $peakLevel }
-        zones        = @($zones)
+        zones        = @($zoneTrail)
         deaths       = $deaths
         killer       = $killer
         stops        = @($stopRows)
         stop_total   = ($stopRows | ForEach-Object { $_.count } | Measure-Object -Sum).Sum
         resumes      = [ordered]@{ total = ($resumeRows | ForEach-Object { $_.count } | Measure-Object -Sum).Sum; by_action = @($resumeRows); log = @($resumeLog | Select-Object -Last 200) }
+        # (f)/(g): the two rungs' own counters, present even at zero.
+        rungs        = [ordered]@{
+            descend   = [ordered]@{ enabled = (-not $NoDescend); after = $DescendAfter; loop_after = $LoopAfter; taken = $resumes['descend']; walks = $descendWalks; moves = $descendMoves; abandoned = $descendAbandoned }
+            next_zone = [ordered]@{ taken = $resumes['next-zone']; transitions = @($zoneTransitions); zones = @($zoneList | ForEach-Object { "$($_.id) ($($_.min)-$($_.max))" }) }
+            waits     = $waits
+        }
         lua_errors   = [ordered]@{ count = $luaErrors.Count; samples = @($luaErrors | Select-Object -First 10) }
         tainted      = $tainted
         polls        = $polls
@@ -536,10 +974,13 @@ finally {
     $md.Add("| wall-clock | $wall s of $($MaxMinutes * 60) s |")
     $md.Add("| game.turn | $($summary.turns.start) -> $($summary.turns.end) (+$($summary.turns.delta), ~$([math]::Floor($summary.turns.delta / 10)) player turns) |")
     $md.Add("| level | $($summary.level.start) -> $($summary.level.end) (max $peakLevel, limit $MaxLevel) |")
-    $md.Add("| zones | $($zones -join ' > ') |")
+    $md.Add("| zones | $($zoneTrail -join ' > ') |")
     $md.Add("| deaths | $deaths$(if ($killer) { " (killed by $killer)" }) |")
     $md.Add("| stops | $($summary.stop_total) across $($stopRows.Count) reason(s) |")
     $md.Add("| resumes | $($summary.resumes.total) |")
+    $md.Add("| descend | $($resumes['descend']) taken ($descendWalks walk(s), $descendMoves move(s), $descendAbandoned abandoned; $(if ($NoDescend) { 'off' } else { "after $DescendAfter hand-backs, explored, or a loop of $LoopAfter" })) |")
+    $md.Add("| next-zone | $($resumes['next-zone']) taken$(if ($zoneTransitions.Count -gt 0) { ' (' + ($zoneTransitions -join '; ') + ')' }); list: $(($zoneList | ForEach-Object { $_.id }) -join ' > ') |")
+    $md.Add("| waits | $waits (a change refused for two turns after a kill) |")
     $md.Add("| Lua errors | $($luaErrors.Count) |")
     $md.Add("| tainted | $tainted |")
     $md.Add("| conditions | $(if ($conditionsApplied.Count -gt 0) { $conditionsApplied -join ', ' } else { 'defaults' }) |")

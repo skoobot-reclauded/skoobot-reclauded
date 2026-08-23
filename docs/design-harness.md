@@ -537,8 +537,43 @@ re-targets a vault door whenever the player stands *next* to it, diagonals inclu
 the same prompt forever, and a single step onto the door's other neighbour changes nothing; if
 it still recurs, `STUCK <reason>` ends the run; (d) the player is dead → record the killer
 (`game.player.killedBy`, set by `onPartyDeath`; there is no `died_from` in 1.7.6) and end;
-(e) anything else → `skoobot_reclauded.start()` again. Nothing in it spends a point, writes a
-stat or moves the player except through the game's own binds and a few ordinary moves. It
+(e) anything else → `skoobot_reclauded.start()` again; (f) **descend when explored** — the
+first 30-minute run put 271 of its 338 stops on "standing on a level change" with two descents
+in all: once a level is explored the engine's auto-explore targets an exit, usually the stairs
+it arrived by, and `running_prev` keeps that target, so (b)'s step-off restarted a bot that
+walked straight back. Now a hand-back on stairs up or the wilderness exit, when the level
+reports nothing left to explore (`running_prev.explore == "exit"`, which auto-explore sets only
+when no unseen tile, item or door is reachable, PlayerExplore.lua:2299 — read, never run, since
+`autoExplore()` moves the player) or for the `-DescendAfter`th time on that level (3), walks to
+the nearest down staircase the player has *seen*, through tiles the player has seen, by the
+engine's own `engine.Astar` — the call the bot's combat pathing makes — one real move per poll,
+spending turns as a player would and handing the game back to the bot the moment a hostile is
+in view; on the stairs, the `CHANGE_LEVEL` bind. Counted as `descend`, and every move is
+counted with it; no seen down staircase, or none reachable, falls through to (b) and the bot
+explores more. The same walk is also the soak's way past a *loop it cannot step out of*: one
+hand-back reason recurring `-LoopAfter` times (15) on one level. (c) only sees a loop that spends
+no turns, and #64's sealed door spends a few — close, restart, the bot's own pathing walks back
+through the door, prompt — so the second validation run spent all twelve minutes and 78 of 79
+stops one tile from that door, with (b)'s step-away undone every time. A walk started that way
+hands back only for an *adjacent* hostile, because a hostile in view that the bot cannot reach
+is what the loop is made of. `-NoDescend` turns it off; (g) **next zone** — on the zone's last level
+(`game.zone.max_level`) under the same trigger, or on the wilderness exit of an explored level
+with no seen down staircase, the engine's own transition `game:changeLevel(1, "<zone>")` — the
+call a step onto a zone entrance on the world map makes (Game.lua:2292), landing on the new
+level's up staircase exactly as walking in does — to the first zone of a list not yet visited
+(`game.visited_zones`) whose `level_range` minimum is at most the character's level + 2.
+Counted as `next-zone`. The bot hands back in the wilderness by design ("cannot be used in the
+wilderness"), which is why the first run never left Trollmire, and why the wilderness is never
+entered deliberately. **The zone list is measurement carriage, not product**: trollmire,
+ruins-kor-pul, norgos-lair, scintillating-caves, rhaloren-camp (all `level_range {1,7}`), then
+old-forest, daikara, maze, sandworm-lair (`{7,16}`) — the order a character of that level would
+usually take the early dungeons in, verified against `data/zones/<id>/zone.lua` (there is no
+`kor-pul`; the ruins are `ruins-kor-pul`) and re-read from the installed module at start, so an
+id with no `zone.lua` is dropped and reported rather than failing at the transition. `-Zones
+"a,b,c"` replaces it. Either change may be refused by `changeLevelCheck` for two turns after a
+kill; the soak then passes one turn through the `MOVE_STAY` bind and counts it (`wait`).
+Nothing in it spends a point, writes a stat or moves the player except through the game's own
+binds, the engine's own transitions and ordinary moves, every one of them counted. It
 fills the fixture's Combat/Sustain/Recovery rules from what the character knows
 (`-NoAutoRules` to skip), since a fresh fixture has none and could not fight — a player would
 do that from the talent screen, and the crude rule set is part of what is measured. The
@@ -550,7 +585,10 @@ enemy above `MAX_DIFF_POWER` — which is a measurement, not a fault. The game a
 zone change under `game.save_name`, so the soak re-points that at `soak-scratch` right after
 loading and the fixture is never overwritten. The output is a JSON summary — levels, turns,
 wall-clock, deaths and killer, the stop histogram sorted by count, the resumes by action, the
-Lua errors the engine logged, the conditions set — plus a markdown twin and the same table
-printed. **None of this is how the product should behave**: a player who wants the bot to walk
+two rungs' own counters (`rungs.descend`: taken, walks, moves, abandoned; `rungs.next_zone`:
+taken, the transitions, the list used; `rungs.waits`), the Lua errors the engine logged, the
+conditions set — plus a markdown twin and the same table printed; `descend` and `next-zone` are
+rows of the resume table even at zero, so a summary always says whether they fired. **None of
+this is how the product should behave**: a player who wants the bot to walk
 through stops has the WARN/STOP/IGNORE policy for that, and anything the soak's histogram says
 is worth changing is changed in the product under its own issue, with a scenario.
