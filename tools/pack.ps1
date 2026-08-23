@@ -36,10 +36,14 @@
         powershell -ExecutionPolicy Bypass -File .\tools\pack.ps1
         powershell -ExecutionPolicy Bypass -File .\tools\pack.ps1 -Release
 
-    -Release additionally refuses to build from a dirty tree or an untagged
-    HEAD, so a released artifact always corresponds to a commit you can name.
+    -Release additionally refuses to build unless the working tree is clean,
+    CHANGELOG.md has a "## [a.b.c]" section for the addon_version in
+    src/init.lua, and HEAD carries the tag v<a.b.c> -- so a released artifact
+    always corresponds to a commit you can name, with notes a user can read.
+    Every failed precondition is reported before it refuses, so one run shows
+    everything that is missing. The procedure is docs/releasing.md.
 
-    T-050.
+    T-050; the -Release preconditions #33.
 #>
 [CmdletBinding()]
 param(
@@ -108,19 +112,55 @@ Write-Host "[pack] from $SrcDir"
 # --------------------------------------------------------------------------
 # -Release preconditions
 # --------------------------------------------------------------------------
+#
+# All three are checked and all failures printed before the refusal, so a
+# maintainer sees the whole list once rather than one item per run. The git
+# calls here write nothing to stderr on their normal paths, so they need no
+# redirect (a redirected native stderr line throws under 'Stop').
 if ($Release) {
+    $refusals = @()
+
+    # 1. Clean tree: the artifact must be reproducible from the commit.
     $dirty = & git -C $RepoRoot status --porcelain
     if ($LASTEXITCODE -ne 0) { Die 'git status failed' }
     if ($dirty) {
         Write-Host '[pack] working tree is dirty:'
         foreach ($d in $dirty) { Write-Host "         $d" }
-        Die 'refusing to build a release from a dirty tree'
+        $refusals += 'the working tree is dirty; commit or stash first'
     }
-    $tag = & git -C $RepoRoot describe --exact-match --tags HEAD 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $tag) {
-        Die 'refusing to build a release from an untagged HEAD (see T-052)'
+
+    # 2. Release notes: CHANGELOG.md must have a "## [a.b.c]" heading for
+    #    this version (Keep a Changelog). Unreleased notes do not count --
+    #    the section is what a user reads on the GitHub Release.
+    $changelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
+    if (-not (Test-Path $changelogPath)) {
+        $refusals += "no CHANGELOG.md at the repo root"
+    } else {
+        $changelog = Get-Content $changelogPath -Raw
+        $heading = '(?m)^##\s*\[' + [regex]::Escape($Version) + '\]'
+        if ($changelog -notmatch $heading) {
+            $refusals += "CHANGELOG.md has no '## [$Version]' section for the addon_version in src/init.lua (move the Unreleased notes under one)"
+        }
     }
-    Write-Host "[pack] release tag $tag"
+
+    # 3. Tag: HEAD must carry v<addon_version>, the name a GitHub Release and
+    #    a bug report both cite. Any other tag on HEAD is not the release tag.
+    $wantTag = "v$Version"
+    $tags = @(& git -C $RepoRoot tag --points-at HEAD)
+    if ($LASTEXITCODE -ne 0) { Die 'git tag --points-at failed' }
+    if ($tags -notcontains $wantTag) {
+        $refusals += "HEAD is not tagged $wantTag (git tag -a $wantTag -m 'Release $Version'); tags on HEAD: " +
+                     $(if ($tags.Count -gt 0) { $tags -join ', ' } else { 'none' })
+    }
+
+    if ($refusals.Count -gt 0) {
+        Write-Host ''
+        Write-Host '[pack] -Release preconditions not met:'
+        foreach ($r in $refusals) { Write-Host "         - $r" }
+        Write-Host '       See docs/releasing.md for the order of operations.'
+        Die "refusing to build a release ($($refusals.Count) precondition(s) failed)"
+    }
+    Write-Host "[pack] release $wantTag, CHANGELOG section present, tree clean"
 }
 
 # --------------------------------------------------------------------------
