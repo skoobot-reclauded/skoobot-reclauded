@@ -183,9 +183,10 @@ Three honest options, in increasing cost:
 
 1. **Stop and let the player play it.** What v1 does. Costs nothing, always correct, gives up
    automation exactly where automation is hardest. This stays the default.
-2. **Per-talent suppression flag.** The talent config UI already collects `usetype` and
-   `priority`; a third field — *"hold while impaired"* — lets the player encode "don't waste
-   Execution while stunned" declaratively. Consistent with the existing philosophy of pushing
+2. **Per-talent suppression flag.** Since #56 each rule is an entry table in an ordered
+   section (`data/rules.lua`), and extra fields on an entry survive every move; a flag —
+   *"hold while impaired"* — lets the player encode "don't waste Execution while stunned"
+   declaratively. Consistent with the existing philosophy of pushing
    irreducible judgement to the player rather than guessing. Only useful to players who set
    stun to `WARN`/`IGNORE`, so it is a refinement, not a replacement.
 3. **Effectiveness-aware scoring.** T-020 territory, and genuinely hard: it needs expected

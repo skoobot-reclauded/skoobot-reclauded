@@ -194,41 +194,34 @@ local d = game.dialogs[#game.dialogs]
 if not d or tostring(d.title) ~= "SkooBot: Reclauded" then return "ERR top dialog is " .. bridge.dialogs() end
 d:use(d.list[1])
 local t = game.dialogs[#game.dialogs]
-return "opened '" .. tostring(t and t.title) .. "' entries=" .. tostring(t and t.list and #t.list) .. " h=" .. tostring(t and t.h) .. " game.h=" .. tostring(game.h)
+local rows = t and t.c_list and t.c_list.list and #t.c_list.list
+return "opened '" .. tostring(t and t.title) .. "' rows=" .. tostring(rows) .. " h=" .. tostring(t and t.h) .. " game.h=" .. tostring(game.h)
 '@
-    $u3 = Probe 'picker' @'
+    # #56: the talent screen is a sectioned list; the add chain (picker, use
+    # type, priority prompt) no longer exists. tools/scenario-talent-screen.ps1
+    # is the full regression; this only checks the shape and one move.
+    $u3 = Probe 'screen' @'
 local t = game.dialogs[#game.dialogs]
-if not t or not t.list then return "ERR no talent dialog: " .. bridge.dialogs() end
-t:use(t.list[#t.list])
-local p = game.dialogs[#game.dialogs]
-if not p or not p.list then return "ERR picker did not open: " .. bridge.dialogs() end
-return ("title='%s' items=%d h=%d game.h=%d overflow=%s"):format(tostring(p.title), #p.list, p.h, game.h, tostring(p.h > game.h))
+if not t or not t.c_list then return "ERR no talent screen: " .. bridge.dialogs() end
+local headers, rows = 0, 0
+for _, it in ipairs(t.c_list.list) do if it.nodes then headers = headers + 1 else rows = rows + 1 end end
+return ("title='%s' headers=%d rows=%d h=%d game.h=%d overflow=%s"):format(tostring(t.title), headers, rows, t.h, game.h, tostring(t.h > game.h))
 '@
-    if ($u3.Status -eq 'OK' -and $u3.Result -match 'overflow=true') { Finding 'DEFECT' "T-014 reproduced: $($u3.Result)" }
-    $null = Probe 'pick' @'
-local p = game.dialogs[#game.dialogs]
-local name = tostring(p.list[1].name)
-p:use(p.list[1])
-local u = game.dialogs[#game.dialogs]
-return "picked '" .. name .. "' -> '" .. tostring(u and u.title) .. "'"
-'@
-    $null = Probe 'usetype' @'
-local u = game.dialogs[#game.dialogs]
-u:use(u.list[1])
-local q = game.dialogs[#game.dialogs]
-return "-> '" .. tostring(q and q.title) .. "' class=" .. tostring(q and q.__CLASSNAME)
-'@
-    $u6 = Probe 'priority' @'
-local q = game.dialogs[#game.dialogs]
-if not q or not q.okclick then return "ERR expected GetQuantity, got " .. bridge.dialogs() end
-q:okclick()
+    if ($u3.Status -eq 'OK' -and $u3.Result -match 'headers=5 rows=[1-9]') { Finding 'OK' 'the talent screen lists four sections plus Unassigned' }
+    elseif ($u3.Status -eq 'OK') { Finding 'CHANGED' "talent screen shape: $($u3.Result)" }
+    $u6 = Probe 'assign' @'
 local t = game.dialogs[#game.dialogs]
-local cfg = skoobot_reclauded.data(game.player).autotalents
-local first = cfg[1] and (tostring(cfg[1].tid) .. "/" .. tostring(cfg[1].usetype) .. "/" .. tostring(cfg[1].priority)) or "none"
-return "top='" .. tostring(t and t.title) .. "' configured=" .. #cfg .. " first=" .. first .. " entries=" .. tostring(t and t.list and #t.list)
+local row
+for _, it in ipairs(t.c_list.list) do if it.entry and not it.section and it.ekind == "activated" then row = it break end end
+if not row then return "ERR no unassigned activated talent" end
+t:selectItem(row)
+t:moveSelected("Combat")
+local r = skoobot_reclauded.rules.get(game.player)
+local last = r.Combat[#r.Combat]
+return ("moved=%s combat=%d last=%s top=%s"):format(tostring(row.entry.tid), #r.Combat, tostring(last and last.tid), tostring(game.dialogs[#game.dialogs] == t))
 '@
-    if ($u6.Status -eq 'OK' -and $u6.Result -match 'configured=1 first=T_\w+/Combat/1') { Finding 'OK' 'the add-talent flow stores tid/usetype/priority' }
-    elseif ($u6.Status -eq 'OK') { Finding 'CHANGED' "add-talent flow ended oddly: $($u6.Result)" }
+    if ($u6.Status -eq 'OK' -and $u6.Result -match 'moved=(T_\w+) combat=\d+ last=\1 top=true') { Finding 'OK' 'moving an unassigned talent to Combat appends it there' }
+    elseif ($u6.Status -eq 'OK') { Finding 'CHANGED' "talent move ended oddly: $($u6.Result)" }
     $null = Probe 'close' @'
 while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end
 return "dialogs=" .. bridge.dialogs()
@@ -340,7 +333,7 @@ return "combat talents configured: " .. #auto
     }
 
     Write-Host ''
-    Write-Host 'Picker with many talents (T-014)'
+    Write-Host 'Talent screen with many talents (T-014)'
     $many = Probe 'picker-many' @'
 local p = game.player
 local learned = 0
@@ -353,19 +346,20 @@ for tid, t in pairs(p.talents_def) do
 end
 local d = require("mod.dialogs.skoobot_reclauded.TalentDialog").new(p)
 game:registerDialog(d)
-d:use(d.list[#d.list])
-local pk = game.dialogs[#game.dialogs]
-local r = ("learned=%d title='%s' items=%d h=%d game.h=%d overflow=%s"):format(learned, tostring(pk.title), #pk.list, pk.h, game.h, tostring(pk.h > game.h))
+local rows = 0
+for _, it in ipairs(d.c_list.list) do if it.entry and not it.section then rows = rows + 1 end end
+local r = ("learned=%d title='%s' unassigned=%d h=%d game.h=%d overflow=%s"):format(learned, tostring(d.title), rows, d.h, game.h, tostring(d.h > game.h))
 while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end
 return r
 '@ 90
     if ($many.Status -eq 'OK') {
-        # T-014 is fixed if the picker now fits the screen AND still lists every
-        # talent (bounded + scrolled, not truncated). Overflow here is a regression.
-        if ($many.Result -match 'overflow=false') { Finding 'OK' "T-014 fixed: the talent picker fits the screen ($($many.Result))" }
-        else { Finding 'BROKEN' "T-014 regressed: the picker overflows again ($($many.Result))" }
-        if ($many.Result -match 'items=(\d+)' -and [int]$Matches[1] -ge 40) { Finding 'OK' 'the picker still lists every talent (scrolled, not truncated)' }
-        else { Finding 'BROKEN' "the picker dropped talents: $($many.Result)" }
+        # T-014 is fixed if the screen fits AND still lists every talent: since
+        # #56 the Unassigned section scrolls rather than truncates. Overflow
+        # here is a regression.
+        if ($many.Result -match 'overflow=false') { Finding 'OK' "T-014 fixed: the talent screen fits the screen ($($many.Result))" }
+        else { Finding 'BROKEN' "T-014 regressed: the talent screen overflows ($($many.Result))" }
+        if ($many.Result -match 'unassigned=(\d+)' -and [int]$Matches[1] -ge 40) { Finding 'OK' 'the screen still lists every talent (scrolled, not truncated)' }
+        else { Finding 'BROKEN' "the screen dropped talents: $($many.Result)" }
     }
 
     $exit = 0

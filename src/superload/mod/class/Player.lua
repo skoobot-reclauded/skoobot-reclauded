@@ -46,6 +46,7 @@ local _M = loadPrevious(...)
 
 local power = dofile("/data-skoobot_reclauded/power.lua")
 local air = dofile("/data-skoobot_reclauded/air.lua")
+local rules = dofile("/data-skoobot_reclauded/rules.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -551,21 +552,77 @@ local function getTalents()
     return talents
 end
 
---- Drop configured talents the character no longer has.
-local function pruneAutoTalents(p)
-    local auto = data(p).autotalents
-    local badindexes = {}
-    for index, info in ipairs(auto) do
-        if not p.talents[info.tid] then
-            log("[TalentList] [WARN] Attempt to fetch missing talent: " .. tostring(info.tid))
-            badindexes[#badindexes + 1] = index
+--- The name an item rule is keyed on: the form ToME's own inventory hotkeys
+--- store (engine/interface/PlayerHotkeys.lua), which survives the item's
+--- talent slot changing and is the same whichever inventory holds it.
+local function itemName(o)
+    return o:getName{no_add_name=true, force_id=true, no_count=true}
+end
+
+--- The live object-use talent for an item name, or nil while the item is not
+--- wielded -- a charm in the bag has no talent at all (ActorObjectUse).
+local function liveObjectTid(p, name)
+    local d = p.object_talent_data
+    if not d then return nil end
+    for tid, entry in pairs(d) do
+        if type(tid) == "string" and type(entry) == "table" and entry.obj and p:knowTalent(tid)
+           and itemName(entry.obj) == name then
+            return tid
         end
     end
-    for i = #badindexes, 1, -1 do
-        table.remove(auto, badindexes[i])
-    end
+    return nil
 end
-bot.talents = { prune = function() return pruneAutoTalents(game.player) end }
+
+local function carried(p, name)
+    for _, inven in pairs(p.inven or {}) do
+        for _, o in ipairs(inven) do
+            if o.getName and itemName(o) == name then return true end
+        end
+    end
+    return false
+end
+
+--- The rules in the current shape, pruned of talents the character no longer
+--- has. FIXED (#56): v1 kept a flat {tid, usetype, priority} list and sorted
+--- it on every read, unstably. The saved table is now four ordered sections,
+--- migrated IN PLACE on first read (data/rules.lua), so the dialog, the act
+--- loop and a scenario holding the table all see one shape. A v1 rule on an
+--- activatable item carried the item's talent slot, which changes with every
+--- swap (#55); it is re-keyed on the item's name here, the way ToME keys its
+--- own item hotkeys. Item rules are never pruned: the item can come back, and
+--- a rule whose item is away is simply skipped.
+local function getRules(p)
+    local d = data(p)
+    local r, report = rules.normalize(d.autotalents)
+    d.autotalents = r
+    if report.migrated > 0 or report.dropped > 0 then
+        log(("[Rules] Migrated the saved talent rules: %d placed, %d dropped"):format(
+            report.migrated, report.dropped))
+    end
+    for _, section in ipairs(rules.SECTIONS) do
+        for _, e in ipairs(r[section]) do
+            if e.tid and not e.object then
+                local t = p:getTalentFromId(e.tid)
+                if t and t.is_object_use then
+                    local o = t.getObject and t.getObject(p, t)
+                    if o then
+                        log("[Rules] Re-keyed an item rule from " .. e.tid .. " to the item " .. itemName(o))
+                        e.object = itemName(o)
+                        e.tid = nil
+                    end
+                end
+            end
+        end
+    end
+    local removed = rules.prune(r, function(e)
+        if e.object then return true end
+        return p:knowTalent(e.tid) and true or false
+    end)
+    for _, e in ipairs(removed) do
+        log("[Rules] [WARN] Dropped the rule for a talent the character no longer has: " .. tostring(e.tid))
+    end
+    return r
+end
 
 --- The threat score of an actor, as the stop conditions see it (the player
 --- by default). For the harness and for bug reports.
@@ -573,27 +630,105 @@ function bot.power(actor)
     return power.level(actor or game.player, game.player.global_speed)
 end
 
---- Configured talent ids of one use type, highest priority first.
-local function getAutoTalents(usetype)
-    local talents = {}
-    pruneAutoTalents(game.player)
-    local tbl = {}
-    for _, v in pairs(data(game.player).autotalents) do
-        table.insert(tbl, v)
-    end
-    table.sort(tbl, function(a, b) return a.priority > b.priority end)
-    for _, entry in ipairs(tbl) do
-        if entry.usetype == usetype then
-            talents[#talents + 1] = entry.tid
-        end
-    end
-    return talents
+--- What a rule is worth to the act loop right now: a talent rule is its tid;
+--- an item rule is the live talent of the wielded item, or nothing.
+local function resolveRule(p, e)
+    local tid = e.tid or (e.object and liveObjectTid(p, e.object))
+    if tid and p:knowTalent(tid) then return tid end
+    return nil
 end
 
-local function getCombatTalents()      return getAutoTalents("Combat") end
-local function getSustainableTalents() return getAutoTalents("Sustain") end
-local function getSustainTalents()     return getAutoTalents("DamagePrevention") end
-local function getRecoveryTalents()    return getAutoTalents("Recovery") end
+--- The talent ids of one section, in order -- the order IS the priority.
+local function getAutoTalents(section)
+    local p = game.player
+    return rules.tids(getRules(p), section, function(e) return resolveRule(p, e) end)
+end
+
+local function getCombatTalents()     return getAutoTalents("Combat") end
+local function getPreventionTalents() return getAutoTalents("DamagePrevention") end
+local function getRecoveryTalents()   return getAutoTalents("Recovery") end
+local function getSustainTalents()    return getAutoTalents("Sustain") end
+
+--- What the talent screen needs, so that it holds no rule logic of its own.
+local function entryFor(p, t)
+    if t.is_object_use then
+        local o = t.getObject and t.getObject(p, t)
+        if not o then return nil end
+        return {object=itemName(o)}
+    end
+    return {tid=t.id}
+end
+
+local function ruleKind(p, e)
+    if e.object then return "object" end
+    local t = e.tid and p:getTalentFromId(e.tid)
+    if t and t.is_object_use then return "object" end
+    return (t and t.mode == "sustained") and "sustained" or "activated"
+end
+
+--- A talent's description and display name, or a fallback. The game's own
+--- screens call these unguarded; here one odd talent -- an inscription learnt
+--- without its inscription data, which a test fixture can do -- must not take
+--- the whole screen down with it.
+local function safeDescription(p, t)
+    local ok, desc = pcall(p.getTalentFullDescription, p, t)
+    if ok and desc then return desc end
+    return "No description is available for this talent."
+end
+
+local function safeName(p, t)
+    local ok, name = pcall(p.getTalentDisplayName, p, t)
+    if ok and name then return tostring(name) end
+    return tostring(t.name or t.id)
+end
+
+local function describeRule(p, e)
+    local d = { entry = e, key = rules.key(e), kind = ruleKind(p, e) }
+    if e.object then
+        d.tid = liveObjectTid(p, e.object)
+        d.t = d.tid and p:getTalentFromId(d.tid) or nil
+        d.live = d.t ~= nil
+        d.carried = carried(p, e.object)
+        if d.t then
+            d.name = safeName(p, d.t)
+            local o = d.t.getObject and d.t.getObject(p, d.t)
+            d.tree = o and (tostring(o.type or "item") .. (o.subtype and ("/" .. tostring(o.subtype)) or "")) or "item"
+            d.desc = safeDescription(p, d.t)
+        else
+            d.name = e.object
+            d.tree = "item"
+            if d.carried then
+                d.desc = "Not active: the item has to be worn for the bot to use it. The rule keeps its place."
+            else
+                d.desc = "Not carried. The rule keeps its place and applies again when the item is back."
+            end
+        end
+    else
+        local t = e.tid and p:getTalentFromId(e.tid)
+        d.t = t
+        d.tid = e.tid
+        d.live = t ~= nil and p:knowTalent(e.tid) ~= nil
+        d.name = t and safeName(p, t) or tostring(e.tid)
+        local tt = t and t.type and p:getTalentTypeFrom(t.type[1])
+        d.tree = (tt and tt.name) or (t and t.type and t.type[1]) or "?"
+        d.desc = t and safeDescription(p, t) or "Unknown talent."
+    end
+    return d
+end
+
+bot.rules = {
+    module   = rules,
+    itemName = itemName,
+    get      = function(p) return getRules(p or game.player) end,
+    tids     = function(p, section)
+        p = p or game.player
+        return rules.tids(getRules(p), section, function(e) return resolveRule(p, e) end)
+    end,
+    entryFor = function(p, t) return entryFor(p or game.player, t) end,
+    kind     = function(p, e) return ruleKind(p or game.player, e) end,
+    describe = function(p, e) return describeRule(p or game.player, e) end,
+    resolve  = function(p, e) return resolveRule(p or game.player, e) end,
+}
 
 -- TODO (v1): exclude enemies in LOS but not LOE -- cannot Rush over pits, and
 -- someone standing in front of the target blocks a non-piercing attack.
@@ -642,7 +777,7 @@ end
 
 -- Returns true if anything was sustained.
 local function activateSustained()
-    local talents = filterFailedTalents(getSustainableTalents())
+    local talents = filterFailedTalents(getSustainTalents())
     for _, tid in pairs(talents) do
         local t = game.player:getTalentFromId(tid)
         log("[Sustain] Attempting to sustain: " .. tid)
@@ -878,7 +1013,7 @@ function skoobot_act(noAction)
 
             if (bot.loop.delta < 0)
                and (math.abs(bot.loop.delta) / game.player.max_life >= cfg("LOWHEALTH_RATIO") / 4) then
-                talents = filterFailedTalents(getSustainTalents())
+                talents = filterFailedTalents(getPreventionTalents())
                 if #talents > 0 then
                     log("[Survival] [Sustain] using sustain, lost more than "
                         .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 4) .. "% life in one turn!")
