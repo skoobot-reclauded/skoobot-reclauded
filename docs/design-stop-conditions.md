@@ -1,6 +1,6 @@
 # Design: liveness vs. model validity
 
-**Status:** proposed · **Task:** T-026 · **Date:** 2026-08-21
+**Status:** built (§1.3 #13, §3 #12) · **Task:** T-026 (#12), T-027 (#13) · **Date:** 2026-08-21, revised 2026-08-23
 **Supersedes:** v1's `getStopConditionList()` + `checkForDebuffs()` split
 
 > **Revised 2026-08-21** after author correction. An earlier draft of this document called
@@ -278,76 +278,126 @@ Do not let option 3's existence justify weakening option 1 before it is built.
 
 ## 3. Framework mechanics
 
+**Status: built (#12, 2026-08-23), on branch `issue-12`.** This section describes what is in
+`src/data/conditions.lua` and how `src/superload/mod/class/Player.lua` consumes it; the
+unit pins are `spec/conditions_spec.lua` and the in-game regression is
+`tools/scenario-conditions.ps1`. The proposal this replaced is in the branch's history.
+
 ### 3.1 Definition list
 
-One entry is the single source of truth for a condition's UI, detection, default policy, and
-capability implications.
+One entry is the single source of truth for a condition's menu label, detection, default
+policy, where the act loop consults it, what it says, and what capability it takes away.
 
 ```lua
-CONDITIONS = {
-  { code = "CANNOT_MOVE", label = "Immobilised", default = "WARN",
-    blocks = { move = true },
-    detect = function(p) return p:attr("never_move") end,
-    msg    = "immobilised and unable to move" },
-
-  { code = "ASLEEP", label = "Asleep", default = "WARN",
-    -- ToME's own idiom, Actor.lua:1402/4448/5800. v1 wrote
-    -- `not p.lucid_dreamer == 1`, always false. See v1-latent-bugs.md.
-    -- Solipsists should set this to IGNORE; sleep is good for them.
-    detect = function(p) return p:attr("sleep") and not p:attr("lucid_dreamer") end,
-    msg    = "asleep" },
-
-  { code = "STUNNED", label = "Stunned", default = "WARN",
-    -- Model-validity boundary, NOT a liveness guard. A stunned character can
-    -- act; evaluatePowerLevel() just cannot be trusted while they are. See §2.1.
-    detect = function(p) return p:attr("stunned") end,
-    msg    = "stunned -- threat estimate unreliable" },
-  -- …
-}
+{ code = "DEBUFF_DAZED", label = "Debuff: DAZED", default = "WARN",
+  category = "debuff", site = "turn", blocks = { move = true }, blocked = "dazed",
+  detect  = function(p) return counter(p, "dazed") > 0 end,
+  message = "you are dazed" },
 ```
 
 Drift between list and detection is what broke v1: `DEBUFF_ASLEEP` rendered as a working
 toggle while its detection was dead code, with no mechanism to notice. One entry makes that
-structurally impossible.
+structurally impossible: the act loop walks the list, so an entry without a detector cannot
+fire and a detector without an entry cannot exist.
+
+**Two kinds of entry share the list**, told apart by `default`:
+
+- **Policy entries** have a default of WARN / STOP / IGNORE. They are what the player sees in
+  *Activate/Deactivate Bot Stop Conditions* and what the save keeps. Their codes, labels,
+  defaults and **order** are v1's thirteen, unchanged — `DEBUFF_*` ×5, `LIFE_*` ×2,
+  `DIALOG_LORE`, `TERRAIN_GLOWING_CHEST`, `SCOUTER_*` ×4 — so the menu and the save format did
+  not change. `DEBUFF_STUNNED` stays a model-validity stop (§2.1), WARN as v1 shipped it.
+- **Liveness entries** have no default and no policy: `CANNOT_MOVE` (`attr("never_move")`)
+  and `ENCASED` (`attr("encased_in_ice")` or `attr("encased")`). They are never in the menu or
+  the save, because §1 says liveness is not configurable; they exist so the capability they
+  take away is declared once, with its detector, and read through `capabilities()`.
+
+**Detection is by capability, as a counter.** Every status attribute is an additive
+temporary value — two sources of stun make 2, confused is a 0–50 percentage — so every test
+is `> 0` or truthiness, never `== 1`. The port carried v1's `== 1` tests marked `-- v1:` until
+here; a doubly stunned or a 30%-confused character read as unafflicted. `DEBUFF_ASLEEP` is
+ToME's own gate, `attr("sleep") and not attr("lucid_dreamer")`, so a Solipsist dreaming
+lucidly is not asleep by the bot's reading at all.
+
+**`site` says where an entry is consulted**, so the explore checks keep their place and
+order and a terrain condition is never evaluated mid-fight:
+
+| site | consulted | entries |
+|---|---|---|
+| `turn` | every decision, before the state branches, in list order | the five debuffs, `LIFE_LOWLIFE` (only with a hostile in view), the four `SCOUTER_*` |
+| `explore` | the EXPLORE branch, after the air checks, before the level-change and move checks | `TERRAIN_GLOWING_CHEST`, at `HANDED_BACK` |
+| `loop` | the per-turn survival initialiser, where the life delta is computed | `LIFE_BIGLOSS` (with `tryStop`, as v1: a WARN fires every big-loss turn) |
+| `dialog` | the open-dialog check, by code; no detector | `DIALOG_LORE` |
+
+One deliberate change of order: v1 checked `LIFE_LOWLIFE`, then the four power conditions,
+then the debuffs; the loop checks the list in the menu's order, debuffs first. When two
+conditions hold at once the bot stops either way; only the reason named differs.
+
+**`ctx`** is what a detector is given besides the actor — the hostile count, the loop scratch
+with the rank-weighted enemy figures (#62), the life-scaled own power, `cfg`, the chest scan
+— built once per decision by `conditionContext()`. The module reads nothing else, which is
+what lets the spec drive every predicate with a fake actor and a fake context.
+
+**`blocks` and the act loop's response** — the half of #7's split that landed here. The loop
+takes the union over every *detected* entry that declares a block, policy or not, through
+`conditions.capabilities()`, and each state has a defined response:
+
+| blocked | EXPLORE | FIGHT |
+|---|---|---|
+| `move` (dazed, frozen, asleep, `never_move` from any source) | hands back `Stopped: cannot move (…)` instead of calling auto-explore — the T-012 freeze | the rotation still runs — **a pinned character attacks what is next to it** — and only when no talent reaches does it hand back `Cannot act: cannot move (…), and no Combat talent reaches <name>`, instead of attempting the step the engine would refuse |
+| `act` (asleep) | as `move` | hands back `Cannot act: cannot act (asleep)` before the rotation |
+| `target` (encased in ice: talents reach only the ice) | as `move` | hands back `Cannot act: cannot target anything (encased in ice)` |
+
+The policy and the block are two consumers of one signal (§1.1): `DEBUFF_DAZED` at IGNORE
+still cannot explore, because dazed sets `never_move` and the block is consulted whatever
+the policy says. The message names the specific conditions (`dazed`, `asleep`) and falls
+back to the generic entry's words, `pinned, held, or overloaded`, only when nothing named
+explains the block — so the T-012 and stop-notice scenarios read the same text they did.
+
+Not built, on purpose: `BLACKOUT` (§1.2) — no turn-gap reading exists yet, and the entry
+would be a policy condition added to the menu, which this issue kept unchanged. It is the
+first candidate for a fourteenth entry.
 
 ### 3.2 Reconcile on access
 
-Definitions live in code. Only the player's chosen `stoptype` persists.
+Definitions live in code. Only the player's chosen `stoptype` persists. Built as T-019
+(#52) and moved into the module as `conditions.reconcile(list)`:
 
 ```lua
 -- Idempotent, unguarded by a "migrated" flag: at ~15 entries it is cheap
 -- enough to run every access, so a hand-edited or half-written save repairs
 -- itself. No version stamps -- self-healing convergence beats ordered
--- migrations.
-local function reconcileConditions(player)
-    local policy = {}
-    for _, e in ipairs(player.skoobot_conditions or {}) do policy[e.code] = e.stoptype end
-
-    local out = {}
-    for _, def in ipairs(CONDITIONS) do        -- definitions drive; orphans fall away
-        out[#out+1] = { code = def.code, label = def.label,
-                        stoptype = policy[def.code] or def.default }
+-- migrations. Rebuilt IN PLACE, so anything holding the table sees it.
+function M.reconcile(list)
+    if M.isCurrent(list) then return false end
+    local chosen = {}
+    for _, v in ipairs(list) do
+        if type(v) == "table" and v.code and M.STOPTYPES[v.stoptype] then
+            chosen[v.code] = v.stoptype
+        end
     end
-    player.skoobot_conditions = out
-    return out
+    for i = #list, 1, -1 do list[i] = nil end
+    for i, def in ipairs(M.policy()) do        -- policy entries drive; orphans fall away
+        list[i] = { label = def.label, code = def.code, stoptype = chosen[def.code] or def.default }
+    end
+    return true
 end
 ```
 
 Handles all three cases: definitions the save lacks are added at their current default;
 orphans whose definition is gone are dropped (otherwise a retired condition lingers as a
 phantom toggle controlling nothing — the ASLEEP failure in miniature); and labels are always
-current.
+current. Liveness entries are never written, since they have no policy to keep.
 
-`getStopCondition` must additionally **fail closed**, returning the definition's default
-rather than `nil`, so a lookup bug degrades to "used the default" instead of crashing mid-run.
+`getStopCondition` additionally **fails closed**, returning a STOP entry rather than `nil`
+for a code no definition carries, so a lookup bug degrades to "stopped" instead of crashing
+mid-run, and logs the code.
 
 ### 3.3 Incidental fix
 
-`tryStop` shadows its own parameter — a condition *code* named `stoptype`, then overwritten by
-the actual stoptype — so the diagnostic prints `Ignoring stop condition: IGNORE` instead of
-naming the condition. `luacheck` flags the shadowing.
-
----
+`tryStop` shadowed its own parameter in v1 — a condition *code* named `stoptype`, then
+overwritten by the actual stoptype — so the diagnostic printed `Ignoring stop condition:
+IGNORE` instead of naming the condition. Fixed in the port; the parameter is `code`.
 
 ## 4. Migration
 

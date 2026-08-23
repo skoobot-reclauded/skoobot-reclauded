@@ -96,6 +96,12 @@ Defects inherited from 0.0.12, all reported by its users:
 - A stop condition added by an update can no longer crash a character created before it: the
   saved list is reconciled with the addon's on every read, keeping your WARN/STOP/IGNORE
   choices and dropping conditions that no longer exist (#52).
+- The *Stunned*, *Confused*, *Dazed* and *Frozen* stops now fire whenever the effect is on you.
+  0.0.12 tested each for a value of exactly 1, so a stun from two sources or a 30% confusion
+  read as nothing; the bot now reads the effect as the game does and says how much ("stunned
+  (x2)", "confused (30% chance to act randomly)"). And "cannot move" is no longer "cannot
+  fight": pinned next to an enemy, the bot attacks; pinned with nothing in reach it hands back
+  saying so, instead of trying a step the game refuses (#12).
 
 ### Not in this version
 
