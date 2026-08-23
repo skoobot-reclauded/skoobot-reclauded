@@ -43,12 +43,16 @@ local function context(over)
 end
 
 -- v1's list, as DEFAULT_CONDITIONS had it before #12: the save format.
+-- The policy list as the menu and the save see it: v1's thirteen in v1's
+-- order, plus TURNS_BLACKOUT (#77) after the debuffs -- the same family of
+-- "what happened to you", and the first entry added since the port.
 local V1 = {
   { "DEBUFF_STUNNED",        "Debuff: STUNNED",            "WARN" },
   { "DEBUFF_CONFUSED",       "Debuff: CONFUSED",           "WARN" },
   { "DEBUFF_DAZED",          "Debuff: DAZED",              "WARN" },
   { "DEBUFF_FROZEN",         "Debuff: FROZEN",             "WARN" },
   { "DEBUFF_ASLEEP",         "Debuff: ASLEEP",             "WARN" },
+  { "TURNS_BLACKOUT",        "Turns: BLACKOUT",            "WARN" },
   { "LIFE_BIGLOSS",          "Life: BIGLOSS",              "WARN" },
   { "LIFE_LOWLIFE",          "Life: LOWLIFE",              "STOP" },
   { "DIALOG_LORE",           "Dialog: LORE",               "IGNORE" },
@@ -101,7 +105,7 @@ describe("data/conditions.lua", function()
       assert.is_nil(C.find("NO_SUCH_CONDITION"))
     end)
 
-    it("policy entries are exactly v1's thirteen, in order, with their labels and defaults", function()
+    it("policy entries are v1's thirteen plus BLACKOUT, in order, with their labels and defaults", function()
       local policy = C.policy()
       assert.equals(#V1, #policy)
       for i, row in ipairs(V1) do
@@ -126,10 +130,17 @@ describe("data/conditions.lua", function()
       assert.equals(C.SITE_DIALOG, d.site)
     end)
 
-    it("the glowing chest hands back rather than stopping", function()
-      assert.equals(C.HANDED_BACK, C.find("TERRAIN_GLOWING_CHEST").severity)
+    -- HANDED_BACK is for the entries that are news rather than danger: the
+    -- chest the player may want to open (#8) and the turns they lost while
+    -- unable to act (#77). Everything else stops at STOPPED.
+    it("the news conditions hand back rather than stopping", function()
+      local handsBack = { TERRAIN_GLOWING_CHEST = true, TURNS_BLACKOUT = true }
       for _, def in ipairs(C.LIST) do
-        if def.code ~= "TERRAIN_GLOWING_CHEST" then assert.is_nil(def.severity, def.code) end
+        if handsBack[def.code] then
+          assert.equals(C.HANDED_BACK, def.severity, def.code)
+        else
+          assert.is_nil(def.severity, def.code)
+        end
       end
     end)
   end)
@@ -204,6 +215,42 @@ describe("data/conditions.lua", function()
     end)
   end)
 
+
+  describe("BLACKOUT: the turns lost while unable to act (#77)", function()
+    local d
+    setup(function() d = C.find("TURNS_BLACKOUT") end)
+
+    it("is a WARN policy entry at the turn site that hands back", function()
+      assert.equals("WARN", d.default)
+      assert.equals(C.SITE_TURN, d.site)
+      assert.equals(C.HANDED_BACK, d.severity)
+      assert.same({}, d.blocks)          -- it reports a past state, blocks nothing
+    end)
+
+    -- One player turn is ten game turns at normal speed. A gap of a few is
+    -- ordinary -- a fast enemy, a haste, the rounding of a turn -- so the
+    -- threshold is "more than one turn", not "more than none".
+    it("fires only above one player turn", function()
+      assert.is_false(d.detect(actor(), context({ turnGap = 0 })))
+      assert.is_false(d.detect(actor(), context({ turnGap = 10 })))
+      assert.is_true(d.detect(actor(), context({ turnGap = 11 })))
+      assert.is_true(d.detect(actor(), context({ turnGap = 300 })))
+      assert.equals(10, C.BLACKOUT_TURNS)
+    end)
+
+    -- Missing is not zero by accident: a ctx built before an activation
+    -- exists has no turnGap at all, and that must read as "no blackout"
+    -- rather than as an error.
+    it("treats an absent gap as none", function()
+      assert.is_false(d.detect(actor(), context({})))
+    end)
+
+    it("says how many whole turns went by", function()
+      assert.equals("lost 1 turn while unable to act",   C.message(d, actor(), context({ turnGap = 11 })))
+      assert.equals("lost 3 turns while unable to act",  C.message(d, actor(), context({ turnGap = 30 })))
+      assert.equals("lost 12 turns while unable to act", C.message(d, actor(), context({ turnGap = 125 })))
+    end)
+  end)
   describe("the power conditions read the situation score (#11)", function()
     local POWER = { "SCOUTER_ENEMYCOUNT", "SCOUTER_BIGENEMY", "SCOUTER_STRONGERENEMY", "SCOUTER_CROWDPOWER" }
 
@@ -326,7 +373,10 @@ describe("data/conditions.lua", function()
           list[#list + 1] = { label = "old " .. i, code = row[1], stoptype = "WARN" }
         end
       end
-      list[7].stoptype = "IGNORE"                       -- LIFE_LOWLIFE, the user's choice
+      -- LIFE_LOWLIFE, the user's choice. By code, not by index: an entry
+      -- added to V1 above it (TURNS_BLACKOUT, #77) must not silently move
+      -- which row this test is about.
+      for _, row in ipairs(list) do if row.code == "LIFE_LOWLIFE" then row.stoptype = "IGNORE" end end
       list[#list + 1] = { label = "gone", code = "RETIRED_CONDITION", stoptype = "STOP" }
       return list
     end

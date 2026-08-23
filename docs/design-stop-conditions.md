@@ -78,9 +78,9 @@ truth — `Assert-Turns -AtLeast 10` is "at least one turn".) The gap is measura
 real turn after it:
 
 ```lua
-{ code = "BLACKOUT", label = "Turns lost while unable to act", default = "WARN",
-  detect = function(p, ctx) return ctx.turnGap > 10 end,   -- more than one player turn
-  msg    = "lost %d turns while unable to act" }
+{ code = "TURNS_BLACKOUT", label = "Turns: BLACKOUT", default = "WARN",
+  detect = function(_, ctx) return (ctx.turnGap or 0) > 10 end,   -- more than one player turn
+  msg    = "lost %d turns while unable to act" }                  -- built as written, #77
 ```
 
 That belongs in §2, not §1 — it's information for a decision, not a liveness guard.
@@ -315,9 +315,10 @@ fire and a detector without an entry cannot exist.
 
 - **Policy entries** have a default of WARN / STOP / IGNORE. They are what the player sees in
   *Activate/Deactivate Bot Stop Conditions* and what the save keeps. Their codes, labels,
-  defaults and **order** are v1's thirteen, unchanged — `DEBUFF_*` ×5, `LIFE_*` ×2,
-  `DIALOG_LORE`, `TERRAIN_GLOWING_CHEST`, `SCOUTER_*` ×4 — so the menu and the save format did
-  not change. `DEBUFF_STUNNED` stays a model-validity stop (§2.1), WARN as v1 shipped it.
+  defaults and **order** were v1's thirteen, unchanged, until #77 added the fourteenth:
+  `DEBUFF_*` ×5, **`TURNS_BLACKOUT`**, `LIFE_*` ×2, `DIALOG_LORE`, `TERRAIN_GLOWING_CHEST`,
+  `SCOUTER_*` ×4. v1's thirteen keep their codes, labels, defaults and relative order, so a
+  saved list still reconciles into this one without losing a choice.
 - **Liveness entries** have no default and no policy: `CANNOT_MOVE` (`attr("never_move")`)
   and `ENCASED` (`attr("encased_in_ice")` or `attr("encased")`). They are never in the menu or
   the save, because §1 says liveness is not configurable; they exist so the capability they
@@ -365,9 +366,13 @@ the policy says. The message names the specific conditions (`dazed`, `asleep`) a
 back to the generic entry's words, `pinned, held, or overloaded`, only when nothing named
 explains the block — so the T-012 and stop-notice scenarios read the same text they did.
 
-Not built, on purpose: `BLACKOUT` (§1.2) — no turn-gap reading exists yet, and the entry
-would be a policy condition added to the menu, which this issue kept unchanged. It is the
-first candidate for a fourteenth entry.
+**Built (#77).** `TURNS_BLACKOUT` is the fourteenth policy entry: WARN by default, HANDED_BACK
+rather than STOPPED because it is news and not danger, and worded "lost N turns while unable to
+act". The turn gap it reads is kept by the per-turn driver, which records `game.turn -
+act.last_turn` before overwriting `last_turn` -- that subtraction is the only place a blackout
+is visible, because while it lasts the engine gives the player no turn and the act loop is not
+running at all. Adding it moved nothing: v1's thirteen keep their codes, labels, defaults and
+relative order, so a saved list still reconciles without losing a choice.
 
 ### 3.2 Reconcile on access
 

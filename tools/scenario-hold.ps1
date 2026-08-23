@@ -292,7 +292,10 @@ function ho.durations()
       d, tostring(eff and eff.dur), tostring(p:attr("stunned")), tmpvals, subtypes,
       tostring(b.impairmentEnding()), ho.rotation())
   end
-  p:removeEffect(p.EFF_STUNNED, true, true)
+  -- Leave the stun as part 3 set it: the parts after this one still expect a
+  -- stunned character. Re-applied rather than left at 1, so part 4 is testing
+  -- an ordinary stun and not the lapsing edge this part just measured.
+  p:setEffect(p.EFF_STUNNED, 5, {})
   ho.reset()
   return "DURATIONS " .. table.concat(out, " ;; ")
 end

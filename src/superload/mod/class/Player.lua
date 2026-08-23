@@ -1447,6 +1447,10 @@ function conditionContext(p, hostiles)
         hostiles    = #hostiles,
         cfg         = cfg,
         chestInView = glowingChestInView,
+        -- #77: turns lost while the character could not act, recorded by the
+        -- per-turn driver. nil outside an activation, and 0 on its first
+        -- iteration -- activationInit starts last_turn at game.turn.
+        turnGap     = (bot.activation and bot.activation.turn_gap) or 0,
     }
     ctx.caps = conditions.capabilities(p, ctx)
     ctx.score = evaluateSituation(p, hostiles, ctx.caps, false)
@@ -2031,6 +2035,12 @@ local function playerActions()
                 act.stalled = act.stalled + 1
             else
                 act.stalled = 0
+                -- #77: the turns that went by since the bot last acted, kept
+                -- before last_turn is overwritten. While the character could
+                -- not act at all the engine gave the player no turn, so this
+                -- is the only place the blackout is visible: as a gap, on the
+                -- first turn back.
+                act.turn_gap = game.turn - act.last_turn
                 act.last_turn = game.turn
             end
             chan.trace("[PlayerActions] iteration %d at game turn %d, stalled %d",

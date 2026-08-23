@@ -70,6 +70,12 @@ M.SITE_EXPLORE = "explore"   -- the EXPLORE branch, after the air checks
 M.SITE_LOOP    = "loop"      -- the per-turn survival initialiser (life delta)
 M.SITE_DIALOG  = "dialog"    -- the open-dialog check; no detector, see the entry
 
+-- #77: game.turn counts ten to a player turn at normal speed, so a gap
+-- larger than this is time the character did not get to spend. One turn,
+-- not zero: a fast enemy, a haste, or the ordinary rounding of a turn can
+-- leave a gap of a few without anything having gone wrong.
+M.BLACKOUT_TURNS = 10
+
 -- The severities a policy entry may stop with: the values of data/notice.lua.
 -- Unset means STOPPED (the player must look).
 M.HANDED_BACK = "handed_back"
@@ -82,6 +88,7 @@ M.HANDED_BACK = "handed_back"
 --   ctx.cfg          function(key) -> the setting's value
 --   ctx.chestInView  function(p) -> is an unopened glowing chest in view
 --   ctx.delta        life change this turn (SITE_LOOP only)
+--   ctx.turnGap      game turns lost since the bot last acted (#77)
 
 --- A status attribute as the counter it is: 0 when absent.
 local function counter(p, name)
@@ -149,6 +156,25 @@ M.LIST = {
       category = "debuff", site = M.SITE_TURN, blocks = { move = true, act = true }, blocked = "asleep",
       detect = function(p) return (p:attr("sleep") and not p:attr("lucid_dreamer")) and true or false end,
       message = "you are asleep" },
+
+    -- #77: the turns that went by while the character could not act at all
+    -- -- paralysis, stoning, a time stun. Not a state the bot can observe
+    -- while it lasts: the engine gives the player no turn, so the act loop
+    -- is not running and there is nothing to detect. What is observable is
+    -- the GAP afterwards, on the first turn the bot gets back, and a player
+    -- who looks up to find the fight has moved on wants to be told why.
+    --
+    -- The threshold is one player turn: game.turn counts ten to a turn at
+    -- normal speed, so a gap over 10 is time the character did not spend.
+    -- WARN by default -- it is news, not danger, and the thing that caused
+    -- it is over by the time this fires.
+    { code = "TURNS_BLACKOUT", label = "Turns: BLACKOUT", default = "WARN",
+      category = "turns", site = M.SITE_TURN, blocks = {}, severity = M.HANDED_BACK,
+      detect = function(_, ctx) return (ctx.turnGap or 0) > M.BLACKOUT_TURNS end,
+      message = function(_, ctx)
+          local turns = math.floor((ctx.turnGap or 0) / 10)
+          return ("lost %d turn%s while unable to act"):format(turns, turns == 1 and "" or "s")
+      end },
 
     -- Life. BIGLOSS is read where the life delta is computed, once per real
     -- turn; LOWLIFE only while something hostile is in view, as v1 had it.

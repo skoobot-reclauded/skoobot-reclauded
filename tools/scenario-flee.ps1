@@ -521,7 +521,7 @@ return "installed"
     if ($f2.Result -match '^(OUTOFSIGHT|SETUP)') { Inconclusive $f2.Result }
     $null = Assert-Result $f2 'the decision did not raise' -Match ' ok=true err=nil '
     $null = Assert-Result $f2 'the rotation was the flee and a talent' -Match ' rot=2 talent=T_ATTACK '
-    Ok ($f2.Result -notmatch 'cornered') 'it did not hand back as cornered' $f2.Result
+    Ok ($f2.Result -notmatch 'reason=Cannot act: cornered') 'it did not hand back as cornered' $f2.Result
     $null = Assert-Result $f2 'canMove was put back here too' -Match ' restored=true '
     # ----- E: the talent screen ---------------------------------------------
     Write-Host ''

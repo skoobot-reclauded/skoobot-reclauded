@@ -143,6 +143,12 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   you would be *asked* about — sealed doors, locked doors, loose rocks — as somewhere it may
   not route through or flee into. You can still walk into one yourself, and it still hands back
   when the prompt opens, because the vault is your decision.
+- **A new stop condition: *Turns: BLACKOUT*** (#77, default WARN). Paralysis, stoning and time
+  stuns take turns away without the bot ever getting one — it cannot notice while it is
+  happening, because the game never asks it what to do. On the first turn it gets back it now
+  says *lost N turns while unable to act*, so a fight that has moved on while you looked away
+  is explained rather than mysterious. Set it to IGNORE if you would rather not hear about it.
+  Your existing WARN/STOP/IGNORE choices are untouched: the other thirteen keep their order.
 
 ### Fixed
 

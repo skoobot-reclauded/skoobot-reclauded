@@ -267,7 +267,7 @@ DEBUFF_STUNNED* → `a) IGNORE | b) WARN | c) STOP`, the code as the title and n
 what the three do. **After** (`Menu.lua`, this branch):
 
 ```
-picker=[Stop conditions: pick one to change] items=13
+picker=[Stop conditions: pick one to change] items=14
   [a) Debuff: STUNNED - WARN | b) Debuff: CONFUSED - WARN | c) Debuff: DAZED - WARN
    | d) Debuff: FROZEN - WARN | e) Debuff: ASLEEP - WARN | f) Life: BIGLOSS - WARN
    | g) Life: LOWLIFE - STOP | h) Dialog: LORE - IGNORE | i) Terrain: Glowing Chest - WARN

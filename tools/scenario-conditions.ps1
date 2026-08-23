@@ -13,9 +13,15 @@
     a power stop; the DEBUFF_* policies are set per probe and every one of
     them is put back; the spawn is removed; the save is never written.
 
-      0. The list: thirteen policy entries, v1's codes in v1's order, in
+      0. The list: fourteen policy entries -- v1's thirteen codes in v1's
+         order plus TURNS_BLACKOUT (#77) after the debuffs -- in
          the saved list and the menu; the liveness entries (CANNOT_MOVE,
          ENCASED) are in the definition list and in neither.
+     0b. BLACKOUT (#77): the fourteenth entry, staged by writing the turn gap
+         onto the activation -- query mode takes no turn, so the driver that
+         computes the gap never runs. A gap of exactly one player turn is not
+         a blackout; more than one hands back with "lost N turns while unable
+         to act", singular at one, and the player is told in the message log.
       1. FIGHT, pinned, a hostile adjacent: the bot attacks rather than
          stopping -- "cannot move" does not mean "cannot fight".
       2. FIGHT, pinned, the hostile two grids away: no talent reaches and
@@ -42,7 +48,7 @@
     Run:
         powershell -ExecutionPolicy Bypass -File .\tools\scenario-conditions.ps1
 
-    #12, #7, #27.
+    #12, #7, #77, #27.
 #>
 [CmdletBinding()]
 param(
@@ -242,6 +248,35 @@ function cd.query(state)
     cd.hostiles(), capsText(), tostring(p:attr("stunned")), tostring(p:attr("confused")),
     tostring(b.last_reason), cd.newLog(nlog))
 end
+-- #77: a blackout, staged.
+--
+-- The gap cannot be produced in query mode: it is computed by the per-turn
+-- driver, which runs only when the engine gives the player a turn, and query
+-- mode deliberately takes none. So the activation is created by one query,
+-- the gap written onto it, and a second query reads it. from_query is
+-- cleared first because bot.query() drops an activation a previous query
+-- left, which would take the gap with it.
+--
+-- What this does not cover is the driver's own subtraction, one line at the
+-- point last_turn is refreshed. What it does cover is everything after it:
+-- that conditionContext carries turnGap, that the fourteenth entry reads it,
+-- and that the wording reaches the player.
+function cd.blackout(gap)
+  local p = game.player
+  cd.reset()
+  b.state = 13
+  b.query()
+  if not b.activation then return "SETUP no activation after a query" end
+  b.activation.from_query = nil
+  b.activation.turn_gap = gap
+  b.data(p).stopwarn = {}
+  local before = game.turn
+  local ld = game.uiset and game.uiset.logdisplay
+  local nlog = ld and ld.log and #ld.log or 0
+  b.query()
+  return ("BLACKOUT gap=%d dturn=%d reason=%s log=%s"):format(gap, game.turn - before,
+    tostring(b.last_reason), cd.newLog(nlog))
+end
 function cd.describe()
   local m = b.conditions.module
   local policy, live, codes = 0, {}, {}
@@ -269,13 +304,32 @@ return "installed"
 
     # ----- 0: the list ----------------------------------------------------------
     Write-Host ''
-    Write-Host '  --- 0. the list: thirteen policy entries, liveness entries outside the save'
+    Write-Host '  --- 0. the list: fourteen policy entries, liveness entries outside the save'
     $d = Probe 'return cd.describe()'
     Write-Host "  $($d.Result)"
-    $null = Assert-Result $d 'thirteen policy entries, and the saved list has exactly those' -Match 'policy=13 saved=13 '
+    $null = Assert-Result $d 'fourteen policy entries, and the saved list has exactly those' -Match 'policy=14 saved=14 '
     $null = Assert-Result $d 'CANNOT_MOVE and ENCASED are liveness entries of the list' -Match 'liveness=\[CANNOT_MOVE,ENCASED\]'
     $null = Assert-Result $d 'and neither reaches the saved list' -Match 'leaked=\[\]'
     $null = Assert-Result $d "v1's order: DEBUFF_STUNNED first, SCOUTER_CROWDPOWER last" -Match 'first=DEBUFF_STUNNED last=SCOUTER_CROWDPOWER'
+
+    # ----- BLACKOUT (#77) ---------------------------------------------------
+    Write-Host ''
+    Write-Host '  --- 0b. BLACKOUT: the turns lost while unable to act'
+    $b0 = Probe 'return cd.blackout(0)'
+    Write-Host "  $($b0.Result)"
+    if ($b0.Result -match '^SETUP') { Inconclusive $b0.Result }
+    $null = Assert-Result $b0 'no gap, no stop' -Match ' dturn=0 reason=nil'
+    $b1 = Probe 'return cd.blackout(10)'
+    Write-Host "  $($b1.Result)"
+    $null = Assert-Result $b1 'a gap of exactly one player turn is not a blackout' -Match ' dturn=0 reason=nil'
+    $b2 = Probe 'return cd.blackout(35)'
+    Write-Host "  $($b2.Result)"
+    $null = Assert-Result $b2 'more than one turn hands back' -Match 'reason=Handed back: lost 3 turns while unable to act'
+    $null = Assert-Result $b2 'and the player is told in the message log' -Match 'log=.*lost 3 turns while unable to act'
+    $null = Assert-Result $b2 'reading it advances no game turn' -Match ' dturn=0 '
+    $b3 = Probe 'return cd.blackout(11)'
+    Write-Host "  $($b3.Result)"
+    $null = Assert-Result $b3 'one turn is singular' -Match 'reason=Handed back: lost 1 turn while unable to act'
 
     $quiet = Probe 'return tostring(cd.findQuiet())' 120
     if ($quiet.Result -ne 'true') { Inconclusive 'no spot with nothing in sight and two free grids in a line' }
