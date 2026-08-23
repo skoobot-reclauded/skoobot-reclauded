@@ -44,6 +44,24 @@ function Probe($label, $lua, $timeout = 30) {
 Write-Host ''
 Write-Host '[surface] SkooBot: Reclauded on ToME 1.7.6'
 
+# The settings this addon has are read from its own defaults file, in the
+# checkout under test, so adding one cannot leave the probes below stale: #58
+# added STOP_POPUP and the options-tab assertion went on saying "seven" until
+# #60's session noticed. src/data/settings.lua has one default line per
+# setting, and that line is the contract:
+#     if type(s.NAME) == "nil" then s.NAME = ... end
+# No game is needed for this, so a parser that recognises nothing fails here,
+# before a launch is spent, and is reported as what it is: a stale probe.
+$settingsLua = Join-Path $RepoRoot 'src\data\settings.lua'
+$ExpectedSettings = @(Select-String -Path $settingsLua -Pattern '^\s*if\s+type\(s\.([A-Z][A-Z0-9_]*)\)\s*==\s*"nil"' |
+    ForEach-Object { $_.Matches[0].Groups[1].Value })
+if ($ExpectedSettings.Count -eq 0) {
+    Write-Host "[surface] FAILED - no 'if type(s.NAME) == ""nil""' default lines recognised in $settingsLua; this probe's parser is stale, not the addon"
+    exit 1
+}
+Write-Host "  settings.lua declares $($ExpectedSettings.Count): $($ExpectedSettings -join ', ')"
+$ExpectedSettingsLua = ($ExpectedSettings | ForEach-Object { '"' + $_ + '"' }) -join ', '
+
 $exit = 1
 try {
     $g = Load-Save -Name $SaveName
@@ -130,15 +148,21 @@ return table.concat(out, " ")
     if ($kb.Status -eq 'OK') {
         if ($kb.Result -match '=false|:none') { Finding 'BROKEN' "a keybind is unregistered or unbound: $($kb.Result)" } else { Finding 'OK' 'all five actions have handlers and default keys' }
     }
-    $null = Probe 'settings' @'
+    $settingsProbe = @'
 local s = config.settings.tome.skoobot_reclauded
 if not s then return "ERR config.settings.tome.skoobot_reclauded is nil" end
 local out = {}
-for _, k in ipairs({"LOWHEALTH_RATIO","MAX_INDIVIDUAL_POWER","MAX_DIFF_POWER","MAX_COMBINED_POWER","MAX_ENEMY_COUNT","ACTION_DELAY"}) do
+for _, k in ipairs({ __EXPECTED__ }) do
   out[#out+1] = k .. "=" .. tostring(s[k])
 end
 return table.concat(out, " ")
 '@
+    $st = Probe 'settings' $settingsProbe.Replace('__EXPECTED__', $ExpectedSettingsLua)
+    if ($st.Status -eq 'OK') {
+        if ($st.Result -match '^ERR') { Finding 'BROKEN' "settings: $($st.Result)" }
+        elseif ($st.Result -match '=nil') { Finding 'BROKEN' "a setting declared in settings.lua has no value at runtime: $($st.Result)" }
+        else { Finding 'OK' "every setting declared in settings.lua has a value at runtime ($($ExpectedSettings.Count))" }
+    }
     $null = Probe 'stopconds' @'
 local l = skoobot_reclauded.conditions.list()
 local out = {}
@@ -162,7 +186,12 @@ return "tooltip=" .. type(r) .. (type(r) == "table" and (" len=" .. tostring(#r)
 
     Write-Host ''
     Write-Host 'Options tab'
-    $op = Probe 'options' @'
+    # The tab's entries carry display titles, not setting keys, so the keys are
+    # checked against the runtime table settings.lua populates and the titles
+    # are counted against it; a missing key is a default that never loaded, a
+    # count that differs is an entry added or dropped on one side only.
+    $optionsProbe = @'
+local expected = { __EXPECTED__ }
 local GO = require "mod.dialogs.GameOptions"
 local d = GO.new()
 game:registerDialog(d)
@@ -171,19 +200,30 @@ for i, t in ipairs(d.c_tabs.tabs) do if tostring(t.title):find("Reclauded") then
 if not found then game:unregisterDialog(d) return "ERR no SkooBot: Reclauded tab among " .. #d.c_tabs.tabs .. " tabs" end
 local ok, err = pcall(function() d:switchTo(found) end)
 if not ok then game:unregisterDialog(d) return "ERR switchTo: " .. tostring(err) end
-local names = {}
+local titles = {}
 for _, it in ipairs(d.list or {}) do
   local s = it.name
   if type(s) == "table" and s.toString then s = s:toString() end
-  names[#names+1] = (tostring(s):gsub("#[^#]*#", ""))
+  titles[#titles+1] = (tostring(s):gsub("#[^#]*#", ""))
 end
 game:unregisterDialog(d)
-return "tab=" .. found .. " options=" .. #names .. ": " .. table.concat(names, "; ")
+local s = config.settings.tome.skoobot_reclauded or {}
+local seen, missing, extra = {}, {}, {}
+for _, k in ipairs(expected) do seen[k] = true; if s[k] == nil then missing[#missing+1] = k end end
+for k in pairs(s) do if not seen[k] then extra[#extra+1] = tostring(k) end end
+table.sort(extra)
+return ("tab=%s options=%d expected=%d missing=%s extra=%s: %s"):format(found, #titles, #expected,
+  #missing > 0 and table.concat(missing, ",") or "none",
+  #extra > 0 and table.concat(extra, ",") or "none",
+  table.concat(titles, "; "))
 '@
+    $op = Probe 'options' $optionsProbe.Replace('__EXPECTED__', $ExpectedSettingsLua)
     if ($op.Status -eq 'OK') {
+        $n = $ExpectedSettings.Count
         if ($op.Result -match '^ERR') { Finding 'BROKEN' "options tab: $($op.Result)" }
-        elseif ($op.Result -match 'options=7') { Finding 'OK' 'the [SkooBot: Reclauded] options tab lists its seven settings' }
-        else { Finding 'CHANGED' "options tab present but not seven entries: $($op.Result)" }
+        elseif ($op.Result -match 'missing=(?!none)') { Finding 'BROKEN' "a setting declared in settings.lua is absent at runtime: $($op.Result)" }
+        elseif ($op.Result -match "options=$n expected=$n missing=none extra=none") { Finding 'OK' "the [SkooBot: Reclauded] options tab lists all $n settings declared in settings.lua ($($ExpectedSettings -join ', '))" }
+        else { Finding 'CHANGED' "options tab does not match settings.lua's $n settings ($($ExpectedSettings -join ', ')): $($op.Result)" }
     }
 
     Write-Host ''
