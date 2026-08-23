@@ -33,3 +33,9 @@ if type(s.MAX_DIFF_POWER)       == "nil" then s.MAX_DIFF_POWER       = 10  end
 if type(s.MAX_COMBINED_POWER)   == "nil" then s.MAX_COMBINED_POWER   = 500 end
 if type(s.MAX_ENEMY_COUNT)      == "nil" then s.MAX_ENEMY_COUNT      = 12  end
 if type(s.ACTION_DELAY)         == "nil" then s.ACTION_DELAY         = 0   end
+
+-- #58: show the "why did it stop" popup (StopDialog) on a STOPPED notice.
+-- Off by default: the log line and the big-news banner carry the stop; the
+-- popup is for players who want to be made to read it. The popup's own
+-- checkbox turns this off again; the options tab turns it back on.
+if type(s.STOP_POPUP)           == "nil" then s.STOP_POPUP           = false end

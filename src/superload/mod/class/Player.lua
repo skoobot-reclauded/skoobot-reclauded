@@ -39,14 +39,20 @@
 --   that both return, so it could never run.
 -- * Everything the harness needs to observe the bot -- inspect(), actions,
 --   last_reason -- is on the runtime table, as the walking skeleton had it.
+-- * A stop is one call, stop(severity, text), and data/notice.lua decides how
+--   it looks (#58); a message that names a key looks the binding up (#57).
+--   v1's aiStop(msg) took a pre-coloured string from each of its ~25 sites.
 
 local Astar = require "engine.Astar"
+local KeyBind = require "engine.KeyBind"
 
 local _M = loadPrevious(...)
 
 local power = dofile("/data-skoobot_reclauded/power.lua")
 local air = dofile("/data-skoobot_reclauded/air.lua")
 local rules = dofile("/data-skoobot_reclauded/rules.lua")
+local notice = dofile("/data-skoobot_reclauded/notice.lua")
+local keys = dofile("/data-skoobot_reclauded/keys.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -75,7 +81,7 @@ local bot = {
 _G.skoobot_reclauded = bot
 
 -- Forward declarations for the mutually recursive core.
-local skoobot_act, checkForAdditionalAction, aiStop
+local skoobot_act, checkForAdditionalAction, stop
 
 local function cfg(key)
     local s = config.settings.tome.skoobot_reclauded
@@ -84,11 +90,6 @@ end
 
 local function log(msg)
     print("[SKOOBOT] " .. msg)
-end
-
--- Strip ToME colour codes for the harness-facing reason string.
-local function plain(s)
-    return (tostring(s):gsub("#[^#]*#", ""))
 end
 
 --- Per-character configuration, persisted with the save.
@@ -201,14 +202,83 @@ bot.conditions = {
     set  = function(code, stoptype) return setStopCondition(game.player, code, stoptype) end,
 }
 
-function aiStop(msg)
+-------------------------------------------------------------------------------
+-- Telling the player (#57, #58)
+-------------------------------------------------------------------------------
+
+--- The key bound to one of this addon's actions right now, as the player
+--- reads it -- "Shift+F7" -- or "unbound". Looked up when the message is
+--- built, never copied from the default, so a rebind shows (#57). "Bound" is
+--- what the engine itself binds: the player's remap if there is one, else the
+--- keybind file's default (KeyBind:getBindTable, engine/KeyBind.lua:114).
+--- data/keys.lua does the rendering; the engine's own formatter is the
+--- fallback for mouse and gesture bindings.
+function bot.keyFor(virtual)
+    local def = KeyBind.binds_def[virtual]
+    local ks = def and KeyBind:getBindTable(def)[1]
+    if not ks then return "unbound" end
+    local function symname(sym)
+        local code = tonumber(sym) or KeyBind[sym]
+        if not code or not core.key.symName then return nil end
+        return core.key.symName(code)
+    end
+    return keys.describe(ks, symname)
+        or (game.key and game.key:formatKeyString(ks))
+        or "unbound"
+end
+
+--- Set one of this addon's settings and persist it, the way the options tab
+--- does. Shared by the tab and by the stop popup's checkbox (#58).
+function bot.setSetting(option, value)
+    local s = config.settings.tome.skoobot_reclauded
+    s[option] = value
+    game:saveSettings("tome.skoobot_reclauded." .. option,
+        ("tome.skoobot_reclauded.%s = %s\n"):format(option, tostring(value)))
+end
+
+bot.notice = notice
+local StopDialog   -- required on first use; the overload mounts the dialog tree
+
+--- Stop the bot and tell the player why (#58). `severity` is notice.STOPPED
+--- (the player must look), notice.HANDED_BACK (finished, or yielded on
+--- purpose) or notice.CANNOT_ACT (could not act); `text` is plain prose with
+--- no colour codes. One line in the message log with a fixed prefix and one
+--- colour per severity, the same text on the big-news banner, and -- for
+--- STOPPED, while the STOP_POPUP setting is on -- a popup the player must
+--- close. `last_reason` gets "<label>: <text>", which the harness reads.
+---
+--- opts.hint    what to do next, shown after the reason; a STOPPED notice
+---              defaults to naming the restart key
+--- opts.banner  false to skip the banner (the player's own key press)
+--- opts.popup   false to skip the popup whatever the setting says
+function stop(severity, text, opts)
+    opts = opts or {}
     bot.active = false
     bot.state = STATE_REST
     bot.activation = nil
     bot.loop = nil
     bot.prevloop = nil
-    bot.last_reason = plain(msg or "AI Stopping!")
-    game.log((msg ~= nil and msg) or "#LIGHT_RED#AI Stopping!")
+
+    local hint = opts.hint
+    if hint == nil and severity == notice.STOPPED then
+        hint = "restart with " .. bot.keyFor("TOGGLE_SKOOBOT_RECLAUDED")
+    end
+    local n = notice.compose(severity, text, hint)
+    bot.last_reason = n.reason
+    log("[Stop] " .. n.reason)
+
+    -- As an argument, never as the format string: game.log formats what it is
+    -- given (string.tformat), and the text may carry a '%'.
+    game.log("%s", n.line)
+    if opts.banner ~= false and game.bignews then
+        game.bignews:saySimple(90, "%s", n.banner)
+    end
+    if n.severity == notice.STOPPED and opts.popup ~= false and cfg("STOP_POPUP") then
+        StopDialog = StopDialog or require("mod.dialogs.skoobot_reclauded.StopDialog")
+        game:registerDialog(StopDialog.new(n.popup, function(suppress)
+            if suppress then bot.setSetting("STOP_POPUP", false) end
+        end))
+    end
 end
 
 -- Tries to stop the bot, returning true. A condition set to IGNORE is
@@ -217,19 +287,19 @@ end
 -- v1 named its parameter `stoptype` and then shadowed it with the policy, so
 -- the diagnostic printed "Ignoring stop condition: IGNORE" instead of the
 -- condition's name. The parameter is `code` here and the message names it.
-local function tryStop(p, code, msg)
+local function tryStop(p, code, text, severity, opts)
     local stoptype = getStopCondition(p, code).stoptype
     if stoptype == "IGNORE" then
         log("[StopConditions] [HIGHLIGHT] Ignoring stop condition: " .. tostring(code))
         return false
     end
-    aiStop(msg)
+    stop(severity or notice.STOPPED, text, opts)
     return true
 end
 
 -- Check `condition` to see whether the bot should stop. A WARN condition
 -- stops once, is then remembered as acknowledged, and re-arms when it clears.
-local function checkStop(p, stopcategory, condition, msg)
+local function checkStop(p, stopcategory, condition, text, severity, opts)
     local stoptype = getStopCondition(p, stopcategory).stoptype
     local d = data(p)
 
@@ -238,14 +308,14 @@ local function checkStop(p, stopcategory, condition, msg)
             if not d.stopwarn then d.stopwarn = {} end
             if d.stopwarn[stopcategory] == true then return false end
             d.stopwarn[stopcategory] = true
-            return tryStop(p, stopcategory, msg)
+            return tryStop(p, stopcategory, text, severity, opts)
         else
             if d.stopwarn then d.stopwarn[stopcategory] = nil end
             return false
         end
     end
 
-    if condition then return tryStop(p, stopcategory, msg) end
+    if condition then return tryStop(p, stopcategory, text, severity, opts) end
     return false
 end
 
@@ -276,8 +346,9 @@ local function loopInit()
     if (loop.delta < 0) and (math.abs(loop.delta) / game.player.max_life >= cfg("LOWHEALTH_RATIO") / 2) then
         -- v1: a stop here returns nil from the initialiser, leaving the loop
         -- table nil; the caller checks for that.
-        if tryStop(game.player, "LIFE_BIGLOSS", "#RED#AI Stopped: Lost more than "
-            .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 2) .. "%% life in one turn!") then return end
+        if tryStop(game.player, "LIFE_BIGLOSS", "lost more than "
+            .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 2)
+            .. "% of max life in one turn (half of LOWHEALTH_RATIO)") then return end
     end
     return loop
 end
@@ -347,7 +418,7 @@ local function SAI_beginExplore()
     if game.player:autoExplore() then
         return game.player:act()
     else
-        return aiStop("#RED#AI Stopped: autoExplore returned false.")
+        return stop(notice.CANNOT_ACT, "auto-explore refused to start")
     end
 end
 
@@ -800,23 +871,23 @@ local function checkPowerLevel()
     local p = game.player
     if checkStop(p, "SCOUTER_BIGENEMY",
         bot.loop.maxVisibleEnemyPower > cfg("MAX_INDIVIDUAL_POWER"),
-        "Max enemy power level too high: " .. bot.loop.maxVisibleEnemyPower) then
+        "an enemy's power level, " .. bot.loop.maxVisibleEnemyPower .. ", is above MAX_INDIVIDUAL_POWER") then
         return true
     end
     if checkStop(p, "SCOUTER_STRONGERENEMY",
         bot.loop.maxVisibleEnemyPower > myPowerLevel + cfg("MAX_DIFF_POWER"),
-        "Max enemy power level too much stronger than player: "
-            .. bot.loop.maxVisibleEnemyPower .. " > " .. myPowerLevel) then
+        "an enemy's power level, " .. bot.loop.maxVisibleEnemyPower
+            .. ", is more than MAX_DIFF_POWER above yours (" .. myPowerLevel .. ")") then
         return true
     end
     if checkStop(p, "SCOUTER_CROWDPOWER",
         bot.loop.sumVisibleEnemyPower > cfg("MAX_COMBINED_POWER"),
-        "Combined enemy power level too high: " .. bot.loop.sumVisibleEnemyPower) then
+        "the combined enemy power level, " .. bot.loop.sumVisibleEnemyPower .. ", is above MAX_COMBINED_POWER") then
         return true
     end
     if checkStop(p, "SCOUTER_ENEMYCOUNT",
         bot.loop.enemyCount > cfg("MAX_ENEMY_COUNT"),
-        "Too many enemies in sight: " .. bot.loop.enemyCount) then
+        bot.loop.enemyCount .. " enemies in sight, above MAX_ENEMY_COUNT") then
         return true
     end
     return false
@@ -830,10 +901,10 @@ local function checkForDebuffs()
     -- for parity; the correct capability detection lands with the WARN/STOP/
     -- IGNORE reconciliation in T-026, where the model-validity reasoning for
     -- each (design-stop-conditions.md 2) decides its default.
-    if checkStop(p, "DEBUFF_CONFUSED", p.confused == 1, "#RED#AI Stopped: Player is Confused!") then return true end
-    if checkStop(p, "DEBUFF_DAZED",    p.dazed == 1,    "#RED#AI Stopped: Player is Dazed!")    then return true end
-    if checkStop(p, "DEBUFF_STUNNED",  p.stunned == 1,  "#RED#AI Stopped: Player is Stunned!")  then return true end
-    if checkStop(p, "DEBUFF_FROZEN",   p.frozen == 1,   "#RED#AI Stopped: Player is Frozen!")   then return true end
+    if checkStop(p, "DEBUFF_CONFUSED", p.confused == 1, "you are confused") then return true end
+    if checkStop(p, "DEBUFF_DAZED",    p.dazed == 1,    "you are dazed")    then return true end
+    if checkStop(p, "DEBUFF_STUNNED",  p.stunned == 1,  "you are stunned")  then return true end
+    if checkStop(p, "DEBUFF_FROZEN",   p.frozen == 1,   "you are frozen")   then return true end
     -- FIXED (T-012). v1 wrote `p.sleep == 1 and not p.lucid_dreamer == 1`, which
     -- parses as `... and (not p.lucid_dreamer) == 1` -- a boolean compared with a
     -- number, always false, so a sleeping bot never handed back ("when I get
@@ -842,7 +913,7 @@ local function checkForDebuffs()
     -- `~= 1` would have been wrong too. A Solipsist benefits from sleep and sets
     -- this condition to IGNORE.
     if checkStop(p, "DEBUFF_ASLEEP", p:attr("sleep") and not p:attr("lucid_dreamer"),
-        "#RED#AI Stopped: Player is Asleep!") then return true end
+        "you are asleep") then return true end
     return false
 end
 
@@ -862,7 +933,7 @@ function skoobot_act(noAction)
         local top = game.dialogs[#game.dialogs]
         if string.match(top.title, "Lore found:") and top.key.virtuals.EXIT then
             -- a lore dialog: the player may have configured it to be ignored
-            if tryStop(game.player, "DIALOG_LORE", "#RED# Ai Stopped: Dialog shown on screen: " .. top.title) then
+            if tryStop(game.player, "DIALOG_LORE", "a dialog is open: " .. top.title, notice.HANDED_BACK) then
                 log("[HIGHLIGHT] tried to stop bot due to presence of dialog: " .. top.title)
                 return
             else
@@ -870,7 +941,7 @@ function skoobot_act(noAction)
                 top.key.virtuals.EXIT()
             end
         else
-            return aiStop("#RED# Ai Stopped: Dialog shown on screen: " .. top.title)
+            return stop(notice.HANDED_BACK, "a dialog is open: " .. top.title)
         end
     end
 
@@ -878,7 +949,7 @@ function skoobot_act(noAction)
     if #hostiles > 0 then
         if checkStop(game.player, "LIFE_LOWLIFE",
             game.player.life < game.player.max_life * cfg("LOWHEALTH_RATIO"),
-            "#RED#AI cancelled for low health") then return end
+            "life is below LOWHEALTH_RATIO") then return end
         bot.state = STATE_FIGHT
     end
 
@@ -886,7 +957,7 @@ function skoobot_act(noAction)
     if checkForDebuffs() then return end
 
     if bot.activation.unspentTotal ~= getUnspentTotal() then
-        return aiStop("#RED#AI Stopped: Unspent points changed!")
+        return stop(notice.HANDED_BACK, "you have unspent points to allocate")
     end
 
     if bot.loop == nil or (not noAction) then
@@ -899,7 +970,7 @@ function skoobot_act(noAction)
 
     bot.loop.thinkCount = bot.loop.thinkCount + 1
     if bot.loop.thinkCount > THINK_LIMIT then
-        return aiStop("#LIGHT_RED#AI Stopped: Number of attempts to calculate action exceeded maximum!")
+        return stop(notice.CANNOT_ACT, "could not settle on an action after " .. THINK_LIMIT .. " tries")
     end
 
     if activateSustained() then return end
@@ -922,7 +993,7 @@ function skoobot_act(noAction)
             local moved
             if path and path[1] then moved = SAI_movePlayer(path[1].x, path[1].y) end
             if not moved and bot.active then
-                return aiStop("#RED#AI stopped: suffocating, and no reachable air!")
+                return stop(notice.STOPPED, "suffocating, and no reachable air")
             end
             checkForAdditionalAction()
             return
@@ -931,7 +1002,7 @@ function skoobot_act(noAction)
         -- recovering): hand back rather than rest. Measured as a fraction of
         -- max_air, since it is 200 for a Yeek, not the flat 50 v1 assumed.
         if p.max_air and p.max_air > 0 and (p.air / p.max_air) < 0.5 then
-            return aiStop("#RED#AI stopped: below half breath!")
+            return stop(notice.STOPPED, "below half breath")
         end
         return SAI_beginRest()
 
@@ -947,7 +1018,7 @@ function skoobot_act(noAction)
                 -- a scratch is not worth a stop. mishander reached the same fix
                 -- from play (salvage item 1). Under T-020 this becomes a score
                 -- input rather than a standalone flag.
-                aiStop("#RED#AI stopped: took damage while exploring, now below the safe threshold!")
+                stop(notice.STOPPED, "took damage while exploring, and life is below IGNORE_DAMAGE_HEALTH_RATIO")
             end
         end
         -- Breath below three-quarters: switch to REST, which now runs to air
@@ -963,11 +1034,11 @@ function skoobot_act(noAction)
         -- re-toggles past it has chosen to skip it. A Solipsist-style player who
         -- never wants to be bothered sets this to IGNORE.
         if checkStop(game.player, "TERRAIN_GLOWING_CHEST", glowingChestInView(game.player),
-            "#GOLD#AI stopped: a glowing chest is nearby -- open it yourself, they can be guarded.") then
+            "a glowing chest is nearby -- open it yourself, they can be guarded", notice.HANDED_BACK) then
             return
         end
         if game.level.map:checkEntity(game.player.x, game.player.y, engine.Map.TERRAIN, "change_level") then
-            aiStop("#GOLD#AI stopping: level change found")
+            stop(notice.HANDED_BACK, "standing on a level change")
         elseif game.player:attr("never_move") then
             -- FIXED (T-012). v1 called auto-explore while unable to move, which
             -- cannot make progress and spun -- the pin / dominate / entangle
@@ -977,7 +1048,7 @@ function skoobot_act(noAction)
             -- ToME adds effects -- unlike mishander's fork, which tested only
             -- EFF_PINNED. The general liveness backstop is T-027; the framework
             -- that folds this into the condition list is T-026.
-            aiStop("#RED#AI stopped: cannot move (pinned, held, or overloaded)")
+            stop(notice.STOPPED, "cannot move (pinned, held, or overloaded)")
         else
             SAI_beginExplore()
         end
@@ -1060,13 +1131,11 @@ function skoobot_act(noAction)
             getDirNum(game.player, targets[1])  -- v1 computed this and never used it
 
             if not path then
-                return aiStop("#RED#[SkooBot] [Combat] [Movement] "
-                    .. "AI stopped: Unable to calculate path to nearest enemy!")
+                return stop(notice.CANNOT_ACT, "no path to " .. targets[1].name)
             else
                 local moved = SAI_movePlayer(path[1].x, path[1].y)
                 if not moved and not bot.do_nothing then
-                    return aiStop("#RED#[SkooBot] [Combat] [Movement] "
-                        .. "AI stopped: Movement along path to nearest enemy failed!")
+                    return stop(notice.CANNOT_ACT, "could not move towards " .. targets[1].name)
                 end
                 checkForAdditionalAction()
                 return
@@ -1074,8 +1143,9 @@ function skoobot_act(noAction)
         else
             -- everything is on cooldown
             log("[Combat] All Combat talents on cooldown. Waiting.")
-            return aiStop("#RED#[SkooBot] [Combat] [Movement] All Combat talents on cooldown!\n"
-                .. "Have you configured talent usage? (the SkooBot: Reclauded menu, Shift+F7 by default)")
+            -- #57: the menu key is looked up, not quoted from the default.
+            return stop(notice.CANNOT_ACT, "no Combat talent is ready -- none configured, or all on cooldown",
+                { hint = "set talent usage in the SkooBot: Reclauded menu, " .. bot.keyFor("MENU_SKOOBOT_RECLAUDED") })
         end
     end
 end
@@ -1092,10 +1162,10 @@ end
 
 function bot.start()
     if bot.active == true then
-        return aiStop("#GOLD#Disabling SkooBot: Reclauded!")
+        return stop(notice.HANDED_BACK, "disabled by the player", { banner = false })
     end
     if game.zone.wilderness then
-        return aiStop("#RED#SkooBot: Reclauded cannot be used in the wilderness!")
+        return stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
     end
     bot.active = true
     bot.actions = 0
@@ -1103,9 +1173,11 @@ function bot.start()
     skoobot_act()
 end
 
-function bot.stop(reason)
+--- Stop from outside the loop: the stop key (hooks/load.lua) and the harness.
+--- `severity` defaults to HANDED_BACK; `opts` as for stop().
+function bot.stop(text, severity, opts)
     if bot.active then
-        aiStop(reason or "#GOLD#SkooBot: Reclauded disabled!")
+        stop(severity or notice.HANDED_BACK, text or "disabled", opts)
     end
 end
 
@@ -1114,7 +1186,7 @@ function bot.query()
         return game.log("Cannot query while SkooBot: Reclauded is active!")
     end
     if game.zone.wilderness then
-        return aiStop("#RED#SkooBot: Reclauded cannot be used in the wilderness!")
+        return stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
     end
     bot.do_nothing = true
     skoobot_act()
@@ -1126,7 +1198,7 @@ function bot.runonce()
         return game.log("Cannot runonce while SkooBot: Reclauded is active!")
     end
     if game.zone.wilderness then
-        return aiStop("#RED#SkooBot: Reclauded cannot be used in the wilderness!")
+        return stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
     end
     bot.runonce = true
     skoobot_act()
@@ -1158,7 +1230,7 @@ local function playerActions()
             return
         end
         if game.zone.wilderness then
-            aiStop("#RED#Player AI cancelled by wilderness zone!")
+            stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
             return
         end
         skoobot_act()
@@ -1166,7 +1238,7 @@ local function playerActions()
             bot.activation.turnCount = bot.activation.turnCount + 1
             log("That was player Act Number " .. bot.activation.turnCount)
             if bot.activation.turnCount > TURN_LIMIT then
-                aiStop("#LIGHT_RED#AI Disabled. AI acted for " .. TURN_LIMIT .. " turns. Did it get stuck?")
+                stop(notice.STOPPED, "acted for " .. TURN_LIMIT .. " turns without handing back -- did it get stuck?")
             end
         end
     end

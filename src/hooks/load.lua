@@ -31,7 +31,9 @@ class:bindHook("ToME:run", function()
         STOP_SKOOBOT_RECLAUDED = function()
             if skoobot_reclauded.active then
                 game.log("#GOLD#SkooBot: Reclauded stop requested!")
-                skoobot_reclauded.stop("#GOLD#SkooBot: Reclauded stopped by the player")
+                -- The player pressed the key: no banner for what they just did (#58).
+                skoobot_reclauded.stop("stopped by the player", skoobot_reclauded.notice.HANDED_BACK,
+                    { banner = false })
             end
         end,
         RUNONCE_SKOOBOT_RECLAUDED = function()
@@ -48,7 +50,10 @@ class:bindHook("ToME:run", function()
             game:registerDialog(d)
         end,
     }
-    print("[SKOOBOT] ready; Shift+F3 toggles, Shift+F7 opens the menu")
+    -- #57: name the keys that are bound, not the defaults.
+    local bot = skoobot_reclauded
+    print("[SKOOBOT] ready; " .. bot.keyFor("TOGGLE_SKOOBOT_RECLAUDED") .. " toggles, "
+        .. bot.keyFor("MENU_SKOOBOT_RECLAUDED") .. " opens the menu")
 end)
 
 dofile("/data-skoobot_reclauded/settings.lua")
@@ -94,6 +99,27 @@ class:bindHook("GameOptions:generateList", function(self, data)
             }
         end
 
+        -- An on/off option, toggled by selecting it, the way the game's own
+        -- "quest popup" option works (mod/dialogs/GameOptions.lua). Persisted
+        -- through the runtime table so the stop popup's checkbox writes the
+        -- same value the same way (#58).
+        local function createBooleanOption(option, tabTitle, desc)
+            local fct = function(item)
+                skoobot_reclauded.setSetting(option, not settings[option])
+                self.c_list:drawItem(item)
+            end
+            local status = function()
+                return settings[option] and "enabled" or "disabled"
+            end
+
+            list[#list + 1] = {
+                zone = Textzone.new{width=self.c_desc.w, height=self.c_desc.h,
+                    text=string.toTString("#GOLD#" .. addonTitle .. "\n\n#WHITE#" .. desc .. "#WHITE#")},
+                name = string.toTString(("#GOLD##{bold}#[%s] %s#WHITE##{normal}#"):format(addonShort, tabTitle)),
+                status = status, fct = fct,
+            }
+        end
+
         createNumericalOption("LOWHEALTH_RATIO", "Low Health Ratio",
             "Bot pauses when under this life percent. Also will pause when losing half this " ..
             "percent life in a single round.")
@@ -112,5 +138,9 @@ class:bindHook("GameOptions:generateList", function(self, data)
             "Bot will wait this many seconds between each action. THIS IS CURRENTLY A BIT BUGGY " ..
             "AND THE BOT WILL ACT WHEN YOU PRESS BUTTONS OR MOVE YOUR MOUSE IN ADDITION TO " ..
             "AUTOMATICALLY WITH THIS DELAY")
+        createBooleanOption("STOP_POPUP", "Popup when the bot stops",
+            "Also open a popup with the reason whenever the bot stops for something you should " ..
+            "look at: low life, a debuff, being stuck. The message-log line and the banner are " ..
+            "always shown. The popup's own checkbox turns this off again.")
     end
 end)
