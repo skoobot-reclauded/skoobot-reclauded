@@ -30,8 +30,9 @@
 --   method on the same class means the one loaded last silently wins, so
 --   nothing here may carry a name the original uses. State lives in the
 --   `skoobot_reclauded` runtime table, config on `player.skoobot_reclauded`.
---   This is also the T-021 direction: the superload surface is now three
---   methods across two classes, all of them wrappers.
+--   Since #14 those two wrappers are the whole superload surface: the
+--   tooltip line is an engine hook (hooks/load.lua) and there is no Actor
+--   superload at all.
 -- * The original leaked four functions into _G (aiStop, checkForAdditionalAction,
 --   getUnspentTotal, skoobot_act). They are locals here.
 -- * Power scoring moved to data/power.lua, a pure module busted can test.
@@ -1731,6 +1732,34 @@ local function scheduleAction()
             playerActions()
             game.paused = false
         end)
+    end
+end
+
+--- The Power Level line of a creature's tooltip (#14), added by the
+--- "Actor:tooltip" hook in hooks/load.lua to the tstring the engine is
+--- building. It lands where the hook fires -- after the stats block, among
+--- the figures it is made from -- where 0.1's wrapper appended it at the
+--- very end. Plain level; with Ctrl held, the component scores, as before.
+--- The figure is bot.power's: the heuristic scored with the PLAYER's global
+--- speed for every actor, as the original did, so the tooltip and the stop
+--- conditions read one number. (The stop checks scale the player's own
+--- figure by remaining life, #62; the tooltip shows the unscaled heuristic.
+--- Which the tooltip should show is #11's, with the score it chooses.)
+function bot.tooltip(actor, ts)
+    if core.key.modState("ctrl") then
+        local scores = power.scores(actor, game.player and game.player.global_speed or 1)
+        ts:add("#FFD700#Power Level#FFFFFF#: " .. string.format("%d", power.sum(scores)), true)
+        for k, v in pairs(scores) do
+            if type(v) ~= "table" then
+                ts:add(" #FFD700#" .. k .. "#FFFFFF#: " .. string.format("%1.2f", v), true)
+            else
+                for k2, v2 in pairs(v) do
+                    ts:add(" #FFD700#Weapon " .. k2 .. "#FFFFFF#: " .. string.format("%1.2f", v2), true)
+                end
+            end
+        end
+    else
+        ts:add("#FFD700#Power Level#FFFFFF#: " .. string.format("%d", bot.power(actor)), true)
     end
 end
 
