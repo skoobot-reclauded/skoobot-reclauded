@@ -269,17 +269,27 @@ function ho.durations()
     p:setEffect(p.EFF_STUNNED, d, {})
     ho.reset()
     local eff = p:hasEffect(p.EFF_STUNNED)
-    -- what the addon can see about where the stun came from
-    local claimed = "none"
-    for _, params in pairs(p.tmp or {}) do
+    -- Where the addon can see the stun coming from, both ways round, so the
+    -- record carries the fact that decided the design: __tmpvals looks like
+    -- the link between an attribute and an effect and is empty here --
+    -- EFF_STUNNED calls addTemporaryValue directly, which does not record
+    -- there -- while the effect's SUBTYPE does say `stun`. If that ever
+    -- inverts, this line says so before the behaviour does.
+    local tmpvals, subtypes = "none", "none"
+    for id, params in pairs(p.tmp or {}) do
       if type(params) == "table" then
         for _, kv in ipairs(params.__tmpvals or {}) do
-          if kv[1] == "stunned" then claimed = tostring(params.dur) end
+          if kv[1] == "stunned" then tmpvals = tostring(params.dur) end
+        end
+        local def = p.tempeffect_def and p.tempeffect_def[id]
+        local sub = def and def.subtype
+        if type(sub) == "table" and (sub.stun or sub.confusion) then
+          subtypes = (subtypes == "none" and "" or subtypes .. ",") .. tostring(def.name) .. ":" .. tostring(params.dur)
         end
       end
     end
-    out[#out + 1] = ("set=%d dur=%s attr=%s claimed=%s ending=%s rotation=[%s]"):format(
-      d, tostring(eff and eff.dur), tostring(p:attr("stunned")), claimed,
+    out[#out + 1] = ("set=%d dur=%s attr=%s tmpvals=%s subtypes=[%s] ending=%s rotation=[%s]"):format(
+      d, tostring(eff and eff.dur), tostring(p:attr("stunned")), tmpvals, subtypes,
       tostring(b.impairmentEnding()), ho.rotation())
   end
   p:removeEffect(p.EFF_STUNNED, true, true)
@@ -361,16 +371,18 @@ return "installed level=" .. tostring(ho.logLevelWas) .. "->" .. tostring(lvl)
     $du = Probe 'return ho.durations()'
     Write-Host "  $($du.Result)"
     if ($du.Result -match '^SETUP') { Inconclusive $du.Result }
-    foreach ($seg in ($du.Result -replace '^DURATIONS ', '') -split ' ;; ') { Note "duration: $seg" }
+    foreach ($seg in (($du.Result -replace "^DURATIONS ", "") -split " ;; ")) { Write-Host "    duration: $seg" }
     $null = Assert-Result $du 'a stun with turns left still holds the entry' -Match ('set=5 [^;]*ending=false rotation=\[' + $Plain + '\]')
     $null = Assert-Result $du '...and at two turns as well' -Match ('set=2 [^;]*ending=false rotation=\[' + $Plain + '\]')
     $null = Assert-Result $du 'a stun on its last turn does NOT hold: the held entry is offered first' -Match ('set=1 [^;]*ending=true rotation=\[' + $Held + ',' + $Plain + '\]')
-    # The addon learns the duration from __tmpvals, which is how it avoids
-    # naming effect ids: if the engine stopped recording the link, `claimed`
-    # would read "none", the impairment would be unaccounted for, and the
-    # entry would keep holding -- the safe direction, but a silent loss of
-    # the refinement. This is where that shows.
-    Ok ($du.Result -notmatch 'claimed=none') 'the stun is traceable to a live effect through __tmpvals' $du.Result
+    # How the addon finds the duration, recorded both ways round because the
+    # obvious route does not work. __tmpvals looks like the link between an
+    # attribute and the effect that set it, and is EMPTY for these:
+    # EFF_STUNNED and its kind call addTemporaryValue directly, which does
+    # not record there. The effect's subtype does say `stun`. If that ever
+    # inverts, these two lines say so before the behaviour does.
+    $null = Assert-Result $du '__tmpvals does not carry the stun (addTemporaryValue, not effectTemporaryValue)' -Match ' tmpvals=none '
+    $null = Assert-Result $du 'the effect subtype does, which is what the addon reads' -Match ' subtypes=\[STUNNED:1\] '
 
     # ----- 4: stunned, STOP -----------------------------------------------
     Write-Host ''

@@ -507,7 +507,7 @@ return "installed"
     $null = Assert-Result $f1 'the decision did not raise' -Match ' ok=true err=nil '
     $null = Assert-Result $f1 'the rotation was the flee alone' -Match ' rot=1 talent=nil '
     $null = Assert-Result $f1 'the bot handed back' -Match ' active=false '
-    $null = Assert-Result $f1 'the reason says cornered, and what there was no step away from' -Match ' reason=cornered: no grid farther from '
+    $null = Assert-Result $f1 'the reason says cornered, and what there was no step away from' -Match ' reason=Cannot act: cornered: no grid farther from '
     $null = Assert-Result $f1 'and says the rotation had nothing else in it' -Match 'and the rotation is flee only$'
     $null = Assert-Result $f1 'canMove was put back' -Match ' restored=true '
 
@@ -521,7 +521,7 @@ return "installed"
     if ($f2.Result -match '^(OUTOFSIGHT|SETUP)') { Inconclusive $f2.Result }
     $null = Assert-Result $f2 'the decision did not raise' -Match ' ok=true err=nil '
     $null = Assert-Result $f2 'the rotation was the flee and a talent' -Match ' rot=2 talent=T_ATTACK '
-    Ok ($f2.Result -notmatch 'reason=cornered') 'it did not hand back as cornered' $f2.Result
+    Ok ($f2.Result -notmatch 'cornered') 'it did not hand back as cornered' $f2.Result
     $null = Assert-Result $f2 'canMove was put back here too' -Match ' restored=true '
     # ----- E: the talent screen ---------------------------------------------
     Write-Host ''

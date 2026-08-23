@@ -714,6 +714,33 @@ local function getPathToAir(self)
     return nil
 end
 
+
+--- A grid the player must CONSENT to enter (#64): a sealed vault door, a
+--- locked door, a loose rock -- anything whose terrain carries
+--- `door_player_check` (mod/class/Grid.lua:65 opens a yes/no popup on it) or
+--- `door_player_stop` (a message popup).
+---
+--- None of them sets `block_move`, so the engine's own passability says yes
+--- and Astar routes straight through: with a hostile past the door, the FIGHT
+--- branch's path ran into it, the popup opened, and a dialog is a hand-back
+--- by design. The player closes it, restarts the bot, and it walks back in
+--- within two to five turns. The first long soak (#61, 2026-08-23) measured
+--- 65 of 66 stops in ten minutes as exactly this -- the single largest source
+--- of hand-backs the bot produced.
+---
+--- So the bot never PLANS a route through one. It is not about remembering a
+--- refusal: a grid the player must be asked about is not a grid the bot may
+--- decide to enter, whether or not it has been asked yet, and the ask itself
+--- still hands back so the player keeps the decision. If a vault door is the
+--- only way to a hostile, "no path to <name>" is the honest answer.
+---
+--- Opening one deliberately is unaffected: the player walks in themselves.
+local function needsConsent(x, y)
+    if not game.level or not game.level.map then return false end
+    local t = game.level.map(x, y, engine.Map.TERRAIN)
+    return (t and (t.door_player_check or t.door_player_stop)) and true or false
+end
+bot.needsConsent = function(x, y) return needsConsent(x, y) end
 local function getNearestHostile()
     local seen = spotHostiles(game.player, true)
     local target = nil
@@ -882,6 +909,13 @@ local function impaired(p)
 end
 bot.impaired = function(p) return impaired(p or game.player) end
 
+--- The effect SUBTYPES that carry the four impairments (#68). ToME's own
+--- grouping: EFF_STUNNED, EFF_DAZED and EFF_FROZEN are all `stun`,
+--- EFF_CONFUSED is `confusion`, and the engine reasons about stun immunity
+--- and the like through exactly these keys. Two keys for four attrs, and no
+--- effect id named, so a new stunning effect is covered the day it ships.
+local IMPAIRING_SUBTYPES = { stun = true, confusion = true }
+
 --- #68: does every impairment on the character run out this turn?
 ---
 --- The point of holding is to wait for full damage. Waiting out an
@@ -890,41 +924,43 @@ bot.impaired = function(p) return impaired(p or game.player) end
 ---
 --- Durations are per EFFECT, and there is no list of impairing effects to
 --- read -- #12 detects by capability precisely because effect ids are many
---- and the attr is one. The engine keeps the link anyway: every attribute
---- an effect sets through effectTemporaryValue is recorded on the live
---- params as `__tmpvals` (engine/interface/ActorTemporaryEffects.lua:297),
---- so the live effects can be asked which of these four they are
---- responsible for, and for how much longer.
+--- and the attr is one. `__tmpvals`, which records the attributes an effect
+--- set, looks like the link and is NOT: EFF_STUNNED and its kind call
+--- addTemporaryValue directly, which does not record there (the engine says
+--- so at engine/interface/ActorTemporaryEffects.lua:249), so a scan of it
+--- finds nothing and the refinement silently never fires. Measured, not
+--- assumed -- scenario-hold part 3c reported `claimed=none` and still does,
+--- as the guard on this. The subtype is the link that exists.
 ---
 --- It ERRS TOWARD HOLDING, as the simple form did, and in two ways:
 ---
----   * an impairment no live effect claims is treated as lasting. Effects
----     that call addTemporaryValue directly do not record in __tmpvals (the
----     engine says so at :249), and an unexplained stun is not evidence of
----     a stun about to end.
----   * the LONGEST claimant wins. Two stuns, one lapsing and one not, is
----     still a stun next turn.
+---   * an impairment with no live impairing effect to explain it is treated
+---     as lasting. An unexplained stun is not evidence of one about to end.
+---   * the LONGEST candidate wins, and candidates are not attributed to a
+---     particular attr. A long confusion holds a lapsing stun. That is
+---     coarse in the safe direction.
 local function impairmentEnding(p)
-    local need, any = {}, false
+    local any = false
     for _, a in ipairs(IMPAIRMENTS) do
-        if p:attr(a) then need[a] = -1 ; any = true end   -- -1: not accounted for
+        if p:attr(a) then any = true break end
     end
     if not any then return false end
-    for _, params in pairs(p.tmp or {}) do
-        if type(params) == "table" then
-            for _, kv in ipairs(params.__tmpvals or {}) do
-                local k = kv[1]
-                if need[k] ~= nil then
-                    local d = tonumber(params.dur) or 0
-                    if d > need[k] then need[k] = d end
+    local longest = nil
+    for id, params in pairs(p.tmp or {}) do
+        local def = p.tempeffect_def and p.tempeffect_def[id]
+        local sub = def and def.subtype
+        if type(sub) == "table" then
+            for key in pairs(sub) do
+                if IMPAIRING_SUBTYPES[key] then
+                    local d = tonumber(type(params) == "table" and params.dur) or 0
+                    if not longest or d > longest then longest = d end
+                    break
                 end
             end
         end
     end
-    for _, d in pairs(need) do
-        if d < 0 or d > 1 then return false end
-    end
-    return true
+    if not longest then return false end   -- nothing explains it: keep holding
+    return longest <= 1
 end
 bot.impairmentEnding = function(p) return impairmentEnding(p or game.player) end
 
@@ -1806,7 +1842,13 @@ function skoobot_act(noAction)
                 return
             end
             local a = Astar.new(game.level.map, game.player)
-            local path = a:calc(game.player.x, game.player.y, targets[1].x, targets[1].y)
+            -- #64: never route through a grid the player must consent to
+            -- enter. Astar's add_check (engine/Astar.lua:113, :134, :156)
+            -- takes each candidate grid; a sealed door sets no block_move,
+            -- so without this the path runs through it and the bot walks
+            -- into a popup it will only hand back on.
+            local path = a:calc(game.player.x, game.player.y, targets[1].x, targets[1].y,
+                nil, nil, function(x, y) return not needsConsent(x, y) end)
             chan.debug("[Combat] [Movement] Pathing towards %s", tostring(targets[1].name))
             getDirNum(game.player, targets[1])  -- v1 computed this and never used it
 
