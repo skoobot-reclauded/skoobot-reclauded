@@ -68,13 +68,31 @@ function bl.onChangeLevel()
   local p = game.player
   return game.level.map:checkEntity(p.x, p.y, engine.Map.TERRAIN, "change_level") ~= nil
 end
+-- #78 needs somewhere to PUT a chest and somewhere to walk: `dist` free
+-- grids in a straight line from the player. Returns dx, dy or nil.
+function bl.freeLine(dist)
+  local p, map = game.player, game.level.map
+  for _, d in ipairs({ {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {-1,-1}, {1,-1}, {-1,1} }) do
+    local ok = true
+    for k = 1, dist do
+      local x, y = p.x + d[1] * k, p.y + d[2] * k
+      if not map:isBound(x, y) or map:checkAllEntities(x, y, "block_move", p) then ok = false break end
+    end
+    if ok then return d[1], d[2] end
+  end
+  return nil
+end
+-- A quiet spot with room. Before #78 this asked only for no hostiles and no
+-- level change, and the walk cases could land somewhere with no line to walk
+-- along -- an INCONCLUSIVE that came down to where the teleport happened to
+-- put the character. Asking for the room up front makes the run repeatable.
 function bl.findQuiet()
   local p = game.player
   for i = 1, 80 do
-    if bl.hostiles() == 0 and not bl.onChangeLevel() then return true end
+    if bl.hostiles() == 0 and not bl.onChangeLevel() and bl.freeLine(4) then return true end
     p:teleportRandom(p.x, p.y, 60, 10)
   end
-  return bl.hostiles() == 0 and not bl.onChangeLevel()
+  return bl.hostiles() == 0 and not bl.onChangeLevel() and bl.freeLine(4) ~= nil
 end
 -- One EXPLORE decision in query mode; report why it would hand back, if at all.
 function bl.decideExplore()
@@ -129,35 +147,22 @@ end
 -- the distance it managed, or SETUP.
 function bl.chestAway(dist)
   local p, map = game.player, game.level.map
-  local dirs = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {-1,-1}, {1,-1}, {-1,1} }
-  for _, d in ipairs(dirs) do
-    local ok = true
-    for k = 1, dist do
-      local x, y = p.x + d[1] * k, p.y + d[2] * k
-      if not map:isBound(x, y) or map:checkAllEntities(x, y, "block_move", p) then ok = false break end
-    end
-    if ok then
-      local x, y = p.x + d[1] * dist, p.y + d[2] * dist
-      local old = map(x, y, engine.Map.TERRAIN)
-      if old then
-        local g = old:clone()
-        g.special = true
-        g.chest_opened = nil
-        g.name = "glowing chest (test)"
-        map(x, y, engine.Map.TERRAIN, g)
-        map:updateMap(x, y)
-        _G.__t013_away = { x = x, y = y, old = old }
-        p:playerFOV()
-        local seen = b78chest()
-        return ("placed at %d,%d seen=%s distance=%s"):format(x, y, tostring(seen ~= nil),
-          tostring(seen and seen.distance))
-      end
-    end
-  end
-  return "SETUP no free line to place a chest along"
-end
-function b78chest()
-  return skoobot_reclauded.nearestChest and skoobot_reclauded.nearestChest() or nil
+  local dx, dy = bl.freeLine(dist)
+  if not dx then return "SETUP no free line to place a chest along" end
+  local x, y = p.x + dx * dist, p.y + dy * dist
+  local old = map(x, y, engine.Map.TERRAIN)
+  if not old then return "SETUP no terrain to clone at the far end of the line" end
+  local g = old:clone()
+  g.special = true
+  g.chest_opened = nil
+  g.name = "glowing chest (test)"
+  map(x, y, engine.Map.TERRAIN, g)
+  map:updateMap(x, y)
+  _G.__t013_away = { x = x, y = y, old = old }
+  p:playerFOV()
+  local seen = skoobot_reclauded.nearestChest and skoobot_reclauded.nearestChest() or nil
+  return ("placed at %d,%d seen=%s distance=%s"):format(x, y, tostring(seen ~= nil),
+    tostring(seen and seen.distance))
 end
 function bl.unchestAway()
   local map = game.level.map
