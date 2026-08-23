@@ -229,7 +229,8 @@ class:bindHook("GameOptions:generateList", function(self, data)
         createNumericalOption("MAX_DIFF_POWER", "Maximum Individual Enemy Power",
             "Pauses the bot when an enemy with a power level this much higher than yours is spotted.")
         createNumericalOption("MAX_COMBINED_POWER", "Maximum Combined Enemy Power",
-            "Pauses the bot when the combined power level of visible enemies is over this amount.")
+            "Pauses the bot when the combined power level of visible enemies is more than this " ..
+            "amount above yours (your power level scaled by the life you have left).")
         createNumericalOption("MAX_ENEMY_COUNT", "Maximum Enemy Count",
             "Pauses the bot when this many enemies is spotted.")
         -- #62: the rank weights. One entry per band; data/power.lua says

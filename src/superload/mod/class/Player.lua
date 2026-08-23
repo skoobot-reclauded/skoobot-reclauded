@@ -904,9 +904,16 @@ local function checkPowerLevel()
             .. ", is more than MAX_DIFF_POWER above yours (" .. mine .. " at current life)") then
         return true
     end
+    -- #62 (salvage-mishander.md item 4): the crowd threshold is relative to
+    -- the character, not a constant. v1 compared the sum with
+    -- MAX_COMBINED_POWER alone, so the same crowd stopped a level-30 and a
+    -- level-3 character alike; now the sum has to exceed the character's
+    -- own (life-scaled) power by that much. The default stays 500, so the
+    -- setting's meaning changed under it: it is the margin above yours.
     if checkStop(p, "SCOUTER_CROWDPOWER",
-        bot.loop.sumVisibleEnemyPower > cfg("MAX_COMBINED_POWER"),
-        "the combined enemy power level, " .. bot.loop.sumVisibleEnemyPower .. ", is above MAX_COMBINED_POWER") then
+        bot.loop.sumVisibleEnemyPower > myPowerLevel + cfg("MAX_COMBINED_POWER"),
+        "the combined enemy power level, " .. bot.loop.sumVisibleEnemyPower
+            .. ", is more than MAX_COMBINED_POWER above yours (" .. mine .. " at current life)") then
         return true
     end
     if checkStop(p, "SCOUTER_ENEMYCOUNT",

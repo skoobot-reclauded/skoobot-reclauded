@@ -30,6 +30,10 @@ if type(s.LOWHEALTH_RATIO)      == "nil" then s.LOWHEALTH_RATIO      = 0.5 end
 if type(s.IGNORE_DAMAGE_HEALTH_RATIO) == "nil" then s.IGNORE_DAMAGE_HEALTH_RATIO = 0.9 end
 if type(s.MAX_INDIVIDUAL_POWER) == "nil" then s.MAX_INDIVIDUAL_POWER = 200 end
 if type(s.MAX_DIFF_POWER)       == "nil" then s.MAX_DIFF_POWER       = 10  end
+-- #62 (salvage-mishander.md item 4): since the crowd threshold became
+-- relative, this is the margin the combined enemy power may exceed the
+-- character's own (life-scaled) power by, not an absolute cutoff. The
+-- default is v1's 500 unchanged; its meaning is not.
 if type(s.MAX_COMBINED_POWER)   == "nil" then s.MAX_COMBINED_POWER   = 500 end
 if type(s.MAX_ENEMY_COUNT)      == "nil" then s.MAX_ENEMY_COUNT      = 12  end
 if type(s.ACTION_DELAY)         == "nil" then s.ACTION_DELAY         = 0   end
