@@ -68,7 +68,7 @@ if game.player:checkStop("DEBUFF_ASLEEP",
 The stop condition was listed in the UI as `Debuff: ASLEEP / WARN`, appeared configurable,
 and did nothing.
 
-**Matches user report — h-youhei, GitHub #46, 2021-03-14:**
+**Matches user report — h-youhei, issue #46 of the original repository, 2021-03-14:**
 
 > *"With Base Game v1.7.2 and Skoobot v0.0.12, the soft-locks still occur.
 > **When I get asleep**, playing melee character."*
@@ -85,9 +85,9 @@ and did nothing.
 
 ---
 
-## Why issue #46 was closed without being fixed
+## Why the original's issue #46 was closed without being fixed
 
-Issue #46 ("Achieving SAI_STATE_EXPLORE after resting while being unable to move soft-locks
+The original repository's issue #46 ("Achieving SAI_STATE_EXPLORE after resting while being unable to move soft-locks
 the game") was closed on 2020-08-04. h-youhei reproduced it seven months later and it was
 never reopened.
 

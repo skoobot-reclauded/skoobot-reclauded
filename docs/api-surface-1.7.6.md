@@ -17,7 +17,8 @@ cross-referenced, not re-reported — **except where this audit shows the docume
 itself wrong**, which happened three times (Remediation items 4 and 5).
 
 **Path shorthand.** `E/` = T-Engine `engine/` tree · `T/` = ToME module (`mod/`, `data/`) ·
-v1 files (`reference/skoobot-upstream`): `P` = `superload/mod/class/Player.lua`, `A` =
+v1 files (SkooBot 0.0.12, `SkoobyDoo/tome4-SkooBot` @ `ad23dea`): `P` =
+`superload/mod/class/Player.lua`, `A` =
 `superload/mod/class/Actor.lua`, `H` = `hooks/load.lua`, `S` = `data/settings.lua`, `K` =
 `overload/data/keybinds/toggle-skoobot.lua`, `BTD`/`CAD`/`POD`/`SM` = the four dialogs under
 `overload/mod/dialogs/`.

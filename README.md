@@ -141,7 +141,8 @@ Design documents worth reading before changing anything:
 [harness](docs/design-harness.md) (how behaviour is verified against a live game),
 [the 1.7.6 API surface](docs/api-surface-1.7.6.md),
 [v1 latent bugs](docs/v1-latent-bugs.md),
-[salvage from mishander's fork](docs/salvage-mishander.md).
+[salvage from mishander's fork](docs/salvage-mishander.md),
+[review of yura9111's PR](docs/salvage-yura9111.md).
 
 ## Development
 

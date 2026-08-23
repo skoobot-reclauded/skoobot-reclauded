@@ -8,9 +8,10 @@ Orientation for anyone — human or assistant — picking this repo up cold.
 original SkooBot, not an update to it. `src/` is the shipped addon; `tools/` is development
 tooling that is never packaged; `docs/` is design record.
 
-The research archive that this project came out of lives beside it at `../Project Summary` —
-post-mortem of the original, every user complaint with its source, and the decision log. It is
-read-only history and holds no tasks; **tasks live only in this repo's GitHub Issues.**
+The post-mortem of the original, every user complaint with its source, and the decision log are
+held by the maintainer outside this repository (on the development machine, in the research
+archive beside this checkout). They are read-only history and hold no tasks; **tasks live only
+in this repo's GitHub Issues.**
 
 ## Read before acting
 
@@ -19,7 +20,7 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
 | Touch GitHub, auth, issues, or publishing | **[docs/github-workflow.md](docs/github-workflow.md)** |
 | Touch the test harness or `tools/` | [docs/design-harness.md](docs/design-harness.md) |
 | Change stop conditions or the act loop | [docs/design-stop-conditions.md](docs/design-stop-conditions.md) |
-| Copy anything from the original or mishander's fork | [NOTICE](NOTICE), [docs/salvage-mishander.md](docs/salvage-mishander.md) |
+| Copy anything from the original, mishander's fork, or a PR to the original | [NOTICE](NOTICE), [docs/salvage-mishander.md](docs/salvage-mishander.md), [docs/salvage-yura9111.md](docs/salvage-yura9111.md) |
 
 ## Rules that are not negotiable
 
@@ -46,8 +47,8 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
   `T-nnn` IDs in older titles, commits and docs are retired but valid references (D-13,
   2026-08-22) — never allocate a new one, never edit the old ones away. Procedure:
   [docs/github-workflow.md](docs/github-workflow.md) §4.
-- Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer in the local
-  research archive — not in this repo, not in issues, for now — and are cited by ID; every
+- Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer outside this
+  repository — not in this repo, not in issues, for now — and are cited by ID; every
   citation here should carry its one-line substance.
 - Push with `--follow-tags` and don't force-push `main` — ordinary hygiene, not a security
   control. **D-9: the owner has accepted the history-rewrite risk and closed the question.**
@@ -58,8 +59,9 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
   bitwise operators compiling under test but fatal in-game). `spec/dialect_spec.lua` now fails
   the run if that regresses. The residual gap is 2.1-vs-2.0.2 — `table.new` and `table.clear`
   resolve under test and fail in-game — and only the harness catches it, not lint.
-- Parse-check with `luajit -bl <file> /dev/null`; lint with `luacheck --std luajit .`. The
-  trailing-slash form `luacheck --std luajit src/` checks **no files** and exits 3.
+- Parse-check with `luajit -bl <file> /dev/null`; lint with `luacheck .` — the tracked
+  `.luacheckrc` carries the std and every per-path environment, so `--std` on the command line
+  is redundant at best. The trailing-slash form `luacheck src/` checks **no files** and exits 3.
 
 ## Working in parallel
 
