@@ -214,7 +214,13 @@ function ho.stun(on)
   ho.reset()
   return ("stunned=%s"):format(tostring(p:attr("stunned") ~= nil and p:attr("stunned") > 0))
 end
-return "installed"
+-- The "Holding ... while impaired" line is a decision detail and is emitted at
+-- debug (#46); this run reads it from the log, so raise the channel for the
+-- session. setLevel is session-only (the persisted LOG_LEVEL is untouched) and
+-- the game is stopped at the end of the run.
+ho.logLevelWas = b.log and b.log.getLevel and b.log.getLevel()
+local lvl = b.log and b.log.setLevel and b.log.setLevel("debug")
+return "installed level=" .. tostring(ho.logLevelWas) .. "->" .. tostring(lvl)
 "@
     if ($install.Result -match '^OLD') { Inconclusive $install.Result }
     if (-not (Assert-Result $install 'helpers installed' -Match '^installed')) { Stop-Game; exit 1 }

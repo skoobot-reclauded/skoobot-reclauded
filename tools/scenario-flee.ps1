@@ -293,7 +293,7 @@ return "installed"
             Write-Host "  act $i`: $txt"
             $script:steps++
             if ($txt -match 'd0=(\d+) d1=(\d+)') {
-                if ([int]$Matches[2] -ne ([int]$Matches[1] + 1)) { $script:bad += "act $i`: distance $($Matches[1]) -> $($Matches[2]), wanted +1" }
+                if ([int]$Matches[2] -lt ([int]$Matches[1] + 1)) { $script:bad += "act $i`: distance $($Matches[1]) -> $($Matches[2]), wanted at least +1" }
             } else { $script:bad += "act $i`: no distances in '$txt'" }
             if ($txt -notmatch 'moved=true') { $script:bad += "act $i`: the player did not move" }
             if ($txt -notmatch 'landed=true') { $script:bad += "act $i`: the player did not land on the grid the step chose" }
@@ -306,7 +306,7 @@ return "installed"
     }
     Write-Host "  ended: $ended ($steps act(s))"
     Ok ($steps -ge 1) 'at least one flee step was taken' "$steps"
-    Ok ($bad.Count -eq 0) 'every act grew the distance by one, moved the player to the chosen grid, and counted one action' ($bad -join '; ')
+    Ok ($bad.Count -eq 0) 'every act grew the distance by at least one (the hostile moves too), moved the player to the chosen grid, and counted one action' ($bad -join '; ')
     foreach ($m in $bad) { Write-Host "         $m" }
     Ok ($ended -match '^(OUTOFSIGHT|BLOCKED)' -or $steps -eq $MaxSteps) 'the acts ended by the hostile leaving view or no farther grid (never a stop)' $ended
     Ok ($turns.Delta -ge 10 * $steps) "game.turn advanced at least 10 per act ($($turns.Delta) for $steps)"

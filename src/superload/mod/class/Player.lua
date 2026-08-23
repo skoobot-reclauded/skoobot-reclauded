@@ -1117,7 +1117,7 @@ local function SAI_flee(entry, hostiles)
         game.log("[SkooBot] AI would flee from " .. tostring(h.name) .. " to the " .. tostring(dir))
         return true
     end
-    log("[Action] Fleeing from " .. tostring(h.name) .. " to the " .. tostring(dir))
+    chan.info("[Action] Fleeing from %s to the %s", tostring(h.name), tostring(dir))
     bot.actions = bot.actions + 1
     local moved = game.player:move(x, y)
     if not moved then
