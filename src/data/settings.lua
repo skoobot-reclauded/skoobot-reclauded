@@ -52,3 +52,12 @@ if type(s.BOSS_POWER_RATIO)     == "nil" then s.BOSS_POWER_RATIO     = 2.0 end
 -- popup is for players who want to be made to read it. The popup's own
 -- checkbox turns this off again; the options tab turns it back on.
 if type(s.STOP_POPUP)           == "nil" then s.STOP_POPUP           = false end
+
+-- #46: how much the bot writes to te4_log.txt, as a level number from
+-- data/log.lua (0 off, 1 error, 2 warn, 3 info, 4 debug, 5 trace). A number
+-- rather than a name because the settings writer quotes nothing, so a name
+-- would come back as a global read of nil. 3 is info: one line per action
+-- and per stop, which is what a bug report is read from; the per-decision
+-- and per-talent chatter is off. The options tab cycles it by name;
+-- skoobot_reclauded.log.setLevel() changes it for the session.
+if type(s.LOG_LEVEL)            == "nil" then s.LOG_LEVEL            = 3     end

@@ -42,6 +42,10 @@
 -- * A stop is one call, stop(severity, text), and data/notice.lua decides how
 --   it looks (#58); a message that names a key looks the binding up (#57).
 --   v1's aiStop(msg) took a pre-coloured string from each of its ~25 sites.
+-- * What the bot writes about itself goes through data/log.lua (#46): five
+--   levels, off below info by default, one "[SKOOBOT]" channel into
+--   te4_log.txt and warnings into the message log. v1's print() on every
+--   thought is the trace level now.
 
 local Astar = require "engine.Astar"
 local KeyBind = require "engine.KeyBind"
@@ -54,6 +58,7 @@ local rules = dofile("/data-skoobot_reclauded/rules.lua")
 local loadout = dofile("/data-skoobot_reclauded/loadout.lua")
 local notice = dofile("/data-skoobot_reclauded/notice.lua")
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
+local logm = dofile("/data-skoobot_reclauded/log.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -89,8 +94,31 @@ local function cfg(key)
     return s and s[key]
 end
 
+-- The channel (#46). The file sink is print, which the engine writes to
+-- te4_log.txt; the user sink is the message log, for warn and error only,
+-- in the stop notices' style so the player sees one voice. `game` is looked
+-- up at call time: this chunk runs while the module is still loading and
+-- `game` is false. The level starts from the persisted setting (LOG_LEVEL,
+-- seeded by data/settings.lua before any class loads) and is switched for
+-- the session by the options tab or, from the bridge,
+-- skoobot_reclauded.log.setLevel("debug").
+local chan = logm.new{
+    sink = print,
+    user = function(levelName, text)
+        if not game or not game.log then return end
+        local colour = levelName == "error" and "#LIGHT_RED#" or "#ORANGE#"
+        -- As an argument, never as the format string (game.log formats).
+        game.log("%s", colour .. "#{bold}#" .. notice.PREFIX .. "#{normal}# " .. text)
+    end,
+    level = cfg("LOG_LEVEL"),
+}
+bot.log = chan
+
+-- v1's one-string log(msg), at debug. The FIGHT branch still speaks it;
+-- everything else passes a format and arguments to the channel so that a
+-- disabled level costs no concatenation.
 local function log(msg)
-    print("[SKOOBOT] " .. msg)
+    chan.debug("%s", msg)
 end
 
 --- Per-character configuration, persisted with the save.
@@ -172,8 +200,8 @@ local function getStopConditionList(p)
         for i, c in ipairs(DEFAULT_CONDITIONS) do
             list[i] = {label=c.label, code=c.code, stoptype=chosen[c.code] or c.stoptype}
         end
-        log("[StopConditions] Reconciled the saved stop-condition list with this version's "
-            .. #list .. " conditions")
+        chan.info("[StopConditions] Reconciled the saved stop-condition list with this version's %d conditions",
+            #list)
     end
     return list
 end
@@ -186,7 +214,7 @@ local function getStopCondition(p, code)
     for index, v in ipairs(getStopConditionList(p)) do
         if v.code == code then return v, index end
     end
-    log("[StopConditions] [ERROR] Unknown stop condition " .. tostring(code) .. "; treating it as STOP")
+    chan.error("[StopConditions] Unknown stop condition %s; treating it as STOP", tostring(code))
     return {label=tostring(code), code=code, stoptype="STOP"}, nil
 end
 
@@ -266,7 +294,9 @@ function stop(severity, text, opts)
     end
     local n = notice.compose(severity, text, hint)
     bot.last_reason = n.reason
-    log("[Stop] " .. n.reason)
+    -- Info, on purpose: the channel's user sink sees warn and above, and the
+    -- player is told of a stop once, by the notice below (#58).
+    chan.info("[Stop] %s", n.reason)
 
     -- As an argument, never as the format string: game.log formats what it is
     -- given (string.tformat), and the text may carry a '%'.
@@ -291,7 +321,7 @@ end
 local function tryStop(p, code, text, severity, opts)
     local stoptype = getStopCondition(p, code).stoptype
     if stoptype == "IGNORE" then
-        log("[StopConditions] [HIGHLIGHT] Ignoring stop condition: " .. tostring(code))
+        chan.debug("[StopConditions] Ignoring stop condition: %s", tostring(code))
         return false
     end
     stop(severity or notice.STOPPED, text, opts)
@@ -367,11 +397,11 @@ local function loopInit()
         act.left_start = true
     end
 
-    log("[Survival] Evaluating life change...")
+    chan.trace("[Survival] Evaluating life change...")
     loop.delta = game.player.life - (bot.prevloop and bot.prevloop.life or game.player.life)
     loop.life = game.player.life
     if math.abs(loop.delta) > 0 then
-        log("[Survival] Delta detected! = " .. loop.delta)
+        chan.debug("[Survival] Delta detected! = %s", loop.delta)
     end
     if (loop.delta < 0) and (math.abs(loop.delta) / game.player.max_life >= cfg("LOWHEALTH_RATIO") / 2) then
         -- v1: a stop here returns nil from the initialiser, leaving the loop
@@ -414,7 +444,7 @@ local function SAI_useTalent(tid, who, force_level, ignore_cd, target)
         game.log("[SkooBot] AI would use the talent " .. name .. " on target " .. (target and target.name or ""))
         return
     end
-    log("[Action] Using Talent " .. name .. " on target " .. (target and target.name or ""))
+    chan.info("[Action] Using Talent %s on target %s", name, target and target.name or "")
     bot.actions = bot.actions + 1
     -- FIXED (T-010). The 5th arg is force_target and the 7th is no_confirm.
     -- v1 passed the target but never no_confirm, so a talent that wanted a
@@ -433,7 +463,7 @@ local function SAI_movePlayer(x, y)
         game.log("[SkooBot] AI would move to the " .. dir)
         return
     end
-    log("[Action] Moving to the " .. dir)
+    chan.info("[Action] Moving to the %s", tostring(dir))
     bot.actions = bot.actions + 1
     return game.player:move(x, y)
 end
@@ -443,7 +473,7 @@ local function SAI_beginExplore()
         game.log("[SkooBot] AI would begin exploring.")
         return
     end
-    log("[Action] Beginning to explore.")
+    chan.info("[Action] Beginning to explore.")
     bot.actions = bot.actions + 1
     if game.player:autoExplore() then
         return game.player:act()
@@ -457,7 +487,7 @@ local function SAI_beginRest()
         game.log("[SkooBot] AI would begin resting.")
         return false
     end
-    log("[Action] Beginning to rest.")
+    chan.info("[Action] Beginning to rest.")
     bot.actions = bot.actions + 1
     game.player:restInit(nil, nil, nil, validateRest)
     return checkForAdditionalAction()
@@ -707,8 +737,8 @@ local function getRules(p)
     local r, report = rules.normalize(d.autotalents)
     d.autotalents = r
     if report.migrated > 0 or report.dropped > 0 then
-        log(("[Rules] Migrated the saved talent rules: %d placed, %d dropped"):format(
-            report.migrated, report.dropped))
+        chan.info("[Rules] Migrated the saved talent rules: %d placed, %d dropped",
+            report.migrated, report.dropped)
     end
     for _, section in ipairs(rules.SECTIONS) do
         for _, e in ipairs(r[section]) do
@@ -717,7 +747,7 @@ local function getRules(p)
                 if t and t.is_object_use then
                     local o = t.getObject and t.getObject(p, t)
                     if o then
-                        log("[Rules] Re-keyed an item rule from " .. e.tid .. " to the item " .. itemName(o))
+                        chan.info("[Rules] Re-keyed an item rule from %s to the item %s", e.tid, itemName(o))
                         e.object = itemName(o)
                         e.tid = nil
                     end
@@ -730,7 +760,7 @@ local function getRules(p)
         return p:knowTalent(e.tid) and true or false
     end)
     for _, e in ipairs(removed) do
-        log("[Rules] [WARN] Dropped the rule for a talent the character no longer has: " .. tostring(e.tid))
+        chan.warn("[Rules] Dropped the rule for a talent the character no longer has: %s", tostring(e.tid))
     end
     return r
 end
@@ -883,8 +913,8 @@ local function proposeLoadout(p)
     end
     table.sort(list, function(a, b) return a.tid < b.tid end)
     local proposal = loadout.discover(list, { self = p })
-    log(("[Loadout] Proposed %d entries, %d unassigned, %d skipped, %d choices"):format(
-        proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices))
+    chan.info("[Loadout] Proposed %d entries, %d unassigned, %d skipped, %d choices",
+        proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices)
     return proposal
 end
 
@@ -900,8 +930,8 @@ bot.loadout = {
     apply    = function(proposal, mode, p)
         p = p or game.player
         local report = loadout.apply(proposal, getRules(p), rules, mode)
-        log(("[Loadout] Applied (%s): %d added, %d removed, %d kept"):format(
-            report.mode, report.added, report.removed, report.kept))
+        chan.info("[Loadout] Applied (%s): %d added, %d removed, %d kept",
+            report.mode, report.added, report.removed, report.kept)
         return report
     end,
     unplaced = function(proposal, p)
@@ -930,7 +960,7 @@ local function getAvailableTalents(target, talentsToUse)
            (target ~= nil and not game.player:getTalentRequiresTarget(t) or game.player:canProject(tg, tx, ty))
            then
             avail[#avail + 1] = tid
-            log("[AvailableTalentFilter] " .. game.player.name .. " can use " .. t.name .. " " .. tid)
+            chan.trace("[AvailableTalentFilter] %s can use %s %s", game.player.name, t.name, tid)
         elseif t.mode == "sustained" and not t.no_npc_use and not t.no_dumb_use and
            not game.player:isTalentCoolingDown(t) and
            not game.player:isTalentActive(t.id) and
@@ -938,8 +968,8 @@ local function getAvailableTalents(target, talentsToUse)
            then
             avail[#avail + 1] = tid
         else
-            log("[AvailableTalentFilter] Excluding talent: " .. tid .. ", cannot be used on "
-                .. (target ~= nil and target.name or "nil"))
+            chan.trace("[AvailableTalentFilter] Excluding talent: %s, cannot be used on %s",
+                tid, target ~= nil and target.name or "nil")
         end
     end
     return avail
@@ -960,7 +990,7 @@ local function activateSustained()
     local talents = filterFailedTalents(getSustainTalents())
     for _, tid in pairs(talents) do
         local t = game.player:getTalentFromId(tid)
-        log("[Sustain] Attempting to sustain: " .. tid)
+        chan.debug("[Sustain] Attempting to sustain: %s", tid)
         if t.mode == "sustained" and game.player.sustain_talents[tid] == nil then
             if SAI_useTalent(tid) then
                 checkForAdditionalAction()
@@ -1064,10 +1094,10 @@ function skoobot_act(noAction)
         if string.match(top.title, "Lore found:") and top.key.virtuals.EXIT then
             -- a lore dialog: the player may have configured it to be ignored
             if tryStop(game.player, "DIALOG_LORE", "a dialog is open: " .. top.title, notice.HANDED_BACK) then
-                log("[HIGHLIGHT] tried to stop bot due to presence of dialog: " .. top.title)
+                chan.debug("[Dialog] stopped for the dialog: %s", tostring(top.title))
                 return
             else
-                log("[HIGHLIGHT] unregistering dialog: " .. top.title)
+                chan.info("[Dialog] closing an ignored lore dialog: %s", tostring(top.title))
                 top.key.virtuals.EXIT()
             end
         else
@@ -1105,7 +1135,7 @@ function skoobot_act(noAction)
 
     if activateSustained() then return end
 
-    log("[State] " .. aiStateString())
+    chan.debug("[State] %s", aiStateString())
 
     if bot.state == STATE_REST then
         local p = game.player
@@ -1367,10 +1397,13 @@ end
 -------------------------------------------------------------------------------
 
 local function playerActions()
-    log("[PlayerActions] playerActions() game paused = " .. tostring(game.paused))
+    chan.trace("[PlayerActions] playerActions() game paused = %s", tostring(game.paused))
     if (not game.player.running) and (not game.player.resting) and bot.active then
         if not game.player:enoughEnergy() then
-            log("[WARN] [Bugfix] Player act called with insufficient energy for action.")
+            -- Ordinary: the nested act() a run or rest starts from lands
+            -- here once the step has spent the energy. v1 tagged it a
+            -- bugfix warning; it is control flow.
+            chan.debug("[PlayerActions] act called with insufficient energy; waiting for the next turn")
             return
         end
         if game.zone.wilderness then
@@ -1380,7 +1413,7 @@ local function playerActions()
         skoobot_act()
         if bot.activation then
             bot.activation.turnCount = bot.activation.turnCount + 1
-            log("That was player Act Number " .. bot.activation.turnCount)
+            chan.trace("[PlayerActions] that was player act number %d", bot.activation.turnCount)
             if bot.activation.turnCount > TURN_LIMIT then
                 stop(notice.STOPPED, "acted for " .. TURN_LIMIT .. " turns without handing back -- did it get stuck?")
             end
@@ -1416,7 +1449,7 @@ function _M:act()
     local ret = old_act(self)
     if game.player == self and (not self.running) and (not self.resting) and bot.active then
         if not self:enoughEnergy() then
-            log("[WARN] [Bugfix] Player act called with insufficient energy for action.")
+            chan.debug("[PlayerActions] act called with insufficient energy; waiting for the next turn")
             return ret
         end
         if cfg("ACTION_DELAY") == 0 then

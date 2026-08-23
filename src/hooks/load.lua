@@ -253,5 +253,36 @@ class:bindHook("GameOptions:generateList", function(self, data)
             "Also open a popup with the reason whenever the bot stops for something you should " ..
             "look at: low life, a debuff, being stuck. The message-log line and the banner are " ..
             "always shown. The popup's own checkbox turns this off again.")
+
+        -- #46: the log level, cycled by name. Selecting the entry steps to
+        -- the next level and wraps; the number is what is persisted (see
+        -- data/settings.lua) and the running channel is switched at once,
+        -- so the next decision logs at the new level without a restart.
+        do
+            local logm = skoobot_reclauded.log
+            local function levelName()
+                local n = tonumber(settings.LOG_LEVEL)
+                return (n and logm.module.name(n)) or logm.getLevel()
+            end
+            local fct = function(item)
+                local n = tonumber(settings.LOG_LEVEL) or logm.getLevelNumber()
+                n = (n + 1) % (logm.module.MAX + 1)
+                skoobot_reclauded.setSetting("LOG_LEVEL", n)
+                logm.setLevel(n)
+                self.c_list:drawItem(item)
+            end
+            list[#list + 1] = {
+                zone = Textzone.new{width=self.c_desc.w, height=self.c_desc.h,
+                    text=string.toTString("#GOLD#" .. addonTitle .. "\n\n#WHITE#" ..
+                        "How much the bot writes to the game's log file (te4_log.txt) about what it " ..
+                        "is doing. Select to step through the levels: off, error, warn, info, debug, " ..
+                        "trace. 'info' is the default: one line per action and per stop, which is " ..
+                        "what a bug report wants. 'debug' adds its reasoning on every decision and " ..
+                        "'trace' the talent-by-talent checks; both grow the file quickly. Warnings " ..
+                        "and errors are also shown in the message log.#WHITE#")},
+                name = string.toTString(("#GOLD##{bold}#[%s] Log level#WHITE##{normal}#"):format(addonShort)),
+                status = levelName, fct = fct,
+            }
+        end
     end
 end)
