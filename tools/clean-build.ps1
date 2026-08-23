@@ -42,6 +42,12 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'harness.ps1')
 
+# Hold the game for the whole gate, not just the launch: the junction removal
+# below and the restore in the finally block must not land under another
+# session's run (#60). Throws if another live host has it; Start-Game later
+# re-enters this same lease, and the child setup-dev.ps1 calls inherit it.
+$null = Enter-HarnessLease
+
 $RepoRoot  = Split-Path -Parent $PSScriptRoot
 $AddonsDir = Join-Path $script:GameDir 'game\addons'
 $SHORT     = 'skoobot_reclauded'

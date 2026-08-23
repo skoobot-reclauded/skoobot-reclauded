@@ -30,6 +30,12 @@ $script:TomeHome  = Join-Path $env:USERPROFILE 'T-Engine\4.0'
 $script:BridgeDir = Join-Path $script:TomeHome 'skoobot-bridge'
 $script:SaveRoot  = Join-Path $script:TomeHome 'tome\save'
 
+# Whose is the game right now, and which checkout would it load? One live
+# host owns the game at a time (harness-lease.ps1, #60). Two sessions used to
+# kill each other's games through Stop-Game and read the result as a flake.
+$script:RepoRoot  = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'harness-lease.ps1')
+
 $script:Seq       = 0
 $script:GamePid   = $null
 $script:LogOffset = 0
@@ -267,8 +273,19 @@ function Clear-BridgeQueue {
     the first still holds the GL context, the audio device and te4_log.txt --
     two instances at once, which is the one thing this harness must never do
     (docs/design-harness.md; the bridge directory is shared).
+
+    Unless the game is someone else's. While another live host holds the
+    lease this does nothing, because "every game process" would be THEIR run
+    -- killing it produced two phantom CRASHED launches on 2026-08-22 (#60).
+    With no live holder it still reaps everything, orphans included.
 #>
 function Stop-Game {
+    $foreign = Get-ForeignLease
+    if ($foreign) {
+        Write-Host "[harness] not stopping the game: it belongs to $(Format-Lease $foreign)"
+        $script:GamePid = $null
+        return
+    }
     Get-Process -Name 't-engine' -ErrorAction Ignore | ForEach-Object { Stop-Process -Id $_.Id -Force }
     $script:GamePid = $null
 
@@ -299,12 +316,19 @@ function Test-GameAlive {
     So readiness is proved by a round trip, not by a log line. PumpTimeoutSec
     covers the wait for the first frame; it is generous on purpose, because
     the cost of being wrong is a fake failure.
+
+    Two pre-flight refusals, both thrown rather than returned, because neither
+    is a launch result: the game is another live host's (the lease), or the
+    junctions would make it load a different checkout than this harness
+    belongs to. Each message says what to do.
 #>
 function Start-Game {
     param(
         [int]$TimeoutSec = 60,
         [int]$PumpTimeoutSec = 240
     )
+    $null = Enter-HarnessLease
+    Assert-JunctionsOwned -GameDir $script:GameDir
     Stop-Game
     if (-not (Test-Path $script:BridgeDir)) { New-Item -ItemType Directory -Path $script:BridgeDir | Out-Null }
     Get-ChildItem $script:BridgeDir -Filter 'cmd-*' -ErrorAction Ignore | Remove-Item -Force
@@ -314,6 +338,7 @@ function Start-Game {
                        -ArgumentList '--flush-stdout','--no-steam','--no-web' `
                        -WorkingDirectory $script:GameDir -PassThru
     $script:GamePid = $p.Id
+    $null = Enter-HarnessLease -GamePid $p.Id
     Write-Host "[harness] launched pid=$($p.Id)"
 
     # Anchor to THIS process's output before believing anything in the log.
@@ -357,22 +382,57 @@ function Start-Game {
 
     -SkipAddonCheck runs it anyway against a save known to be missing the
     product, which is how the detector itself gets tested.
+
+    -Attempts retries the launch chain -- menu bridge, reboot, tome-tier
+    bridge, tome-tier pump -- when it fails on infrastructure with the game
+    still alive. The main menu's demo level has a long tail (design-harness.md
+    section 4) that occasionally outlasts even the 240 s pump timeout, and a
+    second launch is cheaper than a diagnosis every time. Every retry is
+    printed and the result carries Attempt, so a pass on the second try is
+    visible as one. A game that DIED is not retried: with the lease in place
+    that is a real crash or a human, and hiding it would be the false-pass
+    class this harness exists to prevent (#60).
 #>
 function Load-Save {
     param(
         [Parameter(Mandatory)][string]$Name,
         [int]$TimeoutSec = 300,
-        [switch]$SkipAddonCheck
+        [switch]$SkipAddonCheck,
+        [int]$Attempts = 2
     )
 
     if (-not $SkipAddonCheck) {
         if (-not (Assert-SaveAddons -Name $Name)) {
-            return [pscustomobject]@{ Ready = $false; Reason = 'save addon list' }
+            return [pscustomobject]@{ Ready = $false; Reason = 'save addon list'; Attempt = 0 }
         }
     }
 
+    if ($Attempts -lt 1) { $Attempts = 1 }
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $r = Invoke-LoadAttempt -Name $Name -TimeoutSec $TimeoutSec
+        $r | Add-Member -NotePropertyName Attempt -NotePropertyValue $attempt
+        if ($r.Ready) {
+            if ($attempt -gt 1) { Write-Host "[harness] loaded on attempt $attempt of $Attempts" }
+            return $r
+        }
+        if (-not $r.Retryable -or $attempt -ge $Attempts) { return $r }
+        Write-Host "[harness] launch attempt $attempt of $Attempts failed ($($r.Reason)); retrying"
+    }
+}
+
+# One pass through the launch chain. Retryable means the failure was the
+# infrastructure's and the game was still alive to prove it -- a process that
+# died is reported, not relaunched.
+function Invoke-LoadAttempt {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [int]$TimeoutSec = 300
+    )
+
     $g = Start-Game
-    if (-not $g.Ready) { return [pscustomobject]@{ Ready = $false; Reason = 'no bridge at menu' } }
+    if (-not $g.Ready) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'no bridge at menu'; Retryable = (Test-GameAlive) }
+    }
 
     # instanciate() reboots the Lua state into the module, so this command
     # never returns -- fire and forget, then watch the log.
@@ -398,8 +458,9 @@ return "loading"
     if (-not $boot.Matched) {
         Write-Host '[harness] module never rebooted'
         Show-LoadDiagnostics -Seen $boot.Seen
+        $alive = Test-GameAlive
         Stop-Game
-        return [pscustomobject]@{ Ready = $false; Reason = 'no reboot' }
+        return [pscustomobject]@{ Ready = $false; Reason = 'no reboot'; Retryable = $alive }
     }
     Clear-BridgeQueue
 
@@ -407,8 +468,9 @@ return "loading"
     if (-not $w.Matched) {
         Write-Host "[harness] tome-tier bridge never came up after ${TimeoutSec}s"
         Show-LoadDiagnostics -Seen $w.Seen
+        $alive = Test-GameAlive
         Stop-Game
-        return [pscustomobject]@{ Ready = $false; Reason = 'no tome tier' }
+        return [pscustomobject]@{ Ready = $false; Reason = 'no tome tier'; Retryable = $alive }
     }
 
     # Same lesson as Start-Game: the hook line is not the pump.
@@ -417,7 +479,7 @@ return "loading"
         Write-Host "[harness] tome-tier pump never turned (status=$($probe.Status))"
         Show-LoadDiagnostics
         Stop-Game
-        return [pscustomobject]@{ Ready = $false; Reason = 'no tome pump' }
+        return [pscustomobject]@{ Ready = $false; Reason = 'no tome pump'; Retryable = ($probe.Status -ne 'CRASHED') }
     }
 
     $intact = Assert-NoAddonDropped -Seen $w.Seen

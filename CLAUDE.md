@@ -61,6 +61,37 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
 - Parse-check with `luajit -bl <file> /dev/null`; lint with `luacheck --std luajit .`. The
   trailing-slash form `luacheck --std luajit src/` checks **no files** and exits 3.
 
+## Working in parallel
+
+Several sessions may work here at once. Three rules make that safe; none costs a solo task
+more than three commands (#60).
+
+- **`skoobot-reclauded/` is the integration checkout: always `main`, always clean.** Anything
+  that touches `src/`, `tools/` or `spec/` is done in a worktree on an issue branch and
+  reaches `main` by fast-forward only, after the issue's scenarios ran from that checkout:
+
+  ```
+  git -C ../skoobot-reclauded worktree add ../skoobot-reclauded-57 -b issue-57
+  …work, commit, run the issue's scenarios from that checkout…
+  git -C ../skoobot-reclauded merge --ff-only issue-57
+  git -C ../skoobot-reclauded worktree remove ../skoobot-reclauded-57
+  git -C ../skoobot-reclauded branch -d issue-57
+  ```
+
+  Worktrees inherit the bot identity, the blank credential helper and `tools/githooks` —
+  nothing to configure. If `--ff-only` refuses, `main` moved: `git rebase main` in the
+  worktree, re-run the scenarios if the rebase touched your files, then merge. Docs-only
+  changes may go straight onto `main`, committed at once; if the tree is dirty when you
+  arrive, someone else is there — take a worktree.
+- **The game is single-occupancy and the harness enforces it.** `Start-Game` holds a lease
+  while its host process is alive and refuses if another live host holds one; `Stop-Game`
+  never kills another host's game. If it reports the harness in use, do other work and come
+  back — never kill `t-engine` by hand. The junctions must point at the checkout under test:
+  `Start-Game` refuses otherwise, and `tools/setup-dev.ps1` run from that checkout fixes it
+  (it repoints all three; run it again from `main`'s checkout when the worktree goes).
+- **A launch that fails on infrastructure is retried once**, and the retry is printed. A
+  scenario that passed on attempt 2 passed; a game that died is reported, not relaunched.
+
 ## Verifying behaviour
 
 There is a working harness that drives a real game unattended — launch, command, observe,

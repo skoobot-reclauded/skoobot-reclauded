@@ -191,7 +191,7 @@ progress invariant, arrived at independently, which is some evidence it is the r
   install has no te4.org account, so the engine logs `no online profile active` and addon hash
   validation, achievements and character upload are inert either way.
 
-### 4.1 Thirteen traps, each of which cost a debugging cycle
+### 4.1 Fourteen traps, each of which cost a debugging cycle
 
 **The previous run's log can satisfy the next run's checks.** `te4_log.txt` is truncated by
 the engine on startup â€” but not until it opens the file, measured at **~5 ms after
@@ -285,6 +285,37 @@ immediately while a separate thread writes `game.teag.tmp` and renames it. Killi
 on the strength of that return leaves a zero-byte `.tmp` and no save at all. Wait for the real
 file, not for the call.
 
+**`Stop-Game` kills the other session's game, and the victim reports a launch flake.** The
+game install is one resource — one process, one log, one bridge directory, three junctions
+pointing at exactly one checkout — and `Stop-Game` killed every `t-engine` it could see, with
+`Start-Game` calling it first. Two sessions running scenarios at once therefore voided each
+other, and the victim could not tell: on 2026-08-22 both `tome-tier pump never turned`
+failures (00:55 and 21:15) were `status=CRASHED`, the process gone between a live boot-tier
+pump and the tome-tier probe, and both archived logs end mid-load with no Lua error. That is
+what a kill from outside looks like from inside, and it was read as the main menu's long tail.
+The one genuine tail that day was a `TIMEOUT`.
+
+So the game is **leased** (`tools/harness-lease.ps1`, #60). `Start-Game` records the host
+process, its checkout and the game PID in `T-Engine/4.0/skoobot-bridge/harness.lock` and
+refuses while another *live* host holds it; `Stop-Game` leaves a live holder's game alone and
+still reaps everything, orphans included, when nobody live owns it. A lease is live while its
+host process is, so a crashed run frees it by dying and nothing cleans up. It outlives
+`Stop-Game` on purpose — `clean-build.ps1` restores junctions after stopping the game — and
+ends when the host exits, which for `powershell -File` scenarios means the run. Children
+inherit it through `SKOOBOT_HARNESS_HOST`, so `clean-build.ps1` can run `setup-dev.ps1`.
+
+Two corollaries, enforced in the same place. `setup-dev.ps1` repoints the junctions to
+whichever checkout runs it — that is how a worktree becomes the live one — and it refuses
+under another host's lease, because repointing under a running game hands it a different
+checkout mid-run. And `Start-Game` refuses if any junction that exists points at a checkout
+other than the one its own `harness.ps1` lives in, naming the `setup-dev.ps1` to run: without
+that, a scenario silently measured another checkout's `src/`. Both refusals are thrown, not
+returned, so they cannot be mistaken for a result. `Load-Save` also retries the launch chain
+once when it fails on infrastructure with the game still alive — the long tail occasionally
+outlasts even the 240 s pump timeout — printing the retry and returning `Attempt`; a process
+that *died* is reported, never relaunched, because after the lease that is a real crash or a
+human. Guarded by `tools/test-occupancy.ps1`.
+
 ---
 
 ### 4.2 The load oracle
@@ -377,6 +408,7 @@ Nothing in the engine, module, or DLC archives is modified. The whole footprint 
 | Junction `game/addons/boot-skoobot-devbridge` â†’ `tools/devbridge-boot` | remove it |
 | `T-Engine/4.0/settings/resolution.cfg` set to `800x600 Windowed` | one line, not reverted |
 | `te4_log.txt`, `T-Engine/4.0/skoobot-bridge/`, `build/logs/` | artifacts, delete freely |
+| `T-Engine/4.0/skoobot-bridge/harness.lock` | the lease (§4.1); stale once its host exits, delete freely |
 
 **Three junctions, not two.** The devbridge pair is the channel; `tome-skoobot_reclauded` is
 the product. Until it existed, every harness run exercised the bridge and never once loaded
@@ -408,11 +440,13 @@ and `-Remove` is exactly the inverse T-035 needs.
 |---|---|
 | `tools/devbridge/` | tome tier: pump, injection, interference detection |
 | `tools/devbridge-boot/` | boot tier: pump and injection at the main menu |
-| `tools/setup-dev.ps1` | creates/removes the three junctions and `resolution.cfg` |
-| `tools/harness.ps1` | `Start-Game`, `Invoke-Bridge`, `Stop-Game`, `Wait-LogLine`, `Show-LoadDiagnostics` |
+| `tools/setup-dev.ps1` | creates/removes the three junctions and `resolution.cfg`; refuses under another host's lease |
+| `tools/harness.ps1` | `Start-Game`, `Load-Save`, `Invoke-Bridge`, `Stop-Game`, `Wait-LogLine`, `Show-LoadDiagnostics` |
+| `tools/harness-lease.ps1` | whose the game is: the lease, and which checkout the junctions point at (§4.1) |
 | `tools/smoke-test.ps1` | proves the loop end to end |
 | `tools/test-unfocused.ps1` | proves the pump survives a minimised window |
 | `tools/test-relaunch.ps1` | proves a relaunch cannot be satisfied by the previous run's log |
+| `tools/test-occupancy.ps1` | proves one live host owns the game and a dead one is taken over |
 | `tools/new-character.ps1` | creates and saves a character with no human input |
 
 Character creation drives the Birther's own `randomBirth()`, so no descriptor knowledge is

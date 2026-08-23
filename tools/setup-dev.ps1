@@ -95,6 +95,18 @@ if (-not (Test-Path $AddonsDir)) {
     exit 1
 }
 
+# Whose is the game right now? Re-pointing the junctions under another
+# session's running game would hand it a different checkout mid-run, so this
+# refuses while a live harness host elsewhere holds the lease (#60). An
+# ancestor's lease is not "elsewhere": clean-build.ps1 runs this as a child.
+. (Join-Path $PSScriptRoot 'harness-lease.ps1')
+$foreign = Get-ForeignLease
+if ($foreign) {
+    Write-Host "[setup-dev] FAILED - the game is in use by $(Format-Lease $foreign)"
+    Write-Host "            Junctions are not re-pointed under another session's run."
+    exit 1
+}
+
 # --------------------------------------------------------------------------
 # Junctions
 # --------------------------------------------------------------------------
