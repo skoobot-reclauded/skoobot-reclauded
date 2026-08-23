@@ -1,6 +1,6 @@
 # Design: liveness vs. model validity
 
-**Status:** built (§1.3 #13, §3 #12) · **Task:** T-026 (#12), T-027 (#13) · **Date:** 2026-08-21, revised 2026-08-23
+**Status:** built (§1.3 #13, §3 #12, §5 #11) · **Task:** T-026 (#12), T-027 (#13), T-020 (#11) · **Date:** 2026-08-21, revised 2026-08-23
 **Supersedes:** v1's `getStopConditionList()` + `checkForDebuffs()` split
 
 > **Revised 2026-08-21** after author correction. An earlier draft of this document called
@@ -402,3 +402,106 @@ IGNORE` instead of naming the condition. Fixed in the port; the parameter is `co
 ## 4. Migration
 
 Nothing to migrate from v1. Separate addon, separate `short_name`, no shared state.
+
+---
+
+## 5. Scored situational evaluation
+
+**Status: built (#11, 2026-08-23), on branch `issue-11`, stacked on `issue-12`.** This section
+describes `src/data/score.lua` and how the act loop follows it; the unit pins are
+`spec/score_spec.lua`, the in-game regression `tools/scenario-scoring.ps1`, and the parity net
+`tools/scenario-salvage-power.ps1`, whose numbers did not move.
+
+### 5.1 The principle
+
+The flat list can say warn / stop / ignore per named condition. It cannot say *how bad* the
+situation is, or what to do about it short of stopping. The score says both — and **the list
+stays the input, the score is the evaluation**: the four `SCOUTER_*` conditions keep their
+codes, labels, WARN / STOP / IGNORE and their place in the menu; what changed is that their
+detectors read a flag off the score instead of comparing a threshold each.
+
+### 5.2 Inputs, knobs, terms
+
+| input | from |
+|---|---|
+| own power, scaled by the life left (#62 item 3) | `score.ownPower(power.level(p), life, max_life)` |
+| each visible hostile's power × its rank weight (#62 item 2), rank, distance, name | `spotHostiles` records them on each entry |
+| count | `#hostiles` |
+| what the player cannot do — move / act / target | `conditions.capabilities()` (§3.1), as the blocking conditions' words |
+| life and air fractions; whether life fell this turn | the player; the loop scratch's delta |
+| which power flags the player has *accepted* | a condition at IGNORE, or a WARN that fired and was restarted past |
+
+The player's knobs are the **parameters**, replaced by nothing. Each is the denominator of
+one term, so a term of 1 is exactly that knob's limit, 0.5 is half-way to it and 3 is three
+times over:
+
+| term | ratio | knob |
+|---|---|---|
+| `individual` | strongest weighted enemy / limit | `MAX_INDIVIDUAL_POWER` |
+| `stronger` | strongest weighted enemy / (own + margin) | `MAX_DIFF_POWER` |
+| `crowd` | weighted sum / (own + margin) | `MAX_COMBINED_POWER` |
+| `count` | hostiles / limit | `MAX_ENEMY_COUNT` |
+| `unseen` | (1 − life) / (1 − ratio), only when damage arrived with nothing in view | `IGNORE_DAMAGE_HEALTH_RATIO` |
+
+**The score is the largest term** — how far past the worst of the player's limits the
+situation is, in [0, ∞). A knob of zero makes its term infinite over anything ("threat over
+any limit"). `unseen` is the T-011 threshold as a term: with nothing in view, the one threat
+the explore branch faces is damage from a source it cannot see, and the ratio says how far
+below the ignore line the character has fallen.
+
+**The flags are v1's comparisons, made in the scorer unchanged** — `max > MAX_INDIVIDUAL_POWER`,
+`max > own + MAX_DIFF_POWER`, `sum > own + MAX_COMBINED_POWER`, `count > MAX_ENEMY_COUNT` — so a
+knob keeps meaning exactly what the options tab says it means, and the salvage scenario's
+measured numbers hold to the decimal. The `EXPLORE_DAMAGE` flag is the T-011 stop. Each set
+flag carries v1's wording with the figures compared (`details`), and every stop reason now
+ends ` -- threat 2.3`.
+
+**Distance changes no term, on purpose.** A boss at the edge of view is the same boss two
+turns later with less room, and the stop should come at the edge. Distance decides posture.
+
+### 5.3 Posture
+
+The recommendation, with its reasons as strings:
+
+| posture | when | the FIGHT branch does |
+|---|---|---|
+| `handback` | a flag the player has **not** accepted is set; or the player cannot act or target (§3.1 blocks); or own power is 0; or air is under 25% | stops with the reasons joined — in practice the first case never reaches FIGHT, because the turn-site condition stopped the bot already with the same reason |
+| `retreat` | an accepted single-enemy flag (`individual` or `stronger`), the enemy **not adjacent**, the player able to move, and fewer than `RETREAT_LIMIT` (5) steps already taken in a row — against something as fast as the player a chase holds its distance for ever, and every step is a turn not spent fighting | one flee step from the strongest (#59's `fleeStep`) before the rotation; with no step, the rotation as usual. The activation counts the steps; any other posture starts the count over |
+| `hold` | an accepted crowd or count flag, and no single-enemy one | the rotation on what is in reach; with nothing in reach, **waits a turn** (`Actor:waitTurn`, a real action for the progress invariant) instead of walking into the crowd |
+| `fight` | nothing over a limit; or the threat is over a limit, accepted, and already adjacent — a step away from something next to you gives it a free hit; or over a limit, accepted, and the player pinned | the rotation, then the approach, as v1 |
+
+So with the defaults — every `SCOUTER_*` at STOP — nothing changes in what the bot does: a
+flag stops it at the turn site with the figure, the knob and the score in the reason. The
+postures matter once the player sets a power condition to **IGNORE** or restarts past a
+**WARN**: where v1 then charged, the bot now steps back from a strong enemy it can still get
+away from, and waits for a crowd to come to it.
+
+**Not inputs, deliberately:** stunned and confused (§2.1 — the model does not know what they
+cost, so they stay a stop, not a term); the remaining duration of anything (§2.3).
+
+### 5.4 What the tooltip shows
+
+Since #62 the checks compared a life-scaled own power and a rank-weighted enemy power while
+the tooltip still showed the raw heuristic, so the figure in a stop reason could not be found
+on screen. The tooltip now shows both, from the scorer's two helpers so they cannot drift:
+
+```
+Power Level: 120 -- counts as 48 to SkooBot (x0.4 normal)
+Power Level: 80 -- counts as 52 to SkooBot (at 65% life)
+```
+
+The raw number is what v1 showed and what *Maximum Enemy Power* is written against; the
+counted one is what the terms and the stop reasons carry. Ctrl still shows the components.
+
+### 5.5 Explicitly out of scope
+
+- **Walking to a glowing chest as a scored objective** (salvage-mishander.md item 9). It did
+  not fall out of the scorer — the score evaluates threat, and a chest is an opportunity with a
+  path and a guard check, which is a second kind of objective the loop has no slot for. Its
+  own issue.
+- **A non-linear life curve** for own power. The terms are ratios of that figure, so a curve
+  there re-tunes every knob under the player; if it comes, it comes with a migration of the
+  defaults.
+- **Weighing the strongest for the retreat step by the weighted figure.** `fleeStep` from
+  `strongest` ranks by `bot.power`, the raw heuristic, as #59 documented; with one enemy over
+  the limit it makes no difference, and changing #59's rule is #59's follow-up.

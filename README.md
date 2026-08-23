@@ -40,8 +40,12 @@ of its life in one turn or falling under half (both adjustable), being unable to
 glowing chest in view, standing on a level change, or enemies that score too strong by its
 **power level** estimate. Every stop is one line in the message log and a banner, always
 saying why; a stop for something you should look at also names the key that restarts it, and
-can open a popup. Every creature's tooltip shows the power-level estimate; hold `Ctrl` while
-hovering to see how it was made up.
+can open a popup. The power-level stops also say how far over your limits the room is -- a
+**threat** score where 1 is the worst of your limits -- and a power-level condition you set
+to `IGNORE` or restart past is played rather than charged: a step away from a single enemy
+over your limit while it is not yet adjacent, a wait for a crowd to come into reach. Every
+creature's tooltip shows the power-level estimate and what the bot counts it for; hold `Ctrl`
+while hovering to see how it was made up.
 
 The menu (`Shift+F7`) holds the two things you configure per character:
 

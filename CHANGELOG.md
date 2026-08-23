@@ -55,6 +55,15 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
 - **Log level** (#46): a *Log level* entry on the options tab (off / error / warn / info / debug
   / trace; default info). Everything the bot does goes to `te4_log.txt` under `[SKOOBOT]`; only
   warnings and errors reach the message log.
+- **A threat score, and a posture** (#11): the four power-level options and *Ignore Damage
+  Above Life Ratio* are now the scale of one score -- 1 is the worst of your limits, 3 is three
+  times over it -- and every power-level stop says it ("... above yours (52.0 at current life)
+  -- threat 2.3"). With the stop conditions at their defaults nothing else changes. Set a
+  power-level condition to IGNORE, or restart past a WARN, and the bot now plays the
+  situation rather than charging: a step away from a single enemy over your limit while it
+  is not yet adjacent, a wait for a crowd over your limit to come into reach. Every creature's
+  tooltip shows the figure the bot counts it for beside the raw power level ("counts as 48 to
+  SkooBot (x0.4 normal)"; your own "at 65% life").
 
 ### Changed
 
@@ -105,4 +114,4 @@ Defects inherited from 0.0.12, all reported by its users:
 
 ### Not in this version
 
-- The scored situation evaluation that replaces the stop-condition list is after 0.1 (#11).
+- Walking to a glowing chest as a scored objective, and a non-linear life curve for your own power, are after 0.1 (#11, follow-ups).
