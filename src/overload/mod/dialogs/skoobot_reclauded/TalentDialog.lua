@@ -33,15 +33,24 @@
 -- Keys: Enter or a row's letter opens the action menu; 1-4 add (from
 -- Available) or move (from a section) the selected talent to that section;
 -- 0, Delete or Backspace remove it from its section, or from every section
--- when pressed on an Available row; Shift+Up and Shift+Down reorder it.
--- Ctrl+Up/Down belong to the list widget itself, which sees every key before
--- this dialog does (engine/ui/Dialog.lua keyEvent).
+-- when pressed on an Available row; Shift+Up and Shift+Down reorder it;
+-- Space toggles "hold while impaired" on a Combat row (#15). Ctrl+Up/Down
+-- belong to the list widget itself, which sees every key before this dialog
+-- does (engine/ui/Dialog.lua keyEvent). Letters are all taken by the rows
+-- (a-z, A-Z), which is why the hold key is Space rather than a letter.
 --
 -- BUILT-IN ACTIONS (#59). Available also lists the two flee rows -- "Flee
 -- from the nearest hostile", "Flee from the strongest hostile" -- from
 -- data/rules.lua's ACTIONS. They place like a talent, into Combat only
 -- (rules.allowed typing), both may be placed, and their description is the
 -- module's fixed prose.
+--
+-- HOLD WHILE IMPAIRED (#15). A Combat row carries a per-placement flag,
+-- `hold = true`, shown in the Kind column and described in the pane; the bot
+-- skips a held entry while the character is stunned, dazed, confused or
+-- frozen. Toggled with Space or from the row's action menu. A placement is
+-- its own table (rules.place copies on an add), so the flag belongs to the
+-- Combat placement alone; an add into another section clears it there.
 --
 -- SUGGESTED LOADOUTS (#18). The first row of the list, "Suggest a loadout",
 -- carries the count of talents the bot could place that are in no section,
@@ -87,8 +96,8 @@ local TUTORIAL = table.concat({
 	"Drag from Available into a section to add a talent; drag it from one section to another to move it, " ..
 		"or onto another talent to put it before that one. Keyboard: Enter or the letter opens the actions; " ..
 		"1-4 add (from Available) or move (from a section) the selected talent; 0 or Delete removes it from " ..
-		"its section; Shift+Up/Down reorders it. Sustained talents only go in Sustain; the flee actions at " ..
-		"the end of Available only go in Combat.",
+		"its section; Shift+Up/Down reorders it; Space holds a Combat entry while impaired. Sustained talents " ..
+		"only go in Sustain; the flee actions at the end of Available only go in Combat.",
 	"Not sure where to start? The first row suggests a loadout from the game's own talent data; nothing " ..
 		"is written until you choose Merge or Replace.",
 }, "\n") .. "\n"
@@ -161,6 +170,9 @@ function _M:init(actor)
 		[{"_DOWN", "shift"}] = function() self:shiftSelected(1) end,
 		_DELETE = function() self:unassignSelected() end,
 		_BACKSPACE = function() self:unassignSelected() end,
+		-- A key command takes precedence over text input for the same key
+		-- (engine/KeyCommand.lua receiveKey), so __TEXTINPUT never sees " ".
+		_SPACE = function() self:toggleHoldSelected() end,
 	}
 	self.key:addBinds{
 		EXIT = function()
@@ -223,11 +235,20 @@ function _M:row(entry, section, rules)
 	local plain = (tostring(info.name):gsub("#[^#]*#", ""))
 	local kind = KIND_LABELS[info.kind] or tostring(info.kind)
 	if not info.live then kind = kind .. (info.carried == false and " (not carried)" or " (inactive)") end
+	local desc = info.desc
+	-- The hold flag (#15) is a Combat placement's own: shown on that row, in
+	-- the Kind column and in the pane, and nowhere else.
+	local held = section == "Combat" and entry.hold == true
+	if held then kind = kind .. ", held" end
+	if section == "Combat" then
+		desc = tostring(desc) .. "\n\n" .. (held and "#YELLOW#Holding while impaired (Space to clear).#LAST#"
+			or "Not held while impaired (Space to hold).") .. "\n" .. self.rm.HOLD_DESCRIPTION
+	end
 	local inS, used = membership(self.rm, rules, entry)
 	return {
 		char="", name=(icon .. tostring(info.name)):toTString(), cname=plain, kind=kind, tree=tostring(info.tree),
 		used=used, inSections=inS,
-		entry=entry, section=section, ekind=info.kind, tid=info.tid, live=info.live, desc=info.desc,
+		entry=entry, section=section, ekind=info.kind, tid=info.tid, live=info.live, desc=desc, held=held,
 		color=function() return info.live and {0xFF, 0xFF, 0xFF} or {0x80, 0x80, 0x80} end,
 	}
 end
@@ -551,7 +572,11 @@ function _M:place(entry, section, before, from)
 	local rules = self.R.get(self.actor)
 	local at = self.rm.place(rules, entry, section, before, from)
 	-- A hand edit: the row is the player's now, whoever wrote it (#18).
-	if at and rules[section][at] then rules[section][at].suggested = nil end
+	if at and rules[section][at] then
+		rules[section][at].suggested = nil
+		-- The hold flag is Combat's (#15): an add or a move elsewhere drops it.
+		if section ~= "Combat" then rules[section][at].hold = nil end
+	end
 	print(("[SKOOBOT] [TalentDialog] %s -> %s at %s%s"):format(tostring(self.rm.key(entry)), section,
 		tostring(at), from and (" from " .. from) or ""))
 	self:refresh(self.rm.key(entry), section)
@@ -587,6 +612,24 @@ function _M:shift(entry, section, delta)
 	return at
 end
 
+--- Flip "hold while impaired" on a rule's Combat placement (#15). The flag
+--- lives on the STORED table of that one placement; nothing else changes.
+-- @return the new state, or nil if the rule has no Combat placement
+function _M:toggleHold(entry)
+	local rules = self.R.get(self.actor)
+	local i = self.rm.indexIn(rules, "Combat", entry)
+	if not i then
+		self:say("Hold while impaired applies to a Combat entry: put it in Combat first.")
+		return nil
+	end
+	local stored = rules.Combat[i]
+	stored.hold = (not stored.hold) or nil
+	stored.suggested = nil
+	print(("[SKOOBOT] [TalentDialog] %s hold=%s"):format(tostring(self.rm.key(entry)), tostring(stored.hold == true)))
+	self:refresh(self.rm.key(entry), "Combat")
+	return stored.hold == true
+end
+
 --- While a proposal is shown there is nothing to edit: say so, once.
 function _M:previewing()
 	if not self.proposal then return false end
@@ -618,6 +661,21 @@ function _M:shiftSelected(delta)
 	local item = self:selected()
 	if not item or not item.entry or not item.section then return nil end
 	return self:shift(item.entry, item.section, delta)
+end
+
+--- Space: hold the selected Combat row while impaired, or stop holding it.
+function _M:toggleHoldSelected()
+	if self:previewing() then return nil end
+	local item = self:selected()
+	if not item or not item.entry then
+		self:say("Select a Combat entry first.")
+		return nil
+	end
+	if item.section ~= "Combat" then
+		self:say("Hold while impaired applies to a Combat entry: select it in Combat.")
+		return nil
+	end
+	return self:toggleHold(item.entry)
 end
 
 -------------------------------------------------------------------------------
@@ -665,6 +723,10 @@ function _M:use(item, button)
 		end
 		list[#list + 1] = {name="Move up (Shift+Up)", action=function() self:shift(item.entry, item.section, -1) end}
 		list[#list + 1] = {name="Move down (Shift+Down)", action=function() self:shift(item.entry, item.section, 1) end}
+		if item.section == "Combat" then
+			list[#list + 1] = {name=(item.held and "Stop holding while impaired (Space)"
+				or "Hold while impaired (Space)"), action=function() self:toggleHold(item.entry) end}
+		end
 		list[#list + 1] = {name=("Remove from %s (Delete)"):format(rm.LABELS[item.section]),
 			action=function() self:unassign(item.entry, item.section) end}
 	else

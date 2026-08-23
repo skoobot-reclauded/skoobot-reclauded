@@ -32,8 +32,9 @@
 -- most once in a section, but may be in several sections -- a healing
 -- infusion as both Damage Prevention and Recovery, as v1 allowed (owner test
 -- of #56). Each placement is its own table -- place() copies on an add --
--- so extra fields on an entry stay with that placement; a later per-rule
--- flag (#15's "hold while impaired") needs no migration.
+-- so extra fields on an entry stay with that placement: the per-rule flag
+-- `hold = true` (#15, "hold while impaired") is such a field, needed no
+-- migration, and means something only in Combat.
 --
 -- v1, and the port until #56, saved a flat list of {tid=, usetype=, priority=}
 -- in the same field. normalize() migrates that in place, once.
@@ -69,6 +70,16 @@ M.ACTIONS = {
           .. "itself. Both flee rows may be placed: \"from the strongest, failing that from the nearest\" is a "
           .. "legitimate rotation." },
 }
+
+-- What the hold flag means, for the row that carries it (#15). The act loop
+-- reads `entry.hold` on Combat entries only; this is the prose the talent
+-- screen shows beside the toggle.
+M.HOLD_LABEL = "hold while impaired"
+M.HOLD_DESCRIPTION = "Hold while impaired: while the character is stunned, dazed, confused or frozen this entry is "
+    .. "skipped as if it were on cooldown and the rotation falls through to the next one -- so a long-cooldown hit "
+    .. "is not spent at half damage and is ready when the impairment lifts. This only matters to a player who has "
+    .. "set the STUNNED, DAZED, CONFUSED or FROZEN stop conditions to WARN or IGNORE: at STOP the bot hands back "
+    .. "before the rotation runs. Combat only."
 
 M.LABELS = {
     Combat           = "Combat",

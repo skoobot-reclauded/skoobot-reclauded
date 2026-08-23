@@ -819,14 +819,31 @@ local function getAutoTalents(section)
     return rules.tids(getRules(p), section, function(e) return resolveRule(p, e) end)
 end
 
+--- Is the character impaired in a way a held Combat entry waits out (#15)?
+--- Stunned, dazed, confused or frozen, read as the capability counters they
+--- are (attr), never `== 1`: a doubly stunned character is impaired too.
+--- The same four conditions the DEBUFF_* stops watch; this is what a
+--- player who set those to WARN or IGNORE gets instead of a stop. "One
+--- turn of stun left" (design-stop-conditions.md 2.3) is not read: any
+--- impairment holds, which is the simple form and errs toward holding.
+local function impaired(p)
+    return (p:attr("stunned") or p:attr("dazed") or p:attr("confused") or p:attr("frozen")) and true or false
+end
+bot.impaired = function(p) return impaired(p or game.player) end
+
 --- The Combat rotation as the act loop walks it (#59): a talent id for a
 --- talent or a live item, the entry itself for a built-in action, in the
---- player's order.
+--- player's order. A Combat entry with hold = true is left out while the
+--- character is impaired (#15) -- skipped like a talent on cooldown, so the
+--- rotation falls through to the next entry.
 local function getCombatRotation()
     local p = game.player
+    local held = impaired(p)
     local out = {}
     for _, e in ipairs(getRules(p).Combat) do
-        if rules.isAction(e) then
+        if e.hold and held then
+            log("[Combat] Holding " .. tostring(rules.key(e)) .. " while impaired")
+        elseif rules.isAction(e) then
             out[#out + 1] = e
         else
             local tid = resolveRule(p, e)

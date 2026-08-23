@@ -98,6 +98,13 @@ describe("data/rules.lua", function()
       assert.is_nil(R.describeAction({ action = "flee", from = "weakest" }))
     end)
 
+    it("carries the prose for the hold flag (#15)", function()
+      assert.is_string(R.HOLD_LABEL)
+      assert.is_string(R.HOLD_DESCRIPTION)
+      assert.is_truthy(R.HOLD_DESCRIPTION:find("WARN", 1, true), "says who it is for")
+      assert.is_truthy(R.HOLD_DESCRIPTION:find("Combat only", 1, true))
+    end)
+
     it("hands out a fresh entry for a palette row, never the definition itself", function()
       local e = R.actionEntry(R.ACTIONS[1])
       assert.are.same({ action = "flee", from = "nearest" }, e)
@@ -473,6 +480,66 @@ describe("data/rules.lua", function()
       assert.is_nil(R.shift(t, { tid = "T_A" }, "Combat", 1))
     end)
 
+  end)
+
+  describe("the hold flag (#15)", function()
+    -- `hold = true` is a plain field on a Combat placement. Nothing in the
+    -- module reads it; what the module guarantees is that it travels with
+    -- the placement and with nothing else.
+    local t
+    before_each(function()
+      t = R.new()
+      t.Combat = { { tid = "T_A", hold = true }, { action = "flee", from = "nearest", hold = true }, { tid = "T_B" } }
+    end)
+
+    it("survives normalize, on a talent and on a flee", function()
+      local _, report = R.normalize(t)
+      assert.are.same({ migrated = 0, dropped = 0 }, report)
+      assert.is_true(t.Combat[1].hold)
+      assert.is_true(t.Combat[2].hold)
+      assert.is_nil(t.Combat[3].hold)
+    end)
+
+    it("survives a v1 migration like any other field", function()
+      local v1 = { { tid = "T_A", usetype = "Combat", priority = 1, hold = true } }
+      R.normalize(v1)
+      assert.are.same({ { tid = "T_A", hold = true } }, v1.Combat)
+    end)
+
+    it("survives a reposition and a shift within Combat", function()
+      R.place(t, { tid = "T_A" }, "Combat", { tid = "T_B" })
+      assert.are.same({ "!flee:nearest", "T_A", "T_B" }, tids(t.Combat))
+      assert.is_true(t.Combat[1].hold)
+      assert.is_true(t.Combat[2].hold)
+      R.shift(t, { action = "flee", from = "nearest" }, "Combat", 2)
+      assert.are.same({ "T_A", "T_B", "!flee:nearest" }, tids(t.Combat))
+      assert.is_true(t.Combat[3].hold)
+    end)
+
+    it("travels with a move out of Combat and back, on the stored table", function()
+      R.place(t, { tid = "T_A" }, "Recovery", nil, "Combat")
+      assert.is_true(t.Recovery[1].hold, "the stored table moved")
+      R.place(t, { tid = "T_A" }, "Combat", nil, "Recovery")
+      assert.is_true(t.Combat[3].hold)
+    end)
+
+    it("lands on its own table when the flagged row is added to a second section", function()
+      R.place(t, t.Combat[1], "Recovery")
+      assert.is_true(t.Combat[1].hold)
+      -- place() copies on an add, so the Recovery row has the same fields
+      -- at the moment of the add -- including the flag, which the talent
+      -- screen clears outside Combat -- but its own table: clearing it in
+      -- Combat leaves Recovery as it was, and vice versa.
+      t.Combat[1].hold = nil
+      assert.is_true(t.Recovery[1].hold)
+      t.Recovery[1].hold = nil
+      assert.is_nil(t.Combat[1].hold)
+    end)
+
+    it("does not change a rule's identity", function()
+      assert.is_true(R.same({ tid = "T_A", hold = true }, { tid = "T_A" }))
+      assert.are.equal(1, R.indexIn(t, "Combat", { tid = "T_A" }))
+    end)
   end)
 
   describe("remove, removeAll and prune with a flee (#59)", function()
