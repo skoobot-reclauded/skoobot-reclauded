@@ -1,6 +1,6 @@
-﻿# Design: behaviour-verification harness
+# Design: behaviour-verification harness
 
-**Status:** implemented Â· **Tasks:** D-4, T-005 Â· **Date:** 2026-08-21
+**Status:** implemented · **Tasks:** D-4, T-005 · **Date:** 2026-08-21
 
 Verifying that the bot *behaves* correctly needs a real game: the thing under test is a
 decision loop reacting to game state. Unit tests cover pure logic; they cannot tell you the
@@ -9,8 +9,8 @@ bot stopped when it should have. This is the other half.
 They also cover less than they appear to. `busted` ran under PUC Lua 5.4 rather than LuaJIT
 until T-045, so the suite was testing a different language in both directions; it is pinned to
 LuaJIT now, with `spec/dialect_spec.lua` failing the run if that regresses. Even correct, it
-cannot see the difference between the game's LuaJIT 2.0.2 and a local 2.1 â€” `table.new`
-resolves under test and fails in-game â€” and neither can lint. **That gap is this harness's
+cannot see the difference between the game's LuaJIT 2.0.2 and a local 2.1 — `table.new`
+resolves under test and fails in-game — and neither can lint. **That gap is this harness's
 job**, and it is the reason the harness is not optional tooling.
 
 ---
@@ -117,17 +117,17 @@ progress invariant, arrived at independently, which is some evidence it is the r
 - A separate C-side idle throttle toggles 30 FPS and 2 FPS. Measured poll rate at an idle menu
   is ~2.2/sec, so **worst-case command latency is ~500 ms**. That is the floor, not a bug.
 - `game:onTickEnd(f, name)` returning `game.TICK_RESCHEDULE` is a self-perpetuating per-tick
-  callback (engine/Game.lua:331). It looks like the obvious poll loop and is not â€”
+  callback (engine/Game.lua:331). It looks like the obvious poll loop and is not —
   see 4.1. It also calls `requestNextTick`, which pins the engine at 30 FPS and holds a core.
 - Addon directories load unpacked if named `<module>-<something>` with an `init.lua`
   (engine/Module.lua:409-414). Junction the repo tree in and edits go live on next launch.
 - **Addons are scanned per module.** `listAddons` filters on `^<module.short_name>%-`, so at
   the main menu only `boot-*` addons are considered; `tome-*` ones are not looked at until a
   tome game is instanciated. A product addon can therefore be correctly installed and
-  completely invisible at the menu tier â€” that is not a fault.
+  completely invisible at the menu tier — that is not a fault.
 - **A savefile records its addon list, and the engine enforces it.** `Module:instanciate`
   passes `save_desc.addons` into `loadAddons` (`:1041`), which removes anything absent from
-  it â€” `Removing addon <name>: not allowed by savefile` (`:565-569`) â€” and carries on. The
+  it — `Removing addon <name>: not allowed by savefile` (`:565-569`) — and carries on. The
   addon is simply not there. Nothing errors, nothing is highlighted, and a behaviour run from
   such a save happily "verifies" a game that never loaded the thing under test. The
   enabled-by-default rule above applies only when there is **no** savefile list to consult,
@@ -137,14 +137,14 @@ progress invariant, arrived at independently, which is some evidence it is the r
   launching, and `Assert-NoAddonDropped` watches the log after. The first catches a stale
   save without spending a launch; the second catches everything else, including an addon
   dropped for a reason the descriptor cannot show. **A save must be regenerated whenever the
-  addon set changes** â€” `tools/new-character.ps1` does it unattended, and now refuses to
+  addon set changes** — `tools/new-character.ps1` does it unattended, and now refuses to
   write a save whose game did not load the product.
 - The engine reboots into a module plus savefile via `Module:instanciate(mod, name, new_game,
   ...)` (engine/Module.lua:931), the same call the New Game menu makes.
 
 - **Launch time has a long tail, and it is the main menu's demo level.** A launch is normally
-  **~6 s**, but roughly **one in eight takes 90â€“166 s**. Nothing about the addon, the
-  junctions or the harness affects it â€” measured with and without the product installed, and
+  **~6 s**, but roughly **one in eight takes 90–166 s**. Nothing about the addon, the
+  junctions or the harness affects it — measured with and without the product installed, and
   the same tail appears either way.
 
   The log carries no timestamps, so sampling it once a second is what locates the time. Two
@@ -152,12 +152,12 @@ progress invariant, arrived at independently, which is some evidence it is the r
 
   | | where the seconds went |
   |---|---|
-  | dungeon demo | 15 s after `C Map seens texture`, **57 s** after `[RoomsLoader:init] loaded room`, then 13â€“18 s gaps between `Loading tile` lines |
+  | dungeon demo | 15 s after `C Map seens texture`, **57 s** after `[RoomsLoader:init] loaded room`, then 13–18 s gaps between `Loading tile` lines |
   | forest demo | 49 s, 36 s and 19 s gaps across the same phase |
 
   So it is the boot module building its background demo level: procedural room generation,
   then texture loading for whatever terrain it produced. Both are plausible sources of a long
-  tail here â€” generation with rejection/retry is naturally heavy-tailed, and this VM has **no
+  tail here — generation with rejection/retry is naturally heavy-tailed, and this VM has **no
   GPU**, so every `Loading tile` is a software texture upload. The exact split between the two
   is not pinned down; what is established is that it is demo-level construction, it is
   intermittent, and it is not ours.
@@ -167,7 +167,7 @@ progress invariant, arrived at independently, which is some evidence it is the r
   `Server latency` lines, which looked conclusive. It was not. Those lines are emitted
   periodically by a background thread, so they land at the boundary of *any* long gap.
   Disabling connectivity entirely left a 166 s stall in place, with no `Server latency` lines
-  in the log at all. Periodic chatter is not evidence of causation â€” check that removing the
+  in the log at all. Periodic chatter is not evidence of causation — check that removing the
   suspect removes the symptom.
 
   **Disabling `disable_all_connectivity` does not help, and was tried.** An alternating A/B,
@@ -179,14 +179,14 @@ progress invariant, arrived at independently, which is some evidence it is the r
   | connectivity OFF | 59.7 s | 7.0 s | 4 of 8 |
 
   Stalls in both arms, more of them with it disabled. The typical case is perhaps a second
-  better offline â€” inside the noise at this sample size â€” and the tail is untouched. The dev
+  better offline — inside the noise at this sample size — and the tail is untouched. The dev
   loop therefore runs **in the same configuration players run in**, and `setup-dev.ps1`
   manages no connectivity setting at all.
 
   That is the point worth keeping, more than the numbers. Two configurations would have meant
-  every behaviour result carrying a silent "â€¦but measured offline", and a retest step before
+  every behaviour result carrying a silent "…but measured offline", and a retest step before
   release that someone has to remember. Trading a second of startup for a rule that depends on
-  discipline is the wrong way round here â€” the same reasoning as Â§4.1's preference for
+  discipline is the wrong way round here — the same reasoning as §4.1's preference for
   removing a failure mode over detecting it. There is also nothing to test *against*: this
   install has no te4.org account, so the engine logs `no online profile active` and addon hash
   validation, achievements and character upload are inert either way.
@@ -194,13 +194,13 @@ progress invariant, arrived at independently, which is some evidence it is the r
 ### 4.1 Fourteen traps, each of which cost a debugging cycle
 
 **The previous run's log can satisfy the next run's checks.** `te4_log.txt` is truncated by
-the engine on startup â€” but not until it opens the file, measured at **~5 ms after
+the engine on startup — but not until it opens the file, measured at **~5 ms after
 `Start-Process` returns**. `Reset-LogCursor` rewinds to offset 0, so a poll landing inside
 that window reads the *whole previous run*: its `[BRIDGE] ready`, and its `cmd-0001.lua OK`.
 `Start-Game` then reports a game that is up and answering **before the process has opened its
 log**. Measured: two of four launches spaced three seconds apart returned in 0.0 s. That is a
 false PASS, which is the only result this harness must never produce. `Clear-GameLog` now
-deletes the file before launching â€” removing the possibility rather than detecting it â€” and
+deletes the file before launching — removing the possibility rather than detecting it — and
 `Start-Game` additionally waits for the engine's own `[CPU] Detected` banner. Neither check
 suffices alone, because the stale log contains the banner too. Guarded by
 `tools/test-relaunch.ps1`.
@@ -208,17 +208,17 @@ suffices alone, because the stale log contains the banner too. Guarded by
 **`Stop-Process -Force` does not wait for the process to die.** It returned in 6 ms with the
 game still alive; the process actually exited 77 ms later. `Start-Game` calls `Stop-Game` and
 then launches immediately, so without a wait a second engine starts while the first still
-holds the GL context, the audio device and the log â€” two instances at once, the one thing
-Â§6 says never to do. `Stop-Game` now polls until they are gone.
+holds the GL context, the audio device and the log — two instances at once, the one thing
+§6 says never to do. `Stop-Game` now polls until they are gone.
 
 **`ready` is not readiness.** The hook emits `[BRIDGE] ready` from `Boot:run` / `ToME:run`,
-which fires well before the `display()` pump starts turning. On a cold start â€” the first
-launch after the addon set changes, when the engine recomputes addon MD5s â€” the pump stayed
+which fires well before the `display()` pump starts turning. On a cold start — the first
+launch after the addon set changes, when the engine recomputes addon MD5s — the pump stayed
 silent for about a hundred seconds after `ready` while the window came up. `Start-Game`
 returned on the log line, the first five commands were fired into that gap, timed out, and
 were deleted unread. Five failures in a row, none of them real: precisely the class of result
 this harness exists to prevent, produced by the harness itself. Readiness is now proved by a
-round trip â€” `Start-Game` sends `return "pong"` and only reports ready when it comes back.
+round trip — `Start-Game` sends `return "pong"` and only reports ready when it comes back.
 A warm start answers in about a second, so the generous timeout costs nothing when it is not
 needed.
 
@@ -234,7 +234,7 @@ Export with `_G.bridge = bridge`.
 
 **`onTickEnd` is the wrong hook, in two different ways.** The boot module's `tick()` only
 reaches `engine.Game.tick`, and so `onTickEndExecute`, when `self.level` is set or
-`self.stopped` is true (boot/mod/class/Game.lua:454-462) â€” the menu's demo level supplies that
+`self.stopped` is true (boot/mod/class/Game.lua:454-462) — the menu's demo level supplies that
 most of the time, but it drops out across level changes and the pump stalls with it. In the
 tome module the problem is different: `onTickEndCapture` (engine/Game.lua:380) swaps the whole
 callback set into a temporary table during level changes, so a callback that reschedules
@@ -242,12 +242,12 @@ itself can land in a set that is discarded rather than merged, and the pump dies
 the first transition. In a game about descending dungeons, that is immediately.
 
 `display()` looks like the answer, and alone it is not: **it stops when the OS window loses
-focus or is minimised.** Measured â€” the pump went silent immediately after
+focus or is minimised.** Measured — the pump went silent immediately after
 `INTERFERE focus=false`. On a machine a person also uses, that is not an edge case.
 
 So **both tiers arm both mechanisms**: a `display()` wrapper and a self-rescheduling
-`onTickEnd`. They fail in complementary ways â€” `display()` dies on focus loss, `onTickEnd`
-dies on level-change capture â€” so one always survives. Double invocation is harmless because
+`onTickEnd`. They fail in complementary ways — `display()` dies on focus loss, `onTickEnd`
+dies on level-change capture — so one always survives. Double invocation is harmless because
 `claim()` is guarded and the sequence gate makes execution idempotent. Verified against a
 minimised window by `tools/test-unfocused.ps1`.
 
@@ -256,7 +256,7 @@ the name table on every pass, so re-arming by name would append a fresh closure 
 grow without bound.
 
 **A re-entrancy guard must not span execution.** `core.display.forceRedraw()` re-enters
-`display()` and so the pump, which argues for a guard â€” but a guard held across the command
+`display()` and so the pump, which argues for a guard — but a guard held across the command
 latches forever the first time a command does not return, silently killing the pump. Guard the
 shared state (file selection) and release before executing arbitrary code. *I shipped this bug
 and it cost a full run to find.*
@@ -264,12 +264,12 @@ and it cost a full run to find.*
 **Birth does not return.** `atEnd("created")` runs birth, world generation and a save/load
 cycle; the frame that invoked it does not survive to report a result. Waiting for a reply that
 will never arrive is not a diagnosis. Fire it with `-NoWait` and poll for the resulting state
-instead â€” the same discipline as measuring turns rather than seconds.
+instead — the same discipline as measuring turns rather than seconds.
 
 **Visibility is stale until FOV is recomputed, and stale reads as "nothing there".** Hostile
 detection goes through `game.level.map.seens`, which `mod.class.Player:playerFOV()` populates
 (mod/class/Player.lua:550). In normal play that runs every turn, so it is always current. But
-a scenario that *moves* the player â€” `teleportRandom` to set up a situation â€” and then asks
+a scenario that *moves* the player — `teleportRandom` to set up a situation — and then asks
 what is visible gets the answer for the old position, and after a teleport that answer is
 usually zero. Zero is indistinguishable from success. The walking-skeleton scenario believed
 it once, moved on, and the bot found four hostiles the instant it took a real turn. **Call
@@ -323,21 +323,21 @@ human. Guarded by `tools/test-occupancy.ps1`.
 The release gate has no `[BRIDGE]` channel to ask about the product, because the product
 junction is gone and only the packed archive is installed. The engine's own log answers it.
 **All these lines are tab-separated**, because they are `print()` calls with several
-arguments â€” matching `Checking addon tome-â€¦` with a space silently never fires, and a gate
+arguments — matching `Checking addon tome-…` with a space silently never fires, and a gate
 that never fires passes.
 
 Two lines matter, and they are not the same question.
 
-**Discovery** â€” `Module.lua:411`, emitted for everything in `/addons/`:
+**Discovery** — `Module.lua:411`, emitted for everything in `/addons/`:
 
 ```
 Checking addon<TAB>tome-skoobot_reclauded-0.1.0.teaa<TAB>:: (as dir)<TAB>false<TAB>:: (as teaa)<TAB>23<TAB>
 ```
 
-`(as dir)` is `fs.exists(dir/init.lua)`; `(as teaa)` is `short_name:find(".teaa$")` â€” a match
+`(as dir)` is `fs.exists(dir/init.lua)`; `(as teaa)` is `short_name:find(".teaa$")` — a match
 position, or `nil`. This says only that the engine *looked* at it.
 
-**Binding** â€” `Module.lua:490`, emitted only for addons actually loaded, and the line to
+**Binding** — `Module.lua:490`, emitted only for addons actually loaded, and the line to
 assert on:
 
 ```
@@ -348,23 +348,23 @@ Binding addon<TAB>SkooBot: Reclauded<TAB>/addons/tome-skoobot_reclauded-0.1.0.te
 
 The **third field is `add.teaa`**: the archive path when the addon came from an archive, and
 `nil` when it came from an unpacked directory. That one field is exactly the question the gate
-exists to answer â€” *did this load from the artifact, or from the working tree?* â€” and it
+exists to answer — *did this load from the artifact, or from the working tree?* — and it
 answers it directly rather than by inference from what is absent.
 
-The ` * with â€¦` lines (`:496`, `:511`, `:522`, `:533`) follow their own `Binding addon` line,
+The ` * with …` lines (`:496`, `:511`, `:522`, `:533`) follow their own `Binding addon` line,
 so attribution is unambiguous: read from one `Binding addon` to the next. They appear once per
-declared directory, so they also check that the manifest flags did what they claimed â€” a build
+declared directory, so they also check that the manifest flags did what they claimed — a build
 whose `init.lua` sets `hooks = true` and produces no ` * with hooks` did not mount what it
 advertised.
 
 Two absences complete the oracle, and absences need explicit assertions or they pass by
 accident:
 
-- no `Removing addon skoobot_reclauded` (Â§4, the savefile rule);
+- no `Removing addon skoobot_reclauded` (§4, the savefile rule);
 - no `Lua Error` after the addon is checked.
 
 One trap in the negative space: a `.teaa` with no root `init.lua` is skipped at `:416`
-**without any error at all** â€” nothing is printed for it beyond the `Checking addon` line. If a
+**without any error at all** — nothing is printed for it beyond the `Checking addon` line. If a
 junction is still present, the engine loads that instead and the gate passes on the working
 tree rather than on the artifact. That is why the gate removes the product junction, why it
 asserts on `Binding addon`'s third field rather than on the absence of complaints, and why
@@ -374,17 +374,17 @@ asserts on `Binding addon`'s third field rather than on the absence of complaint
 
 The audit that specified this gate assumed the devbridge could be removed along with
 everything else, since the oracle above is read from the log rather than through the bridge.
-Reading it needs no bridge â€” but *reaching* it does.
+Reading it needs no bridge — but *reaching* it does.
 
-`tome-*` addons are only scanned when a tome game is instanciated (Â§4), and the engine has no
+`tome-*` addons are only scanned when a tome game is instanciated (§4), and the engine has no
 command-line path into a module: its full flag set is `--flush-stdout`, `--home`,
 `--ignore-window-change-pos`, `--no-debug`, `--no-sandbox`, `--no-steam`, `--no-web`,
 `--safe-mode`, `--xpos`, `--ypos`. Booting into a module goes through
 `util.showMainMenu`/`Module:instanciate` from inside Lua. So without something driving the
 menu, the game sits at the main menu forever and never looks at a `tome-` addon at all.
 
-The gate therefore removes the **product** junction â€” the one that could make it pass on the
-working tree â€” and keeps the two devbridge junctions purely as the thing that presses the
+The gate therefore removes the **product** junction — the one that could make it pass on the
+working tree — and keeps the two devbridge junctions purely as the thing that presses the
 buttons. What that leaves unproven is narrow and worth stating: it shows the product loads and
 runs from the packed archive, not that the game runs with no dev addons present at all. The
 devbridge cannot contaminate the artifact, because `tools/pack.ps1` packs only `src/` and
@@ -403,9 +403,9 @@ Nothing in the engine, module, or DLC archives is modified. The whole footprint 
 
 | Change | Revert |
 |---|---|
-| Junction `game/addons/tome-skoobot_reclauded` â†’ `src/` | remove it |
-| Junction `game/addons/tome-skoobot-devbridge` â†’ `tools/devbridge` | remove it |
-| Junction `game/addons/boot-skoobot-devbridge` â†’ `tools/devbridge-boot` | remove it |
+| Junction `game/addons/tome-skoobot_reclauded` → `src/` | remove it |
+| Junction `game/addons/tome-skoobot-devbridge` → `tools/devbridge` | remove it |
+| Junction `game/addons/boot-skoobot-devbridge` → `tools/devbridge-boot` | remove it |
 | `T-Engine/4.0/settings/resolution.cfg` set to `800x600 Windowed` | one line, not reverted |
 | `te4_log.txt`, `T-Engine/4.0/skoobot-bridge/`, `build/logs/` | artifacts, delete freely |
 | `T-Engine/4.0/skoobot-bridge/harness.lock` | the lease (§4.1); stale once its host exits, delete freely |
@@ -423,13 +423,13 @@ powershell -ExecutionPolicy Bypass -File .\tools\setup-dev.ps1 -Remove    # reve
 
 It is idempotent, so re-running it is also how you check the state. It refuses to touch a
 real directory sitting where a junction should be, and removes junctions through
-`Directory::Delete(path, false)` rather than `Remove-Item -Recurse` â€” the latter can delete
+`Directory::Delete(path, false)` rather than `Remove-Item -Recurse` — the latter can delete
 *through* a junction, which here would mean emptying `src/` out of the working tree.
 
 `resolution.cfg` is deliberately **not** reverted: the pre-harness value is recorded nowhere,
 so restoring a guess is worse than leaving it, and it cannot affect whether an addon loads.
 
-A clean-build check is therefore "delete three junctions", not "restore a patched file" â€”
+A clean-build check is therefore "delete three junctions", not "restore a patched file" —
 and `-Remove` is exactly the inverse T-035 needs.
 
 ---
