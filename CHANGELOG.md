@@ -124,6 +124,11 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   (N)*, or *N held while impaired, the rest on cooldown or unusable*. The "set talent usage in
   the menu" hint is now offered only when nothing is configured at all, rather than to a player
   whose talents are merely held.
+- **A talent held while impaired is released on the impairment's last turn** (#68). *Hold while
+  impaired* used to skip the entry for as long as the stun lasted, including the turn it was
+  about to lapse on — which cost the rotation a turn and bought nothing. The bot now reads how
+  long each impairment has left. It still errs toward holding: an impairment it cannot trace to
+  a live effect, or one with several sources, is treated as lasting.
 
 ### Fixed
 

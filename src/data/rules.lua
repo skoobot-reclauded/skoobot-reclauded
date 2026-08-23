@@ -87,7 +87,8 @@ M.HOLD_DESCRIPTION = "Hold while impaired: while the character is stunned, dazed
     .. "skipped as if it were on cooldown and the rotation falls through to the next one -- so a long-cooldown hit "
     .. "is not spent at half damage and is ready when the impairment lifts. This only matters to a player who has "
     .. "set the STUNNED, DAZED, CONFUSED or FROZEN stop conditions to WARN or IGNORE: at STOP the bot hands back "
-    .. "before the rotation runs. Combat only."
+    .. "before the rotation runs. On the impairment's last turn the entry is not held: there is nothing left to "
+    .. "wait out. Combat only."
 
 M.LABELS = {
     Combat           = "Combat",

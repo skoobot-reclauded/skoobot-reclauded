@@ -27,6 +27,13 @@
          the debug channel (#75). The loadout hint is not offered: it belongs
          to a player who has configured nothing, not to one whose talents are
          merely held.
+     3c. The same held rotation at EFF_STUNNED durations 5, 2 and 1, each
+         applied fresh. At 5 and 2 the entry is still held; at 1 -- the last
+         turn -- it is not, because waiting out an impairment that lapses
+         anyway costs the rotation a turn and buys nothing (#68). The probe
+         reports the engine's own dur, whether the stun is traceable to a
+         live effect through __tmpvals, and the rotation, so the turn
+         boundary is in the record rather than in someone's head.
       4. The same stun with DEBUFF_STUNNED at STOP: the bot hands back for
          the stun before the rotation runs -- the flag is a refinement of
          the stop, not a replacement.
@@ -48,7 +55,7 @@
     Run:
         powershell -ExecutionPolicy Bypass -File .\tools\scenario-hold.ps1
 
-    #15, #75, #27.
+    #15, #68, #75, #27.
 #>
 [CmdletBinding()]
 param(
@@ -241,11 +248,43 @@ function ho.heldOnly()
   ho.reset()
   return out
 end
-function ho.stun(on)
+function ho.stun(on, dur)
   local p = game.player
-  if on then p:setEffect(p.EFF_STUNNED, 5, {}) else p:removeEffect(p.EFF_STUNNED, true, true) end
+  if on then p:setEffect(p.EFF_STUNNED, dur or 5, {}) else p:removeEffect(p.EFF_STUNNED, true, true) end
   ho.reset()
   return ("stunned=%s"):format(tostring(p:attr("stunned") ~= nil and p:attr("stunned") > 0))
+end
+-- #68: the same held rotation at several remaining durations, MEASURED
+-- rather than assumed. Reports what the engine says the effect has left,
+-- whether the addon reads it as lapsing, and which entry the rotation then
+-- offers -- so the turn boundary is in the record and not in someone's head.
+--
+-- The effect is re-applied fresh for each duration, so nothing carries over;
+-- no game turn passes, so `dur` is what setEffect was given.
+function ho.durations()
+  local p = game.player
+  local out = {}
+  for _, d in ipairs({ 5, 2, 1 }) do
+    p:removeEffect(p.EFF_STUNNED, true, true)
+    p:setEffect(p.EFF_STUNNED, d, {})
+    ho.reset()
+    local eff = p:hasEffect(p.EFF_STUNNED)
+    -- what the addon can see about where the stun came from
+    local claimed = "none"
+    for _, params in pairs(p.tmp or {}) do
+      if type(params) == "table" then
+        for _, kv in ipairs(params.__tmpvals or {}) do
+          if kv[1] == "stunned" then claimed = tostring(params.dur) end
+        end
+      end
+    end
+    out[#out + 1] = ("set=%d dur=%s attr=%s claimed=%s ending=%s rotation=[%s]"):format(
+      d, tostring(eff and eff.dur), tostring(p:attr("stunned")), claimed,
+      tostring(b.impairmentEnding()), ho.rotation())
+  end
+  p:removeEffect(p.EFF_STUNNED, true, true)
+  ho.reset()
+  return "DURATIONS " .. table.concat(out, " ;; ")
 end
 -- The "Holding ... while impaired" line is a decision detail and is emitted at
 -- debug (#46); this run reads it from the log, so raise the channel for the
@@ -315,6 +354,23 @@ return "installed level=" .. tostring(ho.logLevelWas) .. "->" .. tostring(lvl)
     # The loadout hint belongs to an EMPTY rotation, not a held one: pointing
     # a player with talents configured at the suggestion is noise (#18, #75).
     Ok ($ho.Result -notmatch 'suggest a loadout') 'the "configure something" hint is not offered to a player who has' $ho.Result
+
+    # ----- 3c: the last turn of the stun (#68) -----------------------------
+    Write-Host ''
+    Write-Host '  --- 3c. an impairment about to lapse does not hold'
+    $du = Probe 'return ho.durations()'
+    Write-Host "  $($du.Result)"
+    if ($du.Result -match '^SETUP') { Inconclusive $du.Result }
+    foreach ($seg in ($du.Result -replace '^DURATIONS ', '') -split ' ;; ') { Note "duration: $seg" }
+    $null = Assert-Result $du 'a stun with turns left still holds the entry' -Match ('set=5 [^;]*ending=false rotation=\[' + $Plain + '\]')
+    $null = Assert-Result $du '...and at two turns as well' -Match ('set=2 [^;]*ending=false rotation=\[' + $Plain + '\]')
+    $null = Assert-Result $du 'a stun on its last turn does NOT hold: the held entry is offered first' -Match ('set=1 [^;]*ending=true rotation=\[' + $Held + ',' + $Plain + '\]')
+    # The addon learns the duration from __tmpvals, which is how it avoids
+    # naming effect ids: if the engine stopped recording the link, `claimed`
+    # would read "none", the impairment would be unaccounted for, and the
+    # entry would keep holding -- the safe direction, but a silent loss of
+    # the refinement. This is where that shows.
+    Ok ($du.Result -notmatch 'claimed=none') 'the stun is traceable to a live effect through __tmpvals' $du.Result
 
     # ----- 4: stunned, STOP -----------------------------------------------
     Write-Host ''

@@ -863,17 +863,70 @@ local function getAutoTalents(section)
     return rules.tids(getRules(p), section, function(e) return resolveRule(p, e) end)
 end
 
+--- The capability counters a held Combat entry waits out (#15). The same
+--- four the DEBUFF_* stops watch, named as attributes rather than as effect
+--- ids on purpose: data/conditions.lua detects by capability, never by
+--- effect name, because a dozen effects set `stunned` and only the attr is
+--- common to them.
+local IMPAIRMENTS = { "stunned", "dazed", "confused", "frozen" }
+
 --- Is the character impaired in a way a held Combat entry waits out (#15)?
---- Stunned, dazed, confused or frozen, read as the capability counters they
---- are (attr), never `== 1`: a doubly stunned character is impaired too.
---- The same four conditions the DEBUFF_* stops watch; this is what a
---- player who set those to WARN or IGNORE gets instead of a stop. "One
---- turn of stun left" (design-stop-conditions.md 2.3) is not read: any
---- impairment holds, which is the simple form and errs toward holding.
+--- Read as the counters they are (attr), never `== 1`: a doubly stunned
+--- character is impaired too. This is what a player who set those stops to
+--- WARN or IGNORE gets instead of a stop.
 local function impaired(p)
-    return (p:attr("stunned") or p:attr("dazed") or p:attr("confused") or p:attr("frozen")) and true or false
+    for _, a in ipairs(IMPAIRMENTS) do
+        if p:attr(a) then return true end
+    end
+    return false
 end
 bot.impaired = function(p) return impaired(p or game.player) end
+
+--- #68: does every impairment on the character run out this turn?
+---
+--- The point of holding is to wait for full damage. Waiting out an
+--- impairment that is about to lapse anyway costs the rotation a turn and
+--- buys nothing, so a held entry is released on the last turn.
+---
+--- Durations are per EFFECT, and there is no list of impairing effects to
+--- read -- #12 detects by capability precisely because effect ids are many
+--- and the attr is one. The engine keeps the link anyway: every attribute
+--- an effect sets through effectTemporaryValue is recorded on the live
+--- params as `__tmpvals` (engine/interface/ActorTemporaryEffects.lua:297),
+--- so the live effects can be asked which of these four they are
+--- responsible for, and for how much longer.
+---
+--- It ERRS TOWARD HOLDING, as the simple form did, and in two ways:
+---
+---   * an impairment no live effect claims is treated as lasting. Effects
+---     that call addTemporaryValue directly do not record in __tmpvals (the
+---     engine says so at :249), and an unexplained stun is not evidence of
+---     a stun about to end.
+---   * the LONGEST claimant wins. Two stuns, one lapsing and one not, is
+---     still a stun next turn.
+local function impairmentEnding(p)
+    local need, any = {}, false
+    for _, a in ipairs(IMPAIRMENTS) do
+        if p:attr(a) then need[a] = -1 ; any = true end   -- -1: not accounted for
+    end
+    if not any then return false end
+    for _, params in pairs(p.tmp or {}) do
+        if type(params) == "table" then
+            for _, kv in ipairs(params.__tmpvals or {}) do
+                local k = kv[1]
+                if need[k] ~= nil then
+                    local d = tonumber(params.dur) or 0
+                    if d > need[k] then need[k] = d end
+                end
+            end
+        end
+    end
+    for _, d in pairs(need) do
+        if d < 0 or d > 1 then return false end
+    end
+    return true
+end
+bot.impairmentEnding = function(p) return impairmentEnding(p or game.player) end
 
 --- The Combat rotation as the act loop walks it (#59): a talent id for a
 --- talent or a live item, the entry itself for a built-in action, in the
@@ -889,7 +942,8 @@ bot.impaired = function(p) return impaired(p or game.player) end
 --- "Holding <key> while impaired", and a player is not reading that.
 local function getCombatRotation()
     local p = game.player
-    local held = impaired(p)
+    -- #68: an impairment that lapses this turn is not worth waiting out.
+    local held = impaired(p) and not impairmentEnding(p)
     local out, heldCount = {}, 0
     for _, e in ipairs(getRules(p).Combat) do
         if e.hold and held then

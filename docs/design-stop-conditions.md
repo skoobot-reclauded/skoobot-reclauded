@@ -256,13 +256,21 @@ Three honest options, in increasing cost:
      held, because holding is a third way for the rotation to come out empty and the stop that
      reports an empty rotation could name only two — a player who set the debuff to IGNORE and
      held every row was told "none configured, or all on cooldown", both untrue (#75).
-   - **Not "one turn of stun left".** The paragraph above describes a tempo decision keyed on
-     the *remaining* duration. The built form is the simple one: any impairment holds. It errs
-     toward holding — a held hit waits for the whole stun rather than firing on its last turn
-     — because reading remaining durations per effect is the lookahead this section says a
-     heuristic should not pretend to have. The remaining-duration reading is filed as its own
-     issue (a refinement on top of this flag, after the condition framework #12 gives it the
-     effect list), not carried here as a to-do.
+   - **"One turn of stun left" (#68, built).** The paragraph above describes a tempo decision
+     keyed on the *remaining* duration. #15 built the simple form — any impairment holds — and
+     #68 added the refinement: a held entry is released when every impairment on the character
+     runs out this turn, because waiting out something that lapses anyway costs the rotation a
+     turn and buys nothing.
+     Durations are per **effect** and this section detects by **capability**, so there is no
+     list of impairing effects to read. The engine keeps the link regardless: every attribute
+     an effect sets through `effectTemporaryValue` is recorded on the live params as
+     `__tmpvals` (`engine/interface/ActorTemporaryEffects.lua:297`), so the live effects can be
+     asked which of the four attrs they are responsible for and for how much longer. No effect
+     id is named.
+     It still errs toward holding, in two ways: an impairment no live effect claims is treated
+     as lasting — effects that call `addTemporaryValue` directly do not record in `__tmpvals`,
+     and an unexplained stun is not evidence of one about to end — and among several claimants
+     the longest wins.
    - **Who it is for.** Only a player who has set `DEBUFF_STUNNED` (or DAZED / CONFUSED /
      FROZEN) to `WARN` or `IGNORE` ever sees it act: at `STOP` the bot has handed back before
      the rotation runs. The flag's prose says so. It is a refinement of option 1, not a
