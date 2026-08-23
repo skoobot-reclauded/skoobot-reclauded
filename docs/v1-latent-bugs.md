@@ -1,15 +1,17 @@
-# Latent bugs in SkooBot v1, found by static analysis
+# Latent bugs in SkooBot v1
 
-**Date:** 2026-08-21 · Found while triaging for the rebuild, against SkooBot 0.0.12
+**Date:** 2026-08-21 (Bugs 1 and 2, by static analysis); 2026-08-23 (Bug 3, found while
+porting). Against SkooBot 0.0.12
 ([SkoobyDoo/tome4-SkooBot](https://github.com/SkoobyDoo/tome4-SkooBot) at commit `ad23dea`).
-Both were live in every released build and in the copy still published on te4.org and the
+All three were live in every released build and in the copy still published on te4.org and the
 Steam Workshop today.
 
-Both are the **same defect class**: Lua binds `not` tighter than the relational operators, so
-`not x == 1` parses as `(not x) == 1` — a boolean compared to a number, which is *always
-false*. The code is syntactically valid, raises no error, and silently never runs.
+Bugs 1 and 2 are the **same defect class**: Lua binds `not` tighter than the relational
+operators, so `not x == 1` parses as `(not x) == 1` — a boolean compared to a number, which is
+*always false*. The code is syntactically valid, raises no error, and silently never runs.
 
-A full sweep found exactly two instances. There are no others.
+A full sweep found exactly two instances of that class. There are no others. **Bug 3** is a
+third latent bug of a different class — a table tested for truth — found later, while porting.
 
 ---
 
@@ -83,6 +85,43 @@ and did nothing.
 > `p:attr("sleep") and not p:attr("lucid_dreamer")`. See
 > [api-surface-1.7.6.md](api-surface-1.7.6.md) Remediation 4 and "Value-domain notes".
 
+
+---
+
+## Bug 3 — the FIGHT branch's target filter never filtered
+
+*Added 2026-08-23 (#81). A different defect class from the two above, found while working on
+the port rather than by the `not x == 1` sweep — that sweep's claim of "exactly two instances"
+was about its own class and still holds.*
+
+`superload/mod/class/Player.lua`, the FIGHT branch:
+
+```lua
+for _, enemy in pairs(hostiles) do
+    if filterFailedTalents(getAvailableTalents(enemy)) then
+        table.insert(targets, enemy)
+    end
+end
+```
+
+`filterFailedTalents` returns a **table**. In Lua every table is truthy, including an empty
+one, so the condition is a constant `true` and every visible hostile became a target whether or
+not anything could be used on it. The intended test is on the count. The port reproduced it
+faithfully (D-12) and #12 and #11 both left it alone on purpose.
+
+**The obvious repair is wrong**, which is why this survived a reading or two.
+`getAvailableTalents` with no rotation reads every talent the character has and requires
+`canProject` at the enemy's grid, so **range is part of the test**: a melee character five
+squares from an orc has nothing available on it. Test `#... > 0` here and that orc is not a
+target, `targets` comes out empty, and the "nothing left in sight: fight's over" branch sends
+the bot to REST — which re-enters with the orc still in view, sets FIGHT again, and spins to
+`THINK_LIMIT`. Melee stops working.
+
+What the filter can honestly decide is the **pick**, not the target list: approach needs every
+hostile, because closing the distance is how a melee talent comes into range, while the first
+pick should be an enemy something can actually be used on. Fixed that way in #81.
+`scenario-scoring.ps1` probe A is the guard on the trap — *"with nothing in reach it would
+close the distance"* fails loudly under the naive repair.
 ---
 
 ## Why the original's issue #46 was closed without being fixed

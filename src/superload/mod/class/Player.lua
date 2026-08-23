@@ -1644,11 +1644,35 @@ function skoobot_act(noAction)
         end
         if act then act.retreats = 0 end
 
-        local targets = {}
+        -- #81: v1 wrote `if filterFailedTalents(getAvailableTalents(enemy))`,
+        -- which tests a TABLE for truth. A table is always true, so every
+        -- visible hostile became a target and this filter has never once
+        -- filtered. The port reproduced it (D-12) and #12 and #11 left it.
+        --
+        -- The obvious repair -- `#... > 0` on this list -- is WRONG, and is
+        -- written down here so it is not tried again. getAvailableTalents
+        -- with no rotation reads every talent the character has and requires
+        -- canProject at the enemy's grid, so RANGE is part of the test: a
+        -- melee character five squares from an orc has nothing available on
+        -- it. Under `#... > 0` that orc is not a target, `targets` comes out
+        -- empty, and the "nothing left in sight" branch below sends the bot
+        -- to REST -- which re-enters with the orc still in view, sets FIGHT
+        -- again, and spins until THINK_LIMIT. Melee would stop working.
+        -- scenario-scoring probe A is the guard: "with nothing in reach it
+        -- would close the distance".
+        --
+        -- What the filter can honestly decide is the PICK. Approach needs
+        -- every hostile -- closing the distance is HOW a melee talent comes
+        -- into range -- while the first pick should be an enemy something
+        -- can actually be used on, so a turn is not spent aiming at the
+        -- weakest thing in the room when it is the one behind the wall. So
+        -- both lists are built and each is used where it belongs.
+        local targets, usable = {}, {}
         for _, enemy in pairs(hostiles) do
             -- attacking is a talent, so it does not need adding as a choice
-            if filterFailedTalents(getAvailableTalents(enemy)) then
-                table.insert(targets, enemy)
+            targets[#targets + 1] = enemy
+            if #filterFailedTalents(getAvailableTalents(enemy)) > 0 then
+                usable[#usable + 1] = enemy
             end
         end
 
@@ -1665,7 +1689,14 @@ function skoobot_act(noAction)
         local combatTalents = filterFailedTalents(rotation)
 
         if #combatTalents > 0 then
-            local picks = {getLowestHealthEnemy(targets), getNearestHostile()}
+            -- #81: the lowest-life enemy something can be used on, falling
+            -- back to the lowest-life enemy at all when nothing can -- the
+            -- pre-#81 behaviour, kept for that case so the blast radius of
+            -- making this filter live is exactly "the first pick is not
+            -- wasted". getNearestHostile stays as the second pick: it is
+            -- what makes the approach target sensible, and it re-reads the
+            -- field itself.
+            local picks = { getLowestHealthEnemy(#usable > 0 and usable or targets), getNearestHostile() }
             local talents
 
             if (bot.loop.delta < 0)

@@ -346,6 +346,13 @@ return "installed"
     $null = Assert-Result $a 'the reason names the count and the score' -Match 'why=\[3 in view, none over a limit -- threat \d\.\d\]'
     $null = Assert-Result $a 'the bot does not stop' -Match 'reason=nil'
     $null = Assert-Result $a 'with nothing in reach it would close the distance' -Match 'AI would move to the'
+    # ...which is also the guard on #81's trap. The FIGHT branch's target
+    # filter was `if filterFailedTalents(...)` -- a table, always true. The
+    # obvious repair, testing the count on the TARGET list, makes a hostile
+    # out of talent range not a target at all: targets empties, the "fight's
+    # over" branch sends the bot to REST, it re-enters with the hostile
+    # still in view, and it spins to THINK_LIMIT. Melee stops working, and
+    # this line is what says so.
     $null = Assert-Result $a 'query advances no game turn' -Match 'dturn=0 '
     if ($a.Result -match 'score=([\d.]+) ') { Ok ([double]$Matches[1] -le 0.5 -and [double]$Matches[1] -gt 0) "the score is between 0 and 0.5 ($($Matches[1]))" }
     $null = Probe 'return sc.unspawn()'
