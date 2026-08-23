@@ -172,7 +172,15 @@ param(
     # the zones listed; a path cannot honestly be longer).
     [int]$MaxWalkMoves = 400,
     # (g): "a,b,c" of zone ids, replacing the list at the top of this file.
-    [string]$Zones
+    [string]$Zones,
+    # How long to wait for another host to give the game up before starting
+    # (#83). A soak wants the game for many minutes and used to hold NO lease
+    # at all -- it attaches to a game some other, already-exited host
+    # launched -- so any lane's scenario child could take the game out from
+    # under a run in progress. It now holds one for the whole soak.
+    [int]$LeaseWaitMin = 60,
+    # Do not take a lease. For running under an outer host that holds one.
+    [switch]$NoRunLease
 )
 
 $ErrorActionPreference = 'Stop'
@@ -196,6 +204,22 @@ $MdFile = [IO.Path]::ChangeExtension($OutFile, '.md')
 Write-Host ''
 Write-Host "[soak] save=$SaveName max=${MaxMinutes}m level>=$MaxLevel turns>=$MaxTurns poll=${PollSec}s out=$OutFile"
 Write-Host "[soak] descend=$(if ($NoDescend) { 'off' } else { "after $DescendAfter or explored" }) zones=$($ZoneIds -join ',')"
+
+# Hold the game for the whole soak (#83). A soak does not launch the game --
+# it attaches through the bridge to one an earlier, already-exited host
+# started -- so until now it held no lease and nothing stopped a scenario
+# child from taking the game mid-run. Taking one here also makes the reverse
+# true: a lane's library run waits for the soak instead of interleaving with
+# it, which is the point of one lease per run rather than one per child.
+#
+# The junction check is the other half. A lease says whose the game is; it
+# does not say which checkout the game would load. Asserting both means a
+# soak's numbers are about the tree it was started from.
+if (-not $NoRunLease) {
+    $null = Wait-HarnessLease -TimeoutSec ($LeaseWaitMin * 60) -Label 'soak'
+    Assert-JunctionsOwned -GameDir $script:GameDir
+    Write-Host "[soak] holding the game lease for this run (host pid $PID)"
+}
 
 # ---------------------------------------------------------------------------
 # The record. Everything below is what the JSON summary is made of.

@@ -95,6 +95,12 @@ more than three commands (#60).
   back — never kill `t-engine` by hand. The junctions must point at the checkout under test:
   `Start-Game` refuses otherwise, and `tools/setup-dev.ps1` run from that checkout fixes it
   (it repoints all three; run it again from `main`'s checkout when the worktree goes).
+- **A whole run takes one lease, not one per scenario** (#83). `run-scenarios.ps1` and
+  `soak.ps1` hold the game from start to finish and wait — jittered, in seconds — for a
+  holder to finish rather than failing at once; children inherit through
+  `SKOOBOT_HARNESS_HOST`. So expect a library run to block for minutes behind another
+  session's run instead of interleaving with it, and expect your own run to be uninterrupted
+  once it starts. `-NoRunLease` on either restores the old per-child behaviour.
 - **A launch that fails on infrastructure is retried once**, and the retry is printed. A
   scenario that passed on attempt 2 passed; a game that died is reported, not relaunched.
 

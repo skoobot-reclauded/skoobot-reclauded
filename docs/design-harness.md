@@ -316,6 +316,36 @@ outlasts even the 240 s pump timeout — printing the retry and returning `Attem
 that *died* is reported, never relaunched, because after the lease that is a real crash or a
 human. Guarded by `tools/test-occupancy.ps1`.
 
+**The lease is honest about who has the game; it was never fair about who gets it next
+(#83).** `Enter-HarnessLease` refuses the instant somebody else holds one, which is right for
+a scenario wanting the game for fifteen seconds and wrong for a run wanting it for twenty
+minutes. On the night of 2026-08-23 a soak retrying every 90 s was starved for over an hour by
+three lanes running the scenario library: twenty children each holding the lease for ~15 s
+with a gap of a second or two between them, so a 90 s poll almost always woke inside a lease,
+and when it woke in a gap another lane's next child took it between the soak's `setup-dev` and
+its `Start-Game`. It got in on attempt 11, and only because the libraries ran out.
+
+Two changes, and neither makes the lease fair:
+
+- **`Wait-HarnessLease`** waits a holder out instead of failing — polling in seconds, with
+  jitter, because two hosts on the same fixed interval shadow each other indefinitely. A
+  waiter can still lose a gap to a host that arrived later; it is now likely to win one rather
+  than unlikely.
+- **A run holds one lease, not one per child.** `run-scenarios.ps1` and `soak.ps1` take the
+  lease up front and hold it to the end, so the unit of contention is the run: fewer gaps,
+  and they come when the run is over. Children inherit it through `SKOOBOT_HARNESS_HOST` and
+  cannot be refused for `IN USE`. `-NoRunLease` restores the old per-child behaviour on both.
+
+A soak previously held **no** lease at all — it does not launch the game, it attaches through
+the bridge to one an earlier, already-exited host started — so nothing stopped a lane's
+scenario child from taking the game out from under a measurement in progress. It now takes
+both the lease and `Assert-JunctionsOwned`: a lease says whose the game is, the junction check
+says which checkout it would load, and a soak's numbers need both.
+
+The waiting list that would make "first come" actually true is option 2 on #83 and is not
+built; the owner chose the cheap pair. Guarded by `tools/test-lease-wait.ps1`, which needs no
+game — a lease is alive while its host process is, whether or not a t-engine ever ran.
+
 ---
 
 ### 4.2 The load oracle
@@ -458,6 +488,7 @@ and `-Remove` is exactly the inverse T-035 needs.
 | `tools/test-unfocused.ps1` | proves the pump survives a minimised window |
 | `tools/test-relaunch.ps1` | proves a relaunch cannot be satisfied by the previous run's log |
 | `tools/test-occupancy.ps1` | proves one live host owns the game and a dead one is taken over |
+| `tools/test-lease-wait.ps1` | proves a waiter waits a holder out, and gives up at its timeout; needs no game (#83) |
 | `tools/new-character.ps1` | creates and saves a character with no human input; `-Class`/`-Race` make a fixture (§7) |
 | `tools/scenario-*.ps1` | the scenario library (#4): one complaint or one fix each, exit 0 pass · 1 fail · 2 tainted · 3 inconclusive |
 | `tools/scenario-t010-marked-target.ps1` | the #5 repro #4 deferred: a Combat talent the game refuses (Rockswallow, unmarked target) falls through to the next priority in real combat, on the fixture |
@@ -497,8 +528,8 @@ A fixture is regenerated with the same command when the addon set changes (§4),
 written by a scenario: nothing a scenario learns, equips or configures is saved.
 
 **One JSON line per run, under `build/results/`.** `run-scenarios.ps1` runs every
-`tools/scenario-*.ps1` as its own `powershell -ExecutionPolicy Bypass -File` child — the unit
-the lease works at (§4.1), so two sessions interleave at scenario granularity — and appends
+`tools/scenario-*.ps1` as its own `powershell -ExecutionPolicy Bypass -File` child, under one
+lease held by the run rather than one per child (§4.1, #83) — and appends
 `{scenario, status, exit, seconds, tainted, attempts, summary, lines[], when}` to
 `build/results/<yyyy-MM-dd>.jsonl` through `Write-ScenarioResult`. The file is append-only: a
 re-run is a second line with `attempts=2`, never an edit of the first, so the day's file is the

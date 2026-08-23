@@ -120,6 +120,70 @@ function Enter-HarnessLease {
 }
 
 <#
+    Take the lease, waiting for another live host to finish instead of
+    failing at once. Returns the lease; throws only if the wait runs out.
+
+    Enter-HarnessLease refuses the moment somebody else holds it, which is
+    right for a scenario -- one of twenty, each wanting the game for about
+    fifteen seconds. It is wrong for a host that wants the game for minutes.
+    On the night of 2026-08-23 a soak polling every 90 s was starved for over
+    an hour by three lanes running the scenario library: a 90 s retry almost
+    always lands INSIDE somebody's lease, and the gap between one library
+    child and the next is a second or two wide, so the poll had to be lucky
+    twice over. It got in on attempt 11, and only because the libraries ran
+    out (#83).
+
+    So: poll in seconds, not minutes, and jitter, so two waiters cannot
+    synchronise on the same gap forever.
+
+    This does NOT make the lease fair. A waiter can still lose a gap to a
+    host that arrived later; it only makes a long-run host likely to win one
+    rather than unlikely. The waiting list that would make "first come" true
+    is option 2 on #83 and is deliberately not built -- the owner chose the
+    cheap pair (jitter here, one lease per run in the callers).
+#>
+function Wait-HarnessLease {
+    param(
+        [int]$TimeoutSec = 1800,
+        [int]$MinWaitSec = 5,
+        [int]$MaxWaitSec = 10,
+        [int]$GamePid = 0,
+        [string]$Label = 'harness'
+    )
+    $deadline  = (Get-Date).AddSeconds($TimeoutSec)
+    $announced = $false
+    $lastSaid  = Get-Date
+    $held      = 'another host'
+    while ($true) {
+        try {
+            return Enter-HarnessLease -GamePid $GamePid
+        } catch {
+            # Only a foreign lease is worth waiting out; anything else (an
+            # unwritable lease directory, say) is a real failure. Decide on
+            # the message, not on a fresh Get-ForeignLease: the holder can
+            # exit between the refusal and the question, and rethrowing
+            # because the game just became free would be absurd.
+            if ($_.Exception.Message -notmatch 'IN USE') { throw }
+            $foreign = Get-ForeignLease
+            if ($foreign) { $held = Format-Lease $foreign }
+            if (-not $announced) {
+                $budget = if ($TimeoutSec -ge 120) { "$([math]::Round($TimeoutSec / 60)) min" } else { "$TimeoutSec s" }
+                Write-Host "[$Label] the game is held by $held; waiting up to $budget"
+                $announced = $true; $lastSaid = Get-Date
+            } elseif (((Get-Date) - $lastSaid).TotalSeconds -ge 60) {
+                Write-Host "[$Label] still waiting for $held"
+                $lastSaid = Get-Date
+            }
+            if ((Get-Date) -ge $deadline) {
+                throw "[$Label] the game stayed in use for $TimeoutSec s -- last held by $held"
+            }
+            # -Maximum is exclusive for integers, so +1 to include MaxWaitSec.
+            Start-Sleep -Seconds (Get-Random -Minimum $MinWaitSec -Maximum ($MaxWaitSec + 1))
+        }
+    }
+}
+
+<#
     Release explicitly. Not needed in the normal case -- a lease dies with its
     host -- but a long-lived interactive host that is done with the game can
     hand it back without exiting.

@@ -2,17 +2,24 @@
     Run the scenario library, one scenario at a time, and record every run.
 
     Each tools/scenario-*.ps1 is run as its own `powershell -ExecutionPolicy
-    Bypass -File` child, which is also the unit the game lease works at: a
-    child takes the lease when it launches the game and frees it by exiting,
-    so two sessions interleave at scenario granularity (#60). This runner
-    never touches the game itself.
+    Bypass -File` child. This runner never touches the game itself.
+
+    The RUN holds the game lease, not each child (#83). Before that, twenty
+    children took and freed twenty leases with a gap between every pair, and
+    a host wanting the game for minutes -- a soak -- almost always landed
+    inside one of the twenty rather than in a gap: on 2026-08-23 one was
+    starved for over an hour by three lanes doing exactly this. Now the unit
+    of contention is the run. Children inherit the lease through
+    SKOOBOT_HARNESS_HOST and cannot be refused for IN USE. -NoRunLease
+    restores the old per-child behaviour.
 
     Before each scenario, tools/setup-dev.ps1 is run from THIS checkout, so
     the junctions point at the tree being tested even when another worktree
     ran last. setup-dev refuses under another live host's lease, and a
     scenario refuses (IN USE / JUNCTIONS POINT AT ANOTHER CHECKOUT) when the
     game changed hands between the two; either is BUSY here, and the runner
-    waits and retries rather than recording a failure that is nobody's.
+    waits -- jittered, so two waiters cannot shadow each other -- and retries
+    rather than recording a failure that is nobody's.
 
     Exit codes from a scenario, and what the runner does with them:
 
@@ -61,10 +68,21 @@ param(
     # TIMEOUT. The harness's own timeouts add up to several minutes on a bad
     # launch, so this is generous.
     [int]$TimeoutMin = 25,
-    # When the game is another host's: how often to retry, and how long to
-    # wait between tries.
-    [int]$BusyRetries = 40,
-    [int]$BusyWaitSec = 90,
+    # When the game is another host's: how many times to retry a scenario,
+    # and roughly how long to wait between tries. Jittered by +/-3 s so two
+    # waiters cannot synchronise on the same gap (#83). With the run-level
+    # lease below this is a safety net rather than the normal path: children
+    # inherit the run's lease and cannot be refused for IN USE.
+    [int]$BusyRetries = 400,
+    [int]$BusyWaitSec = 8,
+    # How long to wait for another host to give the game up before starting
+    # at all. The run then holds ONE lease from here to the last scenario,
+    # rather than one per child with a gap between every pair (#83, option 3).
+    [int]$LeaseWaitMin = 60,
+    # Do not take a run-level lease. For running the library UNDER an outer
+    # host that already holds one, or deliberately interleaving with another
+    # session at scenario granularity, as before #83.
+    [switch]$NoRunLease,
     [string]$ResultsPath
 )
 
@@ -110,8 +128,30 @@ Write-Host "[run-scenarios] $($selected.Count) scenario(s): $($selected -join ',
 foreach ($e in $excluded) { Write-Host "[run-scenarios] excluded $($e.Name): $($e.Why)" }
 if ($selected.Count -eq 0) { Write-Host '[run-scenarios] nothing to run'; exit 1 }
 
+# One lease for the whole run (#83, option 3). Before this, each scenario
+# child took and freed its own, so a library run was twenty leases with a
+# gap between every pair -- and a long-run host trying to get in almost
+# always landed inside one of the twenty rather than in a gap. Holding it
+# here makes the unit of contention the RUN: fewer gaps, and the ones there
+# are come at the end.
+#
+# Children inherit it through SKOOBOT_HARNESS_HOST, which Enter-HarnessLease
+# sets on this process and Start-Process passes down, so their own
+# Enter-HarnessLease calls find the lease already theirs and leave the owner
+# alone -- the same path clean-build.ps1 has always used for setup-dev.
+if (-not $NoRunLease) {
+    $null = Wait-HarnessLease -TimeoutSec ($LeaseWaitMin * 60) -Label 'run-scenarios'
+    Write-Host "[run-scenarios] holding the game lease for this run (host pid $PID)"
+}
+
 $StatusFor = @{ 0 = 'PASS'; 1 = 'FAIL'; 2 = 'TAINTED'; 3 = 'INCONCLUSIVE' }
 $BusyPattern = 'IN USE by|JUNCTIONS POINT AT ANOTHER CHECKOUT|in use by'
+# The per-scenario wait, jittered by +/-3 s. Two hosts polling on the same
+# fixed interval can shadow each other indefinitely -- both wake, both find
+# the other's lease, both sleep the same amount, forever. Jitter is what
+# breaks that, and it costs one line (#83, option 1).
+function Get-BusyWait { [math]::Max(1, $BusyWaitSec + (Get-Random -Minimum -3 -Maximum 4)) }
+
 
 <#
     Run one child powershell, streaming its output as it arrives and keeping
@@ -205,8 +245,9 @@ foreach ($name in $selected) {
             if (-not (Invoke-SetupDev)) {
                 $busyTries++
                 if ($busyTries -gt $BusyRetries) { $final = [pscustomobject]@{ Status = 'BUSY'; Exit = -1; Seconds = 0; Lines = @('the game stayed in use by another host'); Summary = 'BUSY: lease held throughout' }; break }
-                Write-Host "[run-scenarios] game in use (try $busyTries/$BusyRetries); waiting $BusyWaitSec s"
-                Start-Sleep -Seconds $BusyWaitSec
+                $wait = Get-BusyWait
+                Write-Host "[run-scenarios] game in use (try $busyTries/$BusyRetries); waiting $wait s"
+                Start-Sleep -Seconds $wait
                 continue
             }
         }
@@ -217,8 +258,9 @@ foreach ($name in $selected) {
             $attempts--
             $busyTries++
             if ($busyTries -gt $BusyRetries) { $final = [pscustomobject]@{ Status = 'BUSY'; Exit = $r.ExitCode; Seconds = $r.Seconds; Lines = $r.Lines; Summary = 'BUSY: lease held throughout' }; break }
-            Write-Host "[run-scenarios] game in use (try $busyTries/$BusyRetries); waiting $BusyWaitSec s"
-            Start-Sleep -Seconds $BusyWaitSec
+            $wait = Get-BusyWait
+            Write-Host "[run-scenarios] game in use (try $busyTries/$BusyRetries); waiting $wait s"
+            Start-Sleep -Seconds $wait
             continue
         }
         $status = if ($r.TimedOut) { 'TIMEOUT' } elseif ($StatusFor.ContainsKey($r.ExitCode)) { $StatusFor[$r.ExitCode] } else { 'CRASHED' }
