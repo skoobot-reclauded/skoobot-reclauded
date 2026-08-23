@@ -100,6 +100,12 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   which the bot stopped at the first enemy it saw. Fractions can still be typed with a decimal
   point. The power figures, the enemy count and the action delay keep the open range, having
   no natural ceiling, and a value you had already saved is left alone.
+- **The power limits say they are a scale** (#82). The five that feed the threat figure —
+  *Maximum Enemy Power*, *…Above Yours*, *Maximum Combined Enemy Power*, *Maximum Enemy Count*
+  and *Ignore Damage Above Life Ratio* — now say so on the options tab. Each is the scale for
+  one part of the figure every power stop ends with, where the limit you set counts as 1, so
+  "threat 3" means three times past it. They read as five independent switches before, which
+  is what they were until the scored evaluation replaced the flat list.
 
 ### Fixed
 

@@ -266,22 +266,37 @@ class:bindHook("GameOptions:generateList", function(self, data)
             "A fraction of your maximum life (0.9 is nine tenths). While exploring with nothing " ..
             "in view, damage is ignored as long as life stays above it, so a single poison tick " ..
             "does not stop the bot; once life is below it, any damage taken while exploring hands " ..
-            "back.", 0, 1)
+            "back. It is also the scale that stop is measured on: life exactly at this ratio is " ..
+            "threat 1, and twice as far below it is threat 2. See Maximum Enemy Power.", 0, 1)
+        -- #82: since #11 these five are not independent switches -- each is
+        -- the denominator of one term of the threat score, and the score is
+        -- the largest term (data/score.lua). Every power stop already ends
+        -- " -- threat N"; the tab has to say what N is measured against or
+        -- the number is noise. Explained once here, referred to from the
+        -- other four, the way "Power level: see Maximum Enemy Power" already
+        -- works.
         createNumericalOption("MAX_INDIVIDUAL_POWER", "Maximum Enemy Power",
             "Stop when any enemy in view has a power level above this figure, whatever yours is. " ..
             "Power level is the addon's rough threat score for a creature -- its life, damage, " ..
             "crits, speed, defence, stats and weapons summed -- and is shown as \"Power Level\" " ..
-            "in every creature's tooltip; hold Ctrl over a creature to see the parts.")
+            "in every creature's tooltip; hold Ctrl over a creature to see the parts.\n\n" ..
+            "These five limits are also a scale: every stop for one of them ends \"-- threat N\", " ..
+            "where the limit you set counts as 1, so threat 3 is three times past it. The stop " ..
+            "says how far over the room is, not only that it is.")
         createNumericalOption("MAX_DIFF_POWER", "Maximum Enemy Power Above Yours",
             "Stop when any enemy in view has a power level more than this much above your own. " ..
             "Your own power level is scaled by the life you have left, so the same enemy stops " ..
-            "the bot sooner when you are hurt. Power level: see Maximum Enemy Power.")
+            "the bot sooner when you are hurt. On the threat scale, 1 is an enemy exactly this " ..
+            "far above you. Power level and the threat figure: see Maximum Enemy Power.")
         createNumericalOption("MAX_COMBINED_POWER", "Maximum Combined Enemy Power",
             "Stop when the power levels of every enemy in view, added together, are more than " ..
             "this much above your own (again scaled by the life you have left). A margin above " ..
-            "yours, not an absolute figure. Power level: see Maximum Enemy Power.")
+            "yours, not an absolute figure. On the threat scale, 1 is a room exactly this far " ..
+            "above you. Power level and the threat figure: see Maximum Enemy Power.")
         createNumericalOption("MAX_ENEMY_COUNT", "Maximum Enemy Count",
-            "Stop when more than this many enemies are in view at once, whatever their power.")
+            "Stop when more than this many enemies are in view at once, whatever their power. On " ..
+            "the threat scale, 1 is exactly this many in view -- twelve of them against a limit " ..
+            "of twelve. The threat figure: see Maximum Enemy Power.")
         -- #62: the rank weights. One entry per band; data/power.lua says
         -- which ToME rank falls in which band.
         createNumericalOption("NORMAL_POWER_RATIO", "Normal Enemy Power Ratio",

@@ -499,10 +499,21 @@ for i, t in ipairs(d.c_tabs.tabs) do if tostring(t.title):find("Reclauded") then
 if not found then game:unregisterDialog(d) return "ERR no SkooBot: Reclauded tab" end
 for i, t in ipairs(d.c_tabs.tabs) do if t.title == found then d:switchTo(t.kind) end end
 local out = {}
-local shouting, empty = 0, 0
+local shouting, empty, clipped = 0, 0, {}
 for _, it in ipairs(d.list or {}) do
   local title = fr.plain(it.name)
   local zone = it.zone and fr.plain(it.zone.text) or ""
+  -- No scrollbar is passed to these Textzones, so a description longer than
+  -- the pane is silently CLIPPED -- the player simply never sees the tail.
+  -- Textzone:generate() leaves the height it needs in max_display and the
+  -- height it has in h, so the question is answerable (#82).
+  local z = it.zone
+  if z and z.max_display and z.h and z.max_display > z.h then
+    -- gsub returns TWO values; without the parentheses the match count
+    -- becomes format's second argument and every field shifts along one.
+    local short = (title:gsub("^%s*%[Reclauded%]%s*", ""))
+    clipped[#clipped+1] = ("%s(%d>%d)"):format(short, z.max_display, z.h)
+  end
   -- the pane text is the addon title, a blank line, then the description;
   -- plain() has turned the line breaks into " / "
   zone = zone:gsub("^SkooBot: Reclauded[%s/]*", ""):gsub("%s+", " ")
@@ -511,7 +522,8 @@ for _, it in ipairs(d.list or {}) do
   out[#out+1] = title .. " = " .. tostring(it.status and it.status()) .. " :: " .. zone
 end
 game:unregisterDialog(d)
-return ("tab=[%s] entries=%d empty=%d shouting=%d ;; %s"):format(found, #out, empty, shouting, table.concat(out, " ;; "))
+return ("tab=[%s] entries=%d empty=%d shouting=%d clipped=%d [%s] ;; %s"):format(
+  found, #out, empty, shouting, #clipped, table.concat(clipped, " "), table.concat(out, " ;; "))
 '@
     Check ($op -match 'tab=\[\[SkooBot: Reclauded\]\] entries=(\d+) empty=0 ') 'every entry on the tab has a description'
     $entries = if ($op -match 'entries=(\d+)') { [int]$Matches[1] } else { 0 }
@@ -524,6 +536,18 @@ return ("tab=[%s] entries=%d empty=%d shouting=%d ;; %s"):format(found, #out, em
     Check ($op -match 'Maximum Combined Enemy Power = \d+ :: Stop when the power levels of every enemy in view, added together, are more than this much above your own') 'MAX_COMBINED_POWER says it is a margin above yours'
     Check ($op -match 'Normal Enemy Power Ratio = [\d.]+ :: .*multiple of their power level' -and $op -match 'Elite Enemy Power Ratio = [\d.]+ :: .*multiple' -and $op -match 'Boss Enemy Power Ratio = [\d.]+ :: .*multiple') 'each rank ratio says it is a multiple of the power level'
     Check ($op -match 'Low Health Ratio = [\d.]+ :: A fraction of your maximum life') 'the life ratios say they are fractions of maximum life'
+    # #82: since #11 these five are terms of one threat score, not
+    # independent switches, and every power stop already ends " -- threat N".
+    # The tab has to say what N is measured against.
+    Check ($op -match 'Maximum Enemy Power = \d+ :: .*These five limits are also a scale: every stop for one of them ends "-- threat N", where the limit you set counts as 1') 'Maximum Enemy Power explains the threat scale once'
+    Check ($op -match 'Maximum Enemy Power Above Yours = \d+ :: .*On the threat scale, 1 is an enemy exactly this far above you') 'MAX_DIFF_POWER says what 1 on the scale is'
+    Check ($op -match 'Maximum Combined Enemy Power = \d+ :: .*On the threat scale, 1 is a room exactly this far above you') 'MAX_COMBINED_POWER says what 1 on the scale is'
+    Check ($op -match 'Maximum Enemy Count = \d+ :: .*On the threat scale, 1 is exactly this many in view') 'MAX_ENEMY_COUNT says what 1 on the scale is'
+    Check ($op -match 'Ignore Damage Above Life Ratio = [\d.]+ :: .*life exactly at this ratio is threat 1') 'the explore-damage ratio says what 1 on the scale is'
+    # These Textzones get no scrollbar, so an over-long description is
+    # clipped and the player never sees the tail -- which is how a wording
+    # change quietly loses its last sentence.
+    Check ($op -match 'clipped=0 \[\]') 'no description is longer than the pane it is drawn in'
     foreach ($line in ($op -split ' ;; ' | Select-Object -Skip 1)) { Note "option: $line" }
 
     # #74: the range each numerical entry actually opens with, and what a
