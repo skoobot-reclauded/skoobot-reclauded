@@ -2,11 +2,28 @@
     Create a ToME character with no human input, and save it.
 
     This is the harness bootstrap: every behaviour test starts from a save, and
-    this makes the first one. Race and class come from the Birther's own
-    randomBirth(), so no descriptor knowledge is hardcoded here and nothing
-    breaks when ToME adds a class. Only the name is forced, because the savefile
-    directory is derived from it (mod/dialogs/Birther.lua:225) and the harness
-    needs a predictable path.
+    this makes the first one. By default race and class come from the
+    Birther's own randomBirth(), so no descriptor knowledge is hardcoded here
+    and nothing breaks when ToME adds a class. Only the name is forced, because
+    the savefile directory is derived from it (mod/dialogs/Birther.lua:225) and
+    the harness needs a predictable path.
+
+    -Class and -Race make a FIXTURE instead (#27): a deterministic character
+    that every scenario can reason about. Either takes a display name or a
+    descriptor id -- "Berserker", "Cornac", "Warrior", "Human" -- and is
+    resolved against the Birther's own race and class trees, then selected
+    through the same raceUse()/classUse() a click goes through, so a locked or
+    disallowed choice fails here instead of silently producing a different
+    character. A top-level name (a race or a class) picks its first unlocked
+    subrace or subclass. With -Class and no -Race the race is the Birther's
+    own default, Human / Cornac (Birther:makeDefault, mod/dialogs/Birther.lua:398).
+
+    The standing fixture is
+
+        powershell -ExecutionPolicy Bypass -File .\tools\new-character.ps1 -Name fixture-berserker -Class Berserker
+
+    a melee class with no ranged or marked-target talents, so a scenario that
+    needs such a talent learns it explicitly and knows it is the only one.
 
     Run:  powershell -ExecutionPolicy Bypass -File .\tools\new-character.ps1 -Name harness
 
@@ -19,6 +36,11 @@
 #>
 param(
     [string]$Name = 'harness',
+    # A subclass ("Berserker") or class ("Warrior"), by display name or
+    # descriptor id. Omitted: randomBirth(), as before.
+    [string]$Class,
+    # A subrace ("Cornac") or race ("Human"). Omitted with -Class: Human / Cornac.
+    [string]$Race,
     [int]$BirthTimeoutSec = 900,
     # The addon short_names the save must record. Defaults to the product and
     # the devbridge (harness.ps1). The T-003 baseline runs the ORIGINAL SkooBot
@@ -96,15 +118,75 @@ foreach ($need in $script:RequiredSaveAddons) {
 }
 if (-not (Assert-NoAddonDropped -Seen $w.Seen)) { Stop-Game; exit 1 }
 
-$roll = @"
+if ($Class) {
+    # A fixture. The Birther's trees are what the mouse sees: all_races and
+    # all_classes are lists of {id, name, nodes = { {id, pid, basename,
+    # locked}, ... }} built by generateRaces/generateClasses, a leaf's id
+    # being the descriptor name and its basename the display name. Selection
+    # goes through raceUse()/classUse() -- what a click calls -- which set the
+    # descriptors and regenerate what depends on them. Race first: raceUse()
+    # rebuilds the class tree, which would drop a class chosen before it.
+    $wantRace = if ($Race) { $Race } else { 'Cornac' }
+    $roll = @"
+local d = game.dialogs and game.dialogs[1]
+if not d or d.__CLASSNAME ~= "mod.dialogs.Birther" then return "not at birther: " .. bridge.dialogs() end
+local function plain(s)
+  if type(s) == "table" and s.toString then s = s:toString() end
+  return (tostring(s):gsub("#[^#]*#", "")):lower()
+end
+-- A leaf matching `want` by id or display name; or, for a top-level match,
+-- its first unlocked leaf. Locked entries never match.
+local function pick(tree, want)
+  want = want:lower()
+  for _, top in ipairs(tree) do
+    if not top.locked and (plain(top.id) == want or plain(top.name) == want) then
+      for _, n in ipairs(top.nodes or {}) do if not n.locked then return n end end
+    end
+    for _, n in ipairs(top.nodes or {}) do
+      if not n.locked and (plain(n.id) == want or plain(n.basename or n.name) == want) then return n end
+    end
+  end
+  return nil
+end
+local function names(tree)
+  local out = {}
+  for _, top in ipairs(tree) do
+    for _, n in ipairs(top.nodes or {}) do if not n.locked then out[#out+1] = tostring(n.id) end end
+  end
+  return table.concat(out, ",")
+end
+local race = pick(d.all_races, "$wantRace")
+if not race then return "ERR no unlocked race matches '$wantRace'; have: " .. names(d.all_races) end
+d:raceUse(race)
+local class = pick(d.all_classes, "$Class")
+if not class then return "ERR no unlocked class matches '$Class' for " .. tostring(race.id) .. "; have: " .. names(d.all_classes) end
+d:classUse(class)
+d.c_name:setText("$Name")
+local t = d.descriptors_by_type
+return ("picked race=%s/%s class=%s/%s sex=%s name=%s play_hidden=%s"):format(
+  tostring(t.race), tostring(t.subrace), tostring(t.class), tostring(t.subclass), tostring(t.sex),
+  d.c_name.text, tostring(d.ui_by_ui[d.c_ok].hidden))
+"@
+} else {
+    $roll = @"
 local d = game.dialogs and game.dialogs[1]
 if not d or d.__CLASSNAME ~= "mod.dialogs.Birther" then return "not at birther: " .. bridge.dialogs() end
 d:randomBirth()
 d.c_name:setText("$Name")
 return "rolled name=" .. d.c_name.text .. " play_hidden=" .. tostring(d.ui_by_ui[d.c_ok].hidden)
 "@
+}
 $r = Step 'birther' $roll
 if ($r.Status -ne 'OK') { Write-Host 'FAILED: could not roll a character'; Stop-Game; exit 1 }
+if ($r.Result -match '^ERR ') { Write-Host "FAILED: $($r.Result)"; Stop-Game; exit 1 }
+# The Play button is the Birther's own gate: hidden until every descriptor
+# in its order is set and the name is long enough (Birther:setDescriptor),
+# and atEnd("created") refuses while it is hidden. Checking it here costs
+# nothing; not checking it would spend the whole birth timeout finding out.
+if ($r.Result -notmatch 'play_hidden=false') {
+    Write-Host "FAILED: the Birther's Play button is still hidden -- a choice did not take ($($r.Result))"
+    Stop-Game; exit 1
+}
 
 # Fire and forget. atEnd() runs birth, world generation and a save/load cycle;
 # the frame that invoked it does not survive to report. Poll for the world
@@ -129,13 +211,49 @@ while ((Get-Date) -lt $deadline -and -not $inWorld) {
 }
 if (-not $inWorld) { Write-Host "FAILED: no world after ${BirthTimeoutSec}s"; Stop-Game; exit 1 }
 
+# The world exists, but birth has not finished. The engine is now showing the
+# birth level-up dialog, and closing it runs the rest: the welcome text, then
+# onBirth(), the starting quest and creating_player = false
+# (mod/class/Game.lua:322-377). Saving under those dialogs used to work only
+# because creating_player is not a saved field -- the quest and the intro were
+# simply never granted. Each dialog is closed through its own EXIT bind, the
+# key path the engine itself takes for a quick birth (Game.lua:341), never by
+# unregistering it, so every on_finish callback runs. Nothing is allocated:
+# the level-up dialog closes with no change to accept.
+$settled = $false
+$quiet = 0
+for ($i = 0; $i -lt 16 -and -not $settled; $i++) {
+    $r = Invoke-Bridge -Lua @'
+local d = game.dialogs and game.dialogs[#game.dialogs]
+if not d then return "none" end
+local title = tostring(d.title or d.__CLASSNAME or "?")
+if d.key and d.key.virtuals and d.key.virtuals.EXIT then
+  d.key:triggerVirtual("EXIT")
+  return "closed " .. title .. " -> " .. bridge.dialogs()
+end
+return "stuck " .. title
+'@ -TimeoutSec 30
+    Write-Host ('  dialog   {0,-8} {1}' -f $r.Status, $r.Result)
+    if ($r.Status -ne 'OK') { break }
+    # A callback can register the next dialog on a later tick, so "none"
+    # has to hold twice in a row before birth counts as finished.
+    if ($r.Result -eq 'none') { $quiet++; if ($quiet -ge 2) { $settled = $true; break } }
+    else { $quiet = 0 }
+    if ($r.Result -match '^stuck') { Write-Host "FAILED: a birth dialog has no EXIT bind: $($r.Result)"; Stop-Game; exit 1 }
+    Start-Sleep -Seconds 2
+}
+if (-not $settled) { Write-Host 'FAILED: the birth dialogs did not settle'; Stop-Game; exit 1 }
+$null = Step 'born' 'local n = 0 for _ in pairs(game.player.quests or {}) do n = n + 1 end return bridge.state() .. " quests=" .. n .. " creating=" .. tostring(game.creating_player)' 30
+
 $null = Step 'save' 'game:saveGame() return "save requested"' 120
 
 # Saving is ASYNCHRONOUS -- background_saves defaults to true, so saveGame()
 # returns immediately and a separate thread writes game.teag.tmp, then renames.
 # Killing the process on the strength of that return leaves a zero-byte .tmp and
 # no save at all. Wait for the real file.
-$save = Join-Path $script:SaveRoot "$Name\game.teag"
+# The directory is the engine's sanitised form of the name (Get-SaveDirName):
+# a hyphen in the name is an underscore on disk.
+$save = Join-Path $script:SaveRoot "$(Get-SaveDirName -Name $Name)\game.teag"
 $deadline = (Get-Date).AddSeconds(180)
 while ((Get-Date) -lt $deadline) {
     if ((Test-Path $save) -and (Get-Item $save).Length -gt 0) { break }
@@ -156,6 +274,6 @@ if ((Test-Path $save) -and (Get-Item $save).Length -gt 0) {
     exit 0
 }
 Write-Host "`n[new-character] FAILED - no completed save at $save"
-Get-ChildItem (Join-Path $script:SaveRoot $Name) -ErrorAction Ignore |
+Get-ChildItem (Join-Path $script:SaveRoot (Get-SaveDirName -Name $Name)) -ErrorAction Ignore |
     Select-Object Name, Length | Format-Table -AutoSize
 exit 1

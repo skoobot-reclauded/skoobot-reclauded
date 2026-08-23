@@ -188,9 +188,24 @@ function Show-LoadDiagnostics {
 # What a harness save must list to be worth measuring anything from.
 $script:RequiredSaveAddons = @('skoobot_reclauded', 'skoobot_devbridge')
 
+<#
+    The directory a save named $Name actually lives in. The engine derives it
+    as `name:gsub("[^a-zA-Z0-9_-.]", "_"):lower()` (engine/Savefile.lua:46),
+    and in a Lua set `_-.` is an empty range, so a hyphen and a dot become
+    underscores too: `fixture-berserker` is loaded by that name and saved
+    under `fixture_berserker`. Loading is unaffected -- Module:instanciate
+    applies the same rule -- but anything that reads the directory must apply
+    it as well, or a fixture with a hyphen in its name is reported as having
+    no save at all (#27).
+#>
+function Get-SaveDirName {
+    param([Parameter(Mandatory)][string]$Name)
+    ([regex]::Replace($Name, '[^a-zA-Z0-9_]', '_')).ToLowerInvariant()
+}
+
 function Get-SaveDescPath {
     param([Parameter(Mandatory)][string]$Name)
-    Join-Path $script:SaveRoot "$Name\desc.lua"
+    Join-Path $script:SaveRoot "$(Get-SaveDirName -Name $Name)\desc.lua"
 }
 
 <#
@@ -574,4 +589,161 @@ function Invoke-Bridge {
         Interference = $interference
         Tainted      = ($interference.Count -gt 0)
     }
+}
+
+# ---------------------------------------------------------------------------
+# Assertions and result records (#27).
+#
+# Scenarios used to carry their own Check() and their own tally. These are
+# the shared versions: each prints one PASS/FAIL line, remembers a failure
+# in $script:HarnessFailures and a taint in $script:HarnessTainted, and
+# returns a boolean so a scenario can still branch on it. Nothing above this
+# line changed; every scenario dot-sources this file and keeps working.
+# ---------------------------------------------------------------------------
+
+$script:HarnessFailures = @()
+$script:HarnessTainted  = $false
+$script:ResultsDir      = Join-Path $script:RepoRoot 'build\results'
+
+<#
+    Every line of the game's log right now, through a shared read. The game
+    holds the file open for writing, so a plain Get-Content fails. This does
+    not move the harness's own read cursor: it is for asserting on what the
+    engine and the bot printed, not for waiting on it.
+#>
+function Get-GameLogLines {
+    if (-not (Test-Path $script:LogPath)) { return @() }
+    $fs = [System.IO.File]::Open($script:LogPath, 'Open', 'Read', 'ReadWrite')
+    try {
+        $sr = New-Object System.IO.StreamReader($fs)
+        $text = $sr.ReadToEnd()
+    } finally { $fs.Dispose() }
+    if (-not $text) { return @() }
+    @($text -split "`r?`n" | Where-Object { $_ -ne '' })
+}
+
+<#
+    A bridge result is good when the command ran (Status OK), nobody touched
+    the machine while it did (not Tainted), and -- if -Match is given -- its
+    Result matches. A taint is remembered separately from a failure because
+    it voids the run rather than failing it: the scenario exits 2, and the
+    runner re-runs it once.
+#>
+function Assert-Result {
+    param(
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$What,
+        [string]$Match
+    )
+    if ($Result.Tainted) {
+        $script:HarnessTainted = $true
+        Write-Host "  TAINT $What -- human input during this step"
+    }
+    $ok = ($Result.Status -eq 'OK')
+    $why = ''
+    if (-not $ok) {
+        $why = "status=$($Result.Status)"
+    } elseif ($Match -and -not ("$($Result.Result)" -match $Match)) {
+        $ok = $false
+        $why = "result did not match '$Match': $($Result.Result)"
+    }
+    if ($ok) { Write-Host "  PASS  $What" }
+    else {
+        Write-Host "  FAIL  $What ($why)"
+        $script:HarnessFailures += "$What ($why)"
+    }
+    return $ok
+}
+
+# game.turn as an integer, or -1 if the game did not answer.
+function Get-GameTurn {
+    $r = Invoke-Bridge -Lua 'return tostring(game.turn)' -TimeoutSec 30
+    if ($r.Status -ne 'OK' -or "$($r.Result)" -notmatch '^\s*(-?\d+)') { return -1 }
+    if ($r.Tainted) { $script:HarnessTainted = $true }
+    return [int]$Matches[1]
+}
+
+<#
+    Run a block and assert on how far game.turn moved across it. Progress is
+    measured in turns, never wall-clock (docs/design-harness.md section 3):
+    a click or a resize costs frames, not turns, so a turn-counted assertion
+    is immune to interference by construction. game.turn counts engine
+    ticks: 1000 energy to act, 100 per tick (mod/class/Game.lua:80,
+    engine/GameEnergyBased.lua), so it advances by 10 per game turn at
+    normal speed. -AtLeast 10 is "at least one turn"; -AtMost 0 is "no game
+    time passed" (a query-mode decision).
+
+    Returns {Before, After, Delta, Ok}; the block's own output is not
+    captured, so it can print and Check as it likes.
+#>
+function Assert-Turns {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Block,
+        [Parameter(Mandatory)][string]$What,
+        [int]$AtLeast = -1,
+        [int]$AtMost = -1
+    )
+    $before = Get-GameTurn
+    & $Block | Out-Null
+    $after = Get-GameTurn
+    $delta = $after - $before
+    $ok = ($before -ge 0 -and $after -ge 0)
+    $why = ''
+    if (-not $ok) { $why = 'game.turn unreadable' }
+    elseif ($AtLeast -ge 0 -and $delta -lt $AtLeast) { $ok = $false; $why = "advanced $delta, wanted at least $AtLeast" }
+    elseif ($AtMost -ge 0 -and $delta -gt $AtMost)   { $ok = $false; $why = "advanced $delta, wanted at most $AtMost" }
+    if ($ok) { Write-Host "  PASS  $What (game.turn $before -> $after, +$delta)" }
+    else {
+        Write-Host "  FAIL  $What ($why; game.turn $before -> $after)"
+        $script:HarnessFailures += "$What ($why)"
+    }
+    [pscustomobject]@{ Before = $before; After = $after; Delta = $delta; Ok = $ok }
+}
+
+<#
+    Append one JSON line for a scenario run to build/results/<yyyy-MM-dd>.jsonl.
+
+    One line per run, never rewritten, so a day's file is the day's history:
+    a re-run after a taint is a second line with attempts=2, not an edit of
+    the first. build/ is gitignored, so nothing here reaches the repository;
+    the file is what run-scenarios.ps1 summarises and what a person reads
+    the morning after an unattended run.
+
+    Fields: scenario, status (PASS | FAIL | TAINTED | INCONCLUSIVE | CRASHED |
+    TIMEOUT | BUSY), exit, seconds, tainted, attempts, summary (the
+    scenario's own verdict line), lines (the tail of its output), when.
+#>
+function Write-ScenarioResult {
+    param(
+        [Parameter(Mandatory)][string]$Scenario,
+        [Parameter(Mandatory)][string]$Status,
+        [int]$ExitCode = -1,
+        [double]$Seconds = 0,
+        [bool]$Tainted = $false,
+        [int]$Attempts = 1,
+        [string]$Summary = '',
+        [string[]]$Lines = @(),
+        [string]$Path
+    )
+    if (-not $Path) {
+        if (-not (Test-Path $script:ResultsDir)) { New-Item -ItemType Directory -Path $script:ResultsDir -Force | Out-Null }
+        $Path = Join-Path $script:ResultsDir ((Get-Date -Format 'yyyy-MM-dd') + '.jsonl')
+    }
+    $rec = [ordered]@{
+        scenario = $Scenario
+        status   = $Status
+        exit     = $ExitCode
+        seconds  = [math]::Round($Seconds, 1)
+        tainted  = $Tainted
+        attempts = $Attempts
+        summary  = $Summary
+        lines    = @($Lines)
+        when     = (Get-Date).ToString('o')
+    }
+    # -Compress keeps it to one line; -Depth 3 is enough for a flat record
+    # with one string array. ASCII-safe UTF-8 without a BOM, appended, so
+    # the file is a valid JSON-lines stream from the first byte.
+    $json = ($rec | ConvertTo-Json -Compress -Depth 3)
+    [System.IO.File]::AppendAllText($Path, $json + "`n", (New-Object System.Text.UTF8Encoding($false)))
+    return $Path
 }
