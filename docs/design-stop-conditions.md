@@ -513,10 +513,21 @@ Ctrl still shows the components.
 
 ### 5.5 Explicitly out of scope
 
-- **Walking to a glowing chest as a scored objective** (salvage-mishander.md item 9). It did
-  not fall out of the scorer — the score evaluates threat, and a chest is an opportunity with a
-  path and a guard check, which is a second kind of objective the loop has no slot for. Its
-  own issue.
+- ~~**Walking to a glowing chest as a scored objective**~~ **Done (#78), but not by the
+  scorer.** It still did not fall out of it: `data/score.lua` evaluates THREAT, and a chest is
+  an opportunity with a path and a guard check, which is a second kind of objective the score
+  has no term for (salvage-mishander.md item 9 explains why mishander's FOV-callback version
+  was unsafe). So the score is not asked to rank chests. It is asked, every single step,
+  whether walking is still all right — a **SEEK** state between EXPLORE and FIGHT, entered only
+  with the field clear and the posture `fight`, and left the moment either stops being true.
+  That keeps threat strictly ahead of opportunity without giving the scorer a second currency
+  to weigh.
+  The hand-back at the chest is #8's, unchanged: same reason, same `HANDED_BACK` severity, same
+  WARN / STOP / IGNORE gate, read rather than fired on the way in so a WARN the player has
+  already acknowledged does not send the bot walking again. IGNORE gets neither the walk nor
+  the stop. A chest behind a sealed door is not walked to, because #64's exclusion applies to
+  this path too, and a walk longer than `SEEK_LIMIT` steps is given up: the player did not
+  toggle the bot to have it go sightseeing.
 - ~~**A non-linear life curve** for own power.~~ **Done (#79).** `score.lifeFactor` is
   `x * (1 - LIFE_CURVE * (1 - x))`, which is the linear form at `LIFE_CURVE = 0`, `x²` at 1,
   and ships at **0.5** — half life counts for 0.375, between the two. The worry recorded here

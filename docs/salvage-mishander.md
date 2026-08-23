@@ -151,6 +151,14 @@ stop. mishander labelled it "(beta)" and separately noted it sometimes fails. Re
 against the T-020 scorer: a chest is a scored objective, not a special case wedged into the
 act loop.
 
+> **Taken 2026-08-23** (#78): a SEEK state between EXPLORE and FIGHT, not a term of the
+> scorer -- the score evaluates threat, and a chest is an opportunity, so it is asked whether
+> walking is still all right rather than asked to rank chests. Reachability is an Astar path
+> (with #64's consent exclusion, so a chest behind a vault door is not walked to), the nearest
+> chest wins rather than the last one iteration happened to reach, the walk is capped, and the
+> bot hands back AT the chest with #8's reason and #8's WARN / STOP / IGNORE gate. Regression:
+> `tools/scenario-t013-glowing-chest.ps1`.
+
 ## Reject
 
 **10. Debug logging.** ~15 `game.log("#LIGHT_RED# ...")` calls on hot paths, including inside

@@ -157,6 +157,13 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   changes**, so your *Maximum Enemy Power Above Yours* and *Maximum Combined Enemy Power* mean
   exactly what they did; the bot simply gets more careful sooner once you are wounded. The
   tooltip now spells the multiplier out ("at 65% life, x0.53").
+- **The bot walks to a glowing chest instead of stopping across the room from it** (#78). It
+  used to hand back the moment one came into view, leaving you to walk there yourself. It now
+  walks over and hands back *next to* the chest, with the same message and the same
+  *Terrain: Glowing Chest* setting deciding whether it happens at all — set it to IGNORE and
+  the bot neither walks nor stops, exactly as before. It only walks with nothing hostile in
+  sight and the room reading as safe, it re-checks that every step, and it gives up rather than
+  crossing the whole level or routing through a sealed door.
 
 ### Fixed
 

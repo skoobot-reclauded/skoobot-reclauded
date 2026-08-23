@@ -80,6 +80,7 @@ local STATE_REST    = 10
 local STATE_EXPLORE = 11
 local STATE_HUNT    = 12
 local STATE_FIGHT   = 13
+local STATE_SEEK    = 14
 
 -- FIXED (#13, T-027). v1 stopped after turnCount > 1000 player acts: an
 -- invocation count, not a measure of progress, so a productive run of a
@@ -397,6 +398,9 @@ local function activationInit()
         -- per-turn driver has run this activation; last_turn is game.turn
         -- at the last one; stalled is how many in a row found it unchanged.
         iterations = 0, last_turn = game.turn, stalled = 0,
+        -- #78: steps spent walking to a glowing chest, so a chest across
+        -- the level is not chased for ever. Reset whenever the walk ends.
+        seeks = 0,
         unspentTotal = getUnspentTotal(),
         -- #62 (salvage-mishander.md item 8): the tile this activation began
         -- on, so the explore branch can tell the stairs the player toggled the
@@ -471,6 +475,7 @@ local function aiStateString()
     elseif bot.state == STATE_EXPLORE then return "SAI_STATE_EXPLORE"
     elseif bot.state == STATE_HUNT then return "SAI_STATE_HUNT"
     elseif bot.state == STATE_FIGHT then return "SAI_STATE_FIGHT"
+    elseif bot.state == STATE_SEEK then return "SAI_STATE_SEEK"
     end
     return "Unknown State"
 end
@@ -657,31 +662,40 @@ local function suffocatingAt(self, x, y)
 end
 bot.suffocating = function() local p = game.player return suffocatingAt(p, p.x, p.y) end
 
---- Is an unopened glowing chest in view? (T-013.)
---
--- v1 walked straight past them; the user asked the bot to STOP for one, so the
--- player can decide whether to open it -- glowing chests can be guarded. A
--- glowing chest is a terrain grid (data/general/events/glowing-chest.lua) with
--- `special = true`, a name containing "chest", and `chest_opened` set once
--- opened, so detection is exact and needs no name-string heuristics beyond
--- that. This only STOPS; walking the bot TO the chest is a scored objective
--- for T-020, deliberately not done here (salvage-mishander.md item 9).
-local function glowingChestInView(self)
-    if not self.x then return false end
+--- The nearest unopened glowing chest in view, or nil (T-013, #78).
+---
+--- v1 walked straight past them; the user asked the bot to STOP for one, so
+--- the player can decide whether to open it -- glowing chests can be
+--- guarded. A glowing chest is a terrain grid
+--- (data/general/events/glowing-chest.lua) with `special = true`, a name
+--- containing "chest", and `chest_opened` set once opened, so detection is
+--- exact and needs no name-string heuristics beyond that.
+---
+--- Returns the grid rather than a boolean because #78 walks to it: the
+--- condition asks "is one in view", the SEEK state asks "where".
+local function nearestGlowingChest(self)
+    if not self.x then return nil end
     local map = game.level.map
-    local found = false
+    local bx, by, bd
     core.fov.calc_circle(self.x, self.y, map.w, map.h, self.sight or 10,
         function(_, x, y) return map:opaque(x, y) end,
         function(_, x, y)
-            if found or not map.seens(x, y) then return end
+            if not map.seens(x, y) then return end
             local terrain = map(x, y, map.TERRAIN)
             if terrain and terrain.special and not terrain.chest_opened
                and terrain.name and tostring(terrain.name):lower():find("chest", 1, true) then
-                found = true
+                local d = core.fov.distance(self.x, self.y, x, y)
+                if not bd or d < bd then bx, by, bd = x, y, d end
             end
         end, nil)
-    return found
+    if not bx then return nil end
+    return { x = bx, y = by, distance = bd }
 end
+
+local function glowingChestInView(self)
+    return nearestGlowingChest(self) ~= nil
+end
+bot.nearestChest = function(p) return nearestGlowingChest(p or game.player) end
 
 --- A path to the nearest tile the actor can breathe on AND actually reach.
 --
@@ -1466,6 +1480,39 @@ function conditionContext(p, hostiles)
     return ctx
 end
 
+-- #78: how many steps a chest is worth walking. The map is 65x40 at most in
+-- the early zones, so a path longer than this is not a chest across the
+-- room -- it is a chest the other side of the level, and the player did not
+-- toggle the bot to have it go sightseeing.
+local SEEK_LIMIT = 40
+
+--- Should the bot walk to a chest rather than stop for it (#78)?
+---
+--- Every condition here is a reason the answer is no:
+---
+---   * the policy is IGNORE -- the player has said they do not care, and
+---     seeking would be a stop they turned off arriving as a walk instead;
+---   * something hostile is in view, or the score is not simply "fight" --
+---     a chest is an opportunity and the score is about threat, so any
+---     threat outranks it. This is the "no flag is set" the issue asks for,
+---     read off the posture, which is handback the moment one is;
+---   * the character cannot move, so there is no walking to be done;
+---   * there is no chest, or the bot is already next to it -- in which case
+---     the ordinary condition check hands back, which is the point of the
+---     walk.
+---
+--- The policy is READ, not fired: firing it here would consume the WARN and
+--- the hand-back at the chest would never come.
+local function seekChest(ctx, hostiles)
+    if #hostiles > 0 or ctx.caps.move then return false end
+    if ctx.score and ctx.score.posture ~= score.FIGHT then return false end
+    local pol = getStopCondition(game.player, "TERRAIN_GLOWING_CHEST")
+    if not pol or pol.stoptype == "IGNORE" then return false end
+    local chest = nearestGlowingChest(game.player)
+    if not chest or chest.distance <= 1 then return false end
+    return true
+end
+
 --- One loop over the condition list for a site (#12), replacing v1's
 --- checkForDebuffs / checkPowerLevel if-chains and the explore branch's own
 --- checks: every policy entry with a detector is evaluated, in the list's
@@ -1618,6 +1665,19 @@ function skoobot_act(noAction)
         -- re-toggles past it has chosen to skip it. A Solipsist-style player who
         -- never wants to be bothered sets this to IGNORE. The explore-site
         -- entry of the list (#12): TERRAIN_GLOWING_CHEST, at HANDED_BACK.
+        -- #78: walk to it, rather than stopping the moment it comes into
+        -- view. The hand-back is the same one (#8, TERRAIN_GLOWING_CHEST at
+        -- HANDED_BACK) and still the player's decision; it just happens
+        -- WHERE the decision is easy to act on -- next to the chest -- and
+        -- not from across a room the player then has to walk themselves.
+        --
+        -- The gate is unchanged: IGNORE never seeks and never stops, and
+        -- the policy is read rather than fired, so a WARN the player has
+        -- already acknowledged does not send the bot walking again.
+        if seekChest(ctx, hostiles) then
+            bot.state = STATE_SEEK
+            return skoobot_act(true)
+        end
         if checkConditions(conditions.SITE_EXPLORE, ctx) then return end
         -- #62 (salvage-mishander.md item 8). v1 handed back on ANY level-change
         -- tile, including the stairs the player had just arrived by -- so a
@@ -1660,6 +1720,77 @@ function skoobot_act(noAction)
         bot.state = STATE_EXPLORE
         return skoobot_act(true)
 
+    elseif bot.state == STATE_SEEK then
+        -- #78: walking to a glowing chest.
+        --
+        -- This is a SECOND kind of objective, and the reason the scorer did
+        -- not simply grow one: data/score.lua evaluates THREAT, and a chest
+        -- is an opportunity with a path and a guard check
+        -- (salvage-mishander.md item 9 explains why mishander's
+        -- FOV-callback version was unsafe). So the score is not asked to
+        -- rank chests; it is asked, every single step, whether walking is
+        -- still all right. Anything it does not answer "fight" to ends the
+        -- walk, which keeps threat strictly ahead of opportunity.
+        --
+        -- A hostile does not need handling here: the pre-branch transition
+        -- above sets FIGHT whenever anything is in view, so this branch is
+        -- only ever reached with the field clear.
+        local act = bot.activation
+        local chest = nearestGlowingChest(game.player)
+        -- Gone, opened by something else, or out of sight: nothing to do.
+        if not chest then
+            if act then act.seeks = 0 end
+            bot.state = STATE_EXPLORE
+            return skoobot_act(true)
+        end
+        -- Arrived. The hand-back is the ordinary condition check, so the
+        -- reason, the severity and the WARN/STOP/IGNORE policy are #8's and
+        -- not a second copy of them.
+        if chest.distance <= 1 then
+            if act then act.seeks = 0 end
+            bot.state = STATE_EXPLORE
+            if checkConditions(conditions.SITE_EXPLORE, ctx) then return end
+            -- IGNORE, or a WARN already acknowledged: carry on exploring.
+            return skoobot_act(true)
+        end
+        -- The score's veto, re-read here rather than trusted from the step
+        -- that started the walk.
+        if ctx.caps.move or (ctx.score and ctx.score.posture ~= score.FIGHT) then
+            if act then act.seeks = 0 end
+            bot.state = STATE_EXPLORE
+            return skoobot_act(true)
+        end
+        if act then
+            act.seeks = (act.seeks or 0) + 1
+            if act.seeks > SEEK_LIMIT then
+                chan.debug("[Seek] gave up after %d steps", act.seeks)
+                act.seeks = 0
+                bot.state = STATE_EXPLORE
+                return skoobot_act(true)
+            end
+        end
+        local sa = Astar.new(game.level.map, game.player)
+        -- #64's exclusion applies here too: a chest behind a vault door is
+        -- not a reason to walk into the vault door.
+        local spath = sa:calc(game.player.x, game.player.y, chest.x, chest.y,
+            nil, nil, function(x, y) return not needsConsent(x, y) end)
+        if not spath or #spath == 0 then
+            chan.debug("[Seek] no path to the chest at %d,%d", chest.x, chest.y)
+            if act then act.seeks = 0 end
+            bot.state = STATE_EXPLORE
+            -- No path is the old behaviour's situation exactly: in view,
+            -- unreachable. Hand back where the bot stands, as #8 did.
+            if checkConditions(conditions.SITE_EXPLORE, ctx) then return end
+            return skoobot_act(true)
+        end
+        chan.info("[Seek] Walking to a glowing chest, %d away", chest.distance)
+        if not SAI_movePlayer(spath[1].x, spath[1].y) and not bot.do_nothing then
+            if act then act.seeks = 0 end
+            bot.state = STATE_EXPLORE
+            return stop(notice.CANNOT_ACT, "could not walk to the glowing chest")
+        end
+        checkForAdditionalAction()
+        return
     elseif bot.state == STATE_FIGHT then
         -- #12 (design 1.1, the response half of #7's split): what the
         -- detected conditions say the character cannot do. Fighting needs

@@ -459,7 +459,13 @@ return "installed"
     $d = Probe 'return sc.probe({ MAX_COMBINED_POWER = 1000000, life = 0.4, conds = { SCOUTER_BIGENEMY = "IGNORE", SCOUTER_STRONGERENEMY = "IGNORE" } })'
     Write-Host "  $($d.Result)"
     if ($d.Result -match '^SETUP') { Inconclusive $d.Result }
-    $null = Assert-Result $d 'the posture is RETREAT, with the distance in the reason' -Match 'posture=retreat .*why=\[[^\]]* is [\d.]+x your limit at distance 3: step away first\]'
+    # The spawn is three STEPS along a free line, and sc.line offers diagonals
+    # too, so three steps is distance 3 or 4 depending on which direction was
+    # free. spawnLine reports the distance it actually got; assert against
+    # that rather than against 3, which passes or fails on the geometry the
+    # level happened to offer. (Seen failing on a diagonal, 2026-08-23.)
+    $spawnDist = if ($sp.Result -match 'at distance (\d+)') { $Matches[1] } else { '3' }
+    $null = Assert-Result $d 'the posture is RETREAT, with the distance in the reason' -Match ('posture=retreat .*why=\[[^\]]* is [\d.]+x your limit at distance ' + $spawnDist + ': step away first\]')
     $null = Assert-Result $d 'the bot does not stop' -Match 'reason=nil'
     $null = Assert-Result $d 'and would flee from it before anything else' -Match 'AI would flee from [^|]* to the (north|south|east|west|northeast|northwest|southeast|southwest)'
     $null = Assert-Result $d 'no talent and no approach' -Match '^(?!.*AI would (use|move))'
