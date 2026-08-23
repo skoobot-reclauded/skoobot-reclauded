@@ -1,6 +1,6 @@
 # GitHub workflow
 
-**Status:** current as of 2026-08-21 · **Tasks:** T-022, T-033, T-035
+**Status:** current as of 2026-08-22 · **Issues:** #17 (T-022), #22 (T-033), #20 (T-035)
 
 How this project is hosted, who acts on GitHub, and the two rules that must not be broken.
 Written to be readable by someone who has never seen this repo before — including a future
@@ -168,23 +168,22 @@ when it is an issue with a milestone. Work that lives only in a design document,
 local note, or the research archive is not tracked: file it. There is no second board anywhere,
 on purpose — two boards drift within a week.
 
-Task IDs (`T-001`, `T-010`, …) are permanent and are **not** GitHub issue numbers, which will
-never match. The mapping is the issue list itself.
+**An issue is identified by its number, and nothing else.** Until 2026-08-22 every task also
+carried a permanent `T-nnn` ID in its title and in commit messages, allocated by hand in
+themed blocks, so that `git log --grep=T-010` would survive a tracker migration. That scheme
+is retired (decision **D-13**, held by the maintainer: *the blocks filled within days, every
+new finding needed an allocation before it could be filed, and GitHub already links `#54`
+wherever it appears*). **Nothing is edited retroactively** — the T-IDs already in titles,
+commits and docs stay valid references, and `T-010 in:title` or `git log --grep=T-010` still
+finds them.
 
-- **T-IDs go in issue titles**: `T-010 — Conditional / marked-target talents stall the
-  rotation`. To find an issue by T-ID, search `T-010 in:title`.
-- **T-IDs go in commit messages**: `Fix talent fallthrough (T-010)`. That keeps
-  `git log --grep=T-010` working as the audit trail independently of GitHub, which matters
-  because the tracker can be migrated but history cannot.
-- **Allocating an ID**: take the next free number in the themed block — `00x` baseline and
-  tooling · `01x` inherited defects · `02x` core model and release features · `03x`
-  housekeeping · `04x` verification, harness and dev loop · `05x` release and packaging ·
-  `06x` safety and credentials · `07x` tracking, documentation and continuity — found by
-  searching issue titles for the highest one in that block. Gaps are unallocated, not retired;
-  no lettered sub-IDs.
+- **Titles are plain**: `Stop for glowing chests instead of walking past them`. No prefix.
+- **Commit messages cite the issue number**: `Fix talent fallthrough (#5)`. GitHub links it,
+  and `git log --grep='(#5)'` is the audit trail. If the tracker is ever migrated, the
+  numbers are mapped then.
 - **Every issue gets a milestone** (M1 Baseline and tooling · M2 Core model · M3 Inherited
-  defects · M4 Release readiness) and labels from the existing set. Dependencies and
-  "subsumed by" relations go in the issue body, so the board explains its own ordering.
+  defects · M4 Release readiness · M5 Post-0.1) and labels from the existing set. Dependencies
+  and "subsumed by" relations go in the issue body, so the board explains its own ordering.
 - Automated work files, comments on, and edits issues as the machine account (§2.2); the
   verified mechanics live with the credentials (see below).
 

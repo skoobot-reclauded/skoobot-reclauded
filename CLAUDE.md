@@ -41,12 +41,11 @@ read-only history and holds no tasks; **tasks live only in this repo's GitHub Is
 
 - **GitHub Issues are the single source of truth for tasks.** A task exists when it is an
   issue with a milestone; work that lives only in a document, a chat, or a local file is not
-  tracked — file it, as the machine account. Task IDs (`T-nnn`) are permanent and are **not**
-  GitHub issue numbers. Put them in issue titles and in commit messages
-  (`Fix talent fallthrough (T-010)`), so `git log --grep=T-010` survives any tracker
-  migration. The mapping is the issue list itself (search `T-010 in:title`); allocate the next
-  free number in the themed block by searching titles for the highest one in use. Blocks and
-  procedure: [docs/github-workflow.md](docs/github-workflow.md) §4.
+  tracked — file it, as the machine account. **An issue is identified by its number only.**
+  Cite it in commit messages (`Fix talent fallthrough (#5)`); titles carry no prefix. The
+  `T-nnn` IDs in older titles, commits and docs are retired but valid references (D-13,
+  2026-08-22) — never allocate a new one, never edit the old ones away. Procedure:
+  [docs/github-workflow.md](docs/github-workflow.md) §4.
 - Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer in the local
   research archive — not in this repo, not in issues, for now — and are cited by ID; every
   citation here should carry its one-line substance.
