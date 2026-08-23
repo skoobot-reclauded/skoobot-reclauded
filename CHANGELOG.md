@@ -93,6 +93,13 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   each a one-line wrapper, and adds the *Power Level* tooltip line through the engine's own
   hook instead of patching every creature's tooltip. The line sits with the creature's stats
   (after M. save) rather than at the bottom of the tooltip.
+- **The options say what they will take** (#74). Every numerical option used to open with
+  *From 0 to 1000000*, whatever it meant. The two life fractions now offer *From 0 to 1* and
+  the three rank ratios *From 0 to 10*, and the box holds you to it — typing `50` into *Low
+  Health Ratio* meaning "50%" used to set a threshold of fifty times your maximum life, after
+  which the bot stopped at the first enemy it saw. Fractions can still be typed with a decimal
+  point. The power figures, the enemy count and the action delay keep the open range, having
+  no natural ceiling, and a value you had already saved is left alone.
 
 ### Fixed
 

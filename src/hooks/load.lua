@@ -190,6 +190,22 @@ class:bindHook("GameOptions:generateList", function(self, data)
         local list = data.list
         local settings = config.settings.tome.skoobot_reclauded
 
+        -- A numerical option. `minVal`/`maxVal` are the range the dialog
+        -- clamps typed input to AND the range its prompt states; every entry
+        -- opened with "From 0 to 1000000" before #74, which for the two life
+        -- fractions was actively misleading -- a player typing 50 for "50%"
+        -- got a threshold of fifty times maximum life, and the bot then
+        -- stopped at the first enemy.
+        --
+        -- The minimum is GetQuantity's SIXTH argument (engine/dialogs/
+        -- GetQuantity.lua: init(title, prompt, default, max, action, min)),
+        -- which is easy to miss after the callback and was simply never
+        -- passed, so no minimum was enforced either. Numberbox bounds on
+        -- edit (util.bound in updateText), so a value already saved outside
+        -- the range survives until the player types in the box -- which is
+        -- right: this changes what can be entered, never what is stored.
+        -- Decimals are accepted (Numberbox takes '.'), so a fraction can be
+        -- typed into a 0-to-1 range.
         local function createNumericalOption(option, tabTitle, desc, minVal, maxVal, prompt)
             minVal = minVal or 0
             maxVal = maxVal or 1000000
@@ -201,7 +217,7 @@ class:bindHook("GameOptions:generateList", function(self, data)
                     game:saveSettings("tome.skoobot_reclauded." .. option,
                         ("tome.skoobot_reclauded." .. option .. " = %s\n"):format(tostring(settings[option])))
                     self.c_list:drawItem(item)
-                end))
+                end, minVal))
             end
             local status = function()
                 return tostring(settings[option] or "-")
@@ -245,12 +261,12 @@ class:bindHook("GameOptions:generateList", function(self, data)
             "stops when life is below it. The other life thresholds follow from it: losing half " ..
             "of this fraction in one turn is the Big Loss stop; in a fight, losing a quarter of " ..
             "it in one turn uses a Damage Prevention talent, and missing a quarter of it uses a " ..
-            "Recovery talent.")
+            "Recovery talent.", 0, 1)
         createNumericalOption("IGNORE_DAMAGE_HEALTH_RATIO", "Ignore Damage Above Life Ratio",
             "A fraction of your maximum life (0.9 is nine tenths). While exploring with nothing " ..
             "in view, damage is ignored as long as life stays above it, so a single poison tick " ..
             "does not stop the bot; once life is below it, any damage taken while exploring hands " ..
-            "back.")
+            "back.", 0, 1)
         createNumericalOption("MAX_INDIVIDUAL_POWER", "Maximum Enemy Power",
             "Stop when any enemy in view has a power level above this figure, whatever yours is. " ..
             "Power level is the addon's rough threat score for a creature -- its life, damage, " ..
@@ -271,13 +287,13 @@ class:bindHook("GameOptions:generateList", function(self, data)
         createNumericalOption("NORMAL_POWER_RATIO", "Normal Enemy Power Ratio",
             "Critters and normal-rank enemies count for this multiple of their power level in " ..
             "the three power checks above: 0.4 means a common counts for less than half, so a " ..
-            "pack of them does not read as a threat; 1 is face value.")
+            "pack of them does not read as a threat; 1 is face value.", 0, 10)
         createNumericalOption("ELITES_POWER_RATIO", "Elite Enemy Power Ratio",
             "Elite, rare and unique enemies count for this multiple of their power level in the " ..
-            "three power checks above: 1 is face value; 2 would count each as double.")
+            "three power checks above: 1 is face value; 2 would count each as double.", 0, 10)
         createNumericalOption("BOSS_POWER_RATIO", "Boss Enemy Power Ratio",
             "Bosses, elite bosses and anything stronger count for this multiple of their power " ..
-            "level in the three power checks above: 2 counts each as double; 1 is face value.")
+            "level in the three power checks above: 2 counts each as double; 1 is face value.", 0, 10)
         createNumericalOption("ACTION_DELAY", "Action Delay",
             "Seconds the bot waits between its actions, so you can watch what it does. 0 acts " ..
             "at full speed. Known to be rough: with a delay set, the bot also takes its next " ..

@@ -320,14 +320,19 @@ CHANGELOG names kept):
 The scenario reads all eleven back from the live tab and asserts the retitled pair, the
 power-level clause, the margin wording and the absence of capitals.
 
-**Still wrong, outside this pass's region:** selecting any numerical entry opens the engine's
-quantity prompt with *From 0 to 1000000*, because `createNumericalOption` is called without a
-range. For the two life fractions that invites *50* for 50%, which is a threshold above maximum
+**Fixed since this pass (#74):** selecting any numerical entry used to open the engine's
+quantity prompt with *From 0 to 1000000*, because `createNumericalOption` was called without a
+range. For the two life fractions that invited *50* for 50%, which is a threshold above maximum
 life and a bot that stops at the first enemy. The number box accepts decimals, so only the
-prompt is wrong.
+range was wrong. The two life fractions now prompt *From 0 to 1* and the three rank ratios
+*From 0 to 10*; the power figures, the enemy count and the delay keep the open range, having no
+natural ceiling. The minimum is enforced too, which it never was — it is `GetQuantity`'s sixth
+argument, after the callback, and was simply never passed. A value already saved outside a
+range is left alone; `Numberbox` bounds on edit, so this changes what can be typed and not what
+is stored.
 
-**Findings.** F10 (done, `hooks/load.lua` wording). F11 (should, `hooks/load.lua`
-`createNumericalOption` calls) — filed, §11.
+**Findings.** F10 (done, `hooks/load.lua` wording). F11 (`hooks/load.lua`
+`createNumericalOption` calls) — filed as #74 and fixed there.
 
 ## 8. Coexistence with the original SkooBot
 
@@ -455,7 +460,7 @@ each, under the game lease; none tainted.
 | F13, F4, F8 | should | `Player.lua` | stop texts in setting keys; cooldown text hedges; condition labels are codes | issue filed |
 | F3 | should | `src/hooks/load.lua` `ToME:runDone` | nothing visible at load on a fresh character | issue filed |
 | F5 | should | `Menu.lua` + `scenario-keybinds.ps1` | *Set Skill Usage* / *Activate/Deactivate…* | issue filed |
-| F11 | should | `src/hooks/load.lua` (ranges) | every option prompts *From 0 to 1000000* | issue filed |
+| F11 | should | `src/hooks/load.lua` (ranges) | every option prompts *From 0 to 1000000* | **fixed** (#74) |
 | F2 | note | engine | the Addons list shows no description | nothing to do |
 | F7 | note | `TalentDialog.lua` | *clear the 0 current rows* on a fresh character | nothing to do |
 | F12 | note | both addons | tooltip *Power Level* twice with both installed | nothing to do |

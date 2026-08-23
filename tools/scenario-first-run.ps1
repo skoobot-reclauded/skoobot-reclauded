@@ -25,7 +25,9 @@
       6. the stop-conditions dialogs: the labels and the WARN / STOP / IGNORE
          choice;
       7. the options tab: every title and description, read back, with the
-         two power titles that read backwards retitled and no shouting;
+         two power titles that read backwards retitled and no shouting; and
+         the range each numerical entry opens with, down to what a player
+         typing 50 into it ends up with (#74);
       8. the first real stop with a suggested loadout applied: the notice
          line, the banner and the popup text;
       9. COEXISTENCE with the original SkooBot, only when game/addons/
@@ -523,6 +525,67 @@ return ("tab=[%s] entries=%d empty=%d shouting=%d ;; %s"):format(found, #out, em
     Check ($op -match 'Normal Enemy Power Ratio = [\d.]+ :: .*multiple of their power level' -and $op -match 'Elite Enemy Power Ratio = [\d.]+ :: .*multiple' -and $op -match 'Boss Enemy Power Ratio = [\d.]+ :: .*multiple') 'each rank ratio says it is a multiple of the power level'
     Check ($op -match 'Low Health Ratio = [\d.]+ :: A fraction of your maximum life') 'the life ratios say they are fractions of maximum life'
     foreach ($line in ($op -split ' ;; ' | Select-Object -Skip 1)) { Note "option: $line" }
+
+    # #74: the range each numerical entry actually opens with, and what a
+    # player typing "50" into it ends up with. Reading the prompt is not
+    # enough -- the prompt was only ever cosmetic; the bound is c_box.min /
+    # c_box.max, and before #74 the minimum was never passed at all.
+    #
+    # The engine clamps on ACCEPT, not while typing: __TEXTINPUT calls
+    # updateText(nil, true) -- no_limits -- so the box holds 50 until Enter
+    # calls updateText(0), which bounds it. Both steps are done here, so the
+    # record shows the value the player sees typed and the value they get.
+    $rg = Probe 'option-ranges' @'
+local GO = require "mod.dialogs.GameOptions"
+local d = GO.new()
+game:registerDialog(d)
+local tab
+for _, t in ipairs(d.c_tabs.tabs) do if tostring(t.title):find("Reclauded") then tab = t end end
+if not tab then game:unregisterDialog(d) return "ERR no SkooBot: Reclauded tab" end
+d:switchTo(tab.kind)
+
+local want = { "Low Health Ratio", "Ignore Damage Above Life Ratio",
+               "Normal Enemy Power Ratio", "Maximum Enemy Power Above Yours", "Action Delay" }
+local out = {}
+for _, title in ipairs(want) do
+  local item
+  for _, it in ipairs(d.list or {}) do
+    if not item and fr.plain(it.name):find(title, 1, true) then item = it end
+  end
+  if not item then
+    out[#out+1] = title .. " MISSING"
+  else
+    item.fct(item)
+    local dlg = game.dialogs[#game.dialogs]
+    local box = dlg and dlg.c_box
+    if not box then
+      out[#out+1] = title .. " NODIALOG"
+    else
+      local prompt = fr.plain(box.title or ""):gsub(":%s*$", "")
+      box.first = false
+      box.tmp = { "5", "0" }
+      box:updateText(nil, true)     -- typing: unclamped, as the engine does it
+      local typed = box.number
+      box:updateText(0)             -- Enter: bounds it
+      out[#out+1] = ("%s prompt=[%s] min=%s max=%s typed=%s accepted=%s"):format(
+        title, prompt, tostring(box.min), tostring(box.max), tostring(typed), tostring(box.number))
+      game:unregisterDialog(dlg)
+    end
+  end
+end
+game:unregisterDialog(d)
+fr.closeAll()
+return table.concat(out, " ;; ")
+'@
+    Check ($rg -match 'Low Health Ratio prompt=\[From 0 to 1\] min=0 max=1 ') 'Low Health Ratio offers 0 to 1, and means it'
+    Check ($rg -match 'Low Health Ratio .* typed=50 accepted=1\b') '...so 50 typed for "50%" becomes 1, not fifty times maximum life'
+    Check ($rg -match 'Ignore Damage Above Life Ratio prompt=\[From 0 to 1\] min=0 max=1 ') 'Ignore Damage Above Life Ratio offers 0 to 1'
+    Check ($rg -match 'Normal Enemy Power Ratio prompt=\[From 0 to 10\] min=0 max=10 ') 'the rank ratios offer 0 to 10'
+    Check ($rg -match 'Normal Enemy Power Ratio .* typed=50 accepted=10\b') '...and clamp to 10'
+    Check ($rg -match 'Maximum Enemy Power Above Yours prompt=\[From 0 to 1000000\].* accepted=50\b') 'the power figures keep the open range, having no natural ceiling'
+    Check ($rg -match 'Action Delay prompt=\[From 0 to 1000000\].* accepted=50\b') 'so does the delay'
+    Check ($rg -notmatch 'MISSING|NODIALOG') 'every probed entry opened its quantity dialog'
+    foreach ($line in ($rg -split ' ;; ')) { Note "range: $line" }
 
     # ----- 8. the first real stop ------------------------------------------
     Write-Host ''
