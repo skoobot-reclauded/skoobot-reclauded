@@ -69,12 +69,17 @@ This asymmetry is the whole point: **movement blocking still grants turns, which
 hangs. Act blocking doesn't.**
 
 What *is* worth surfacing is the aftermath — the "attacked 24 times in a row" case, currently
-only discoverable from a post-mortem of the log. `game.turn` advances by 1000 per game turn,
-so the gap is measurable on the first real turn after it:
+only discoverable from a post-mortem of the log. `game.turn` counts engine ticks, not player
+turns: an actor needs 1000 energy to act and receives 100 per tick (mod/class/Game.lua:80,
+engine/GameEnergyBased.lua), so **it advances by 10 per player turn at normal speed**, more
+slowly for a fast character and faster for a slow one. (An earlier draft of this section said
+1000 per game turn; that is the energy figure, not the tick count, and the harness measured the
+truth — `Assert-Turns -AtLeast 10` is "at least one turn".) The gap is measurable on the first
+real turn after it:
 
 ```lua
 { code = "BLACKOUT", label = "Turns lost while unable to act", default = "WARN",
-  detect = function(p, ctx) return ctx.turnGap > 1 end,
+  detect = function(p, ctx) return ctx.turnGap > 10 end,   -- more than one player turn
   msg    = "lost %d turns while unable to act" }
 ```
 
@@ -83,6 +88,9 @@ That belongs in §2, not §1 — it's information for a decision, not a liveness
 gap.
 
 ### 1.3 Progress invariant, not iteration caps
+
+**Status: built (#13, 2026-08-23).** This section describes what is in
+`src/superload/mod/class/Player.lua`; the regression is `tools/scenario-liveness.ps1`.
 
 v1's hang guard, `Player.lua:857`:
 
@@ -98,33 +106,80 @@ A magic number counting **invocations, not progress**. Three problems:
 - It only counts outer iterations. A spin *inside* one `act()` call is invisible to it.
 - 1000 wasted iterations still happen before it fires.
 
+yura9111's PR to the original — a counter of consecutive `autoExplore()` calls, stopping at
+100 — had the same shape and the same flaws, and was rejected on review for them
+([salvage-yura9111.md](salvage-yura9111.md)). The invocation-count design is now rejected
+twice, once by each of its authors' defect classes.
+
 **Better primitive: did game time advance?** Every bot iteration should consume energy. If
 `game.turn` is unchanged after an iteration, no game time passed — by definition nothing
 happened, whatever the code thinks it did.
 
+What "iteration" means here is fixed by the engine. The per-turn driver, `playerActions()`,
+runs once each time the engine hands the player a turn with the bot active and the player
+neither running nor resting — from the `Player:act` wrapper, or from the `ACTION_DELAY` timer.
+A run or a rest that the bot starts steps *inside* the engine's own `act()` and re-enters the
+driver only when it ends; a nested `act()` the bot itself calls (auto-explore does) re-enters
+it at once, in the same frame. So a spin of any shape — the pinned auto-explore that stops
+without moving and is started again, a talent the game refuses every time, a move that never
+lands — is a sequence of driver entries at one `game.turn`, nested or not.
+
 ```lua
--- Liveness invariant: an iteration that does not advance game.turn did nothing.
--- N consecutive no-ops is a livelock regardless of cause -- including causes
--- not yet imagined, which is the point. Small N, because there is no legitimate
--- reason to burn several iterations on zero game time.
-if game.turn == ctx.lastTurn then
-    ctx.stalled = ctx.stalled + 1
-    if ctx.stalled >= STALL_LIMIT then
-        return aiStop(("#RED#AI stopped: no progress in %d iterations (state: %s)")
-                      :format(ctx.stalled, aiStateString()))
+-- Checked BEFORE the decision, from the second iteration of an activation
+-- on; the first creates the counters. An unchanged game.turn means the
+-- previous iteration spent no game time.
+local act = bot.activation
+if act then
+    act.iterations = act.iterations + 1
+    if game.turn == act.last_turn then
+        act.stalled = act.stalled + 1
+    else
+        act.stalled = 0
+        act.last_turn = game.turn
     end
-else
-    ctx.stalled = 0
+    if act.stalled >= STALL_LIMIT then
+        chan.info("[Liveness] no progress in %d iterations: %s", act.stalled, bot.inspect())
+        return stop(notice.STOPPED, ("no progress in %d iterations (state: %s) -- please report this")
+            :format(act.stalled, aiStateString()))
+    end
 end
+skoobot_act()
 ```
+
+`STALL_LIMIT` is **8**, a named constant with its reasoning beside it. One no-op iteration is
+legitimate — auto-explore refuses to start because something just came into view, and the
+next iteration fights — and nothing legitimate needs more than two; every no-op is a whole
+decision on a frame the player is waiting for, so the limit is small, and eight leaves room
+for a sequence nobody has thought of while still firing inside one keypress. The counters
+live on the activation, so a restart by the player starts them clean.
 
 This catches the general class rather than enumerated instances — the pinned freeze, the
 explore soft-lock, encumbrance, and the next one nobody has hit yet. Capability checks (§1.1)
 remain the cheap early-out that avoids reaching the guard at all; the invariant is the
-backstop that makes "we missed a case" survivable instead of fatal.
+backstop that makes "we missed a case" survivable instead of fatal. `scenario-liveness.ps1`
+proves both halves: with the `never_move` guard bypassed for the bot alone (the engine's own
+`move()` still refuses), the T-012 freeze trips the invariant in eight iterations and zero
+game turns with `SAI_STATE_EXPLORE` in the reason; and a healthy run on the fixture — rest,
+explore, fight, restarted after each legitimate hand-back — advances 1000+ game turns without
+it firing.
+
+**There is no absolute ceiling.** The design's objection to v1 was that a productive run
+tripped a wire meant for a spin; any ceiling on iterations or turns would be that wire again,
+and the progress invariant already bounds the only thing worth bounding. A run that is
+advancing game time is, by the invariant's definition, doing something, and what it is doing
+is the stop conditions' (§2) business, not liveness's.
+
+**`THINK_LIMIT` (25) stays, as the inner guard.** It counts `skoobot_act()` re-entries within
+one iteration — the REST-to-EXPLORE hop when there is nothing to rest for, HUNT-to-EXPLORE,
+FIGHT-to-REST, `checkForAdditionalAction` after a free action — which happen at one
+`game.turn` and are invisible to the invariant until the iteration ends. A productive chain is
+two or three deep; 25 without settling is real spinning inside one decision, and it is caught
+before it can overflow the stack. It measures a different thing from the invariant and does
+not count player turns, so it has neither of v1's flaws.
 
 Reporting the AI state in the stop message turns each trip into a bug report rather than a
-shrug.
+shrug — and the full `inspect()` line goes to `te4_log.txt` through the debug channel (#46) at
+info, so it is there at the default level, while the player is told once by the notice (#58).
 
 ---
 

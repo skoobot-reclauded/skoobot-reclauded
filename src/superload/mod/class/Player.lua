@@ -65,10 +65,39 @@ local STATE_EXPLORE = 11
 local STATE_HUNT    = 12
 local STATE_FIGHT   = 13
 
--- v1: thinkCount > 25 and turnCount > 1000, both invocation counts rather
--- than progress. T-027 replaces them with a progress invariant.
+-- FIXED (#13, T-027). v1 stopped after turnCount > 1000 player acts: an
+-- invocation count, not a measure of progress, so a productive run of a
+-- thousand turns tripped the same wire as a spin ("did it get stuck?"), and
+-- a spin inside one act was invisible to it until a thousand wasted
+-- iterations had passed. yura9111's PR to the original counted auto-explore
+-- calls the same way (salvage-yura9111.md). Both are gone.
+--
+-- The liveness invariant in their place (design-stop-conditions.md 1.3):
+-- an act-loop iteration that did not advance game.turn consumed no game
+-- time and so did nothing, whatever the code believes it did. STALL_LIMIT
+-- consecutive no-ops is a livelock whatever the cause -- the pinned
+-- auto-explore v1 froze on, encumbrance, a talent the game refuses every
+-- time, and the next one nobody has imagined -- and the bot stops with the
+-- AI state in the reason so that every trip is a bug report. There is no
+-- ceiling on a run that is advancing: a productive long run trips nothing.
+--
+-- Why 8. One no-op iteration is legitimate: auto-explore refuses to start
+-- because something just came into view, and the next iteration fights.
+-- Nothing legitimate needs more than two, and every no-op costs a full
+-- decision on a frame the player is waiting for, so the limit is small;
+-- eight leaves room for a sequence nobody has thought of while still
+-- firing inside a single keypress. The counter lives on the activation, so
+-- a restart by the player starts it clean.
+local STALL_LIMIT = 8
+
+-- THINK_LIMIT stays, as the inner guard. It counts skoobot_act() re-entries
+-- within one iteration -- the REST-to-EXPLORE hop when there is nothing to
+-- rest for, HUNT-to-EXPLORE, FIGHT-to-REST, checkForAdditionalAction after
+-- a free action -- which all happen at one game.turn and so are invisible
+-- to the progress invariant until the iteration ends. A productive chain
+-- is two or three deep; 25 without settling is real spinning inside one
+-- decision, and it is caught before it can overflow the stack.
 local THINK_LIMIT = 25
-local TURN_LIMIT  = 1000
 
 -- The runtime table. Transient: none of this is saved with the character.
 local bot = {
@@ -362,7 +391,10 @@ end
 local function activationInit()
     local p = game.player
     return {
-        turnCount = 0,
+        -- #13: the liveness counters. iterations is how many times the
+        -- per-turn driver has run this activation; last_turn is game.turn
+        -- at the last one; stalled is how many in a row found it unchanged.
+        iterations = 0, last_turn = game.turn, stalled = 0,
         unspentTotal = getUnspentTotal(),
         -- #62 (salvage-mishander.md item 8): the tile this activation began
         -- on, so the explore branch can tell the stairs the player toggled the
@@ -1384,12 +1416,14 @@ function bot.inspect()
     local p = game and game.player
     if not p then return "no player" end
     local hostiles = #spotHostiles(p, true)
+    local act = bot.activation
     return ("turn=%s hostiles=%d life=%s/%s air=%s resting=%s running=%s wilderness=%s "
-        .. "active=%s state=%s actions=%d reason=%s"):format(
+        .. "active=%s state=%s actions=%d iterations=%s stalled=%s reason=%s"):format(
         tostring(game.turn), hostiles, tostring(p.life), tostring(p.max_life), tostring(p.air),
         tostring(p.resting ~= nil), tostring(p.running ~= nil),
         tostring(game.zone and game.zone.wilderness or false),
-        tostring(bot.active), aiStateString(), bot.actions, tostring(bot.last_reason))
+        tostring(bot.active), aiStateString(), bot.actions,
+        tostring(act and act.iterations), tostring(act and act.stalled), tostring(bot.last_reason))
 end
 
 -------------------------------------------------------------------------------
@@ -1410,14 +1444,31 @@ local function playerActions()
             stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
             return
         end
-        skoobot_act()
-        if bot.activation then
-            bot.activation.turnCount = bot.activation.turnCount + 1
-            chan.trace("[PlayerActions] that was player act number %d", bot.activation.turnCount)
-            if bot.activation.turnCount > TURN_LIMIT then
-                stop(notice.STOPPED, "acted for " .. TURN_LIMIT .. " turns without handing back -- did it get stuck?")
+        -- #13: the liveness invariant, checked BEFORE the decision so a spin
+        -- is cut at its STALL_LIMITth iteration rather than after it. The
+        -- first iteration of an activation creates the counters inside
+        -- skoobot_act(); from the second on, an unchanged game.turn means
+        -- the previous iteration spent no game time.
+        local act = bot.activation
+        if act then
+            act.iterations = act.iterations + 1
+            if game.turn == act.last_turn then
+                act.stalled = act.stalled + 1
+            else
+                act.stalled = 0
+                act.last_turn = game.turn
+            end
+            chan.trace("[PlayerActions] iteration %d at game turn %d, stalled %d",
+                act.iterations, game.turn, act.stalled)
+            if act.stalled >= STALL_LIMIT then
+                -- The bug report: the full state line, at info so it is in
+                -- te4_log.txt by default; the notice carries the state.
+                chan.info("[Liveness] no progress in %d iterations: %s", act.stalled, bot.inspect())
+                return stop(notice.STOPPED, ("no progress in %d iterations (state: %s) -- please report this"):format(
+                    act.stalled, aiStateString()))
             end
         end
+        skoobot_act()
     end
     if not bot.active and not bot.runonce then
         bot.activation = nil
