@@ -17,7 +17,8 @@
          order plus TURNS_BLACKOUT (#77) after the debuffs -- in
          the saved list and the menu; the liveness entries (CANNOT_MOVE,
          ENCASED) are in the definition list and in neither.
-     0b. BLACKOUT (#77): the fourteenth entry, staged by writing the turn gap
+     0b. BLACKOUT (#77), after the quiet spot is found so nothing is in view:
+         the fourteenth entry, staged by writing the turn gap
          onto the activation -- query mode takes no turn, so the driver that
          computes the gap never runs. A gap of exactly one player turn is not
          a blackout; more than one hands back with "lost N turns while unable
@@ -267,6 +268,7 @@ function cd.blackout(gap)
   b.state = 13
   b.query()
   if not b.activation then return "SETUP no activation after a query" end
+  local primed = tostring(b.last_reason)
   b.activation.from_query = nil
   b.activation.turn_gap = gap
   b.data(p).stopwarn = {}
@@ -274,7 +276,17 @@ function cd.blackout(gap)
   local ld = game.uiset and game.uiset.logdisplay
   local nlog = ld and ld.log and #ld.log or 0
   b.query()
-  return ("BLACKOUT gap=%d dturn=%d reason=%s log=%s"):format(gap, game.turn - before,
+  -- Read the gap BACK off the activation. bot.query() drops one a previous
+  -- query left (`from_query`), and a stop can clear one too, so the number
+  -- the condition saw is not necessarily the number written above -- and a
+  -- dropped activation reads as gap 0, which looks exactly like "no
+  -- blackout" and is the one way this probe can lie. Reported so a failure
+  -- says which it was. Hostiles too: the power conditions are STOP here and
+  -- come before BLACKOUT in the list, so anything wandering in would answer
+  -- with its own reason.
+  local held = b.activation and b.activation.turn_gap
+  return ("BLACKOUT gap=%d held=%s hostiles=%d primed=%s dturn=%d reason=%s log=%s"):format(
+    gap, tostring(held), cd.hostiles(), primed, game.turn - before,
     tostring(b.last_reason), cd.newLog(nlog))
 end
 function cd.describe()
@@ -312,6 +324,9 @@ return "installed"
     $null = Assert-Result $d 'and neither reaches the saved list' -Match 'leaked=\[\]'
     $null = Assert-Result $d "v1's order: DEBUFF_STUNNED first, SCOUTER_CROWDPOWER last" -Match 'first=DEBUFF_STUNNED last=SCOUTER_CROWDPOWER'
 
+    $quiet = Probe 'return tostring(cd.findQuiet())' 120
+    if ($quiet.Result -ne 'true') { Inconclusive 'no spot with nothing in sight and two free grids in a line' }
+
     # ----- BLACKOUT (#77) ---------------------------------------------------
     Write-Host ''
     Write-Host '  --- 0b. BLACKOUT: the turns lost while unable to act'
@@ -322,17 +337,21 @@ return "installed"
     $b1 = Probe 'return cd.blackout(10)'
     Write-Host "  $($b1.Result)"
     $null = Assert-Result $b1 'a gap of exactly one player turn is not a blackout' -Match ' dturn=0 reason=nil'
+    # Singular BEFORE plural. Both hand back, and BLACKOUT is a WARN, so
+    # running them in the other order made the second depend on the first's
+    # acknowledgement being cleared -- which it is, by cd.reset, but that is
+    # a dependency the assertions did not need to carry. (One flake in a full
+    # library run, 2026-08-23; both cases pass alone.)
+    $b3 = Probe 'return cd.blackout(11)'
+    Write-Host "  $($b3.Result)"
+    $null = Assert-Result $b3 'the gap reached the condition intact' -Match ' held=11 hostiles=0 '
+    $null = Assert-Result $b3 'one turn is singular' -Match 'reason=Handed back: lost 1 turn while unable to act'
     $b2 = Probe 'return cd.blackout(35)'
     Write-Host "  $($b2.Result)"
     $null = Assert-Result $b2 'more than one turn hands back' -Match 'reason=Handed back: lost 3 turns while unable to act'
     $null = Assert-Result $b2 'and the player is told in the message log' -Match 'log=.*lost 3 turns while unable to act'
     $null = Assert-Result $b2 'reading it advances no game turn' -Match ' dturn=0 '
-    $b3 = Probe 'return cd.blackout(11)'
-    Write-Host "  $($b3.Result)"
-    $null = Assert-Result $b3 'one turn is singular' -Match 'reason=Handed back: lost 1 turn while unable to act'
 
-    $quiet = Probe 'return tostring(cd.findQuiet())' 120
-    if ($quiet.Result -ne 'true') { Inconclusive 'no spot with nothing in sight and two free grids in a line' }
 
     # ----- 1: pinned, FIGHT, adjacent ------------------------------------------
     Write-Host ''
