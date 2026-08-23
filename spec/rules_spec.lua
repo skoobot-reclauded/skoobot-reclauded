@@ -89,6 +89,18 @@ describe("data/rules.lua", function()
       end
     end)
 
+    -- #67: a blocked flee with nothing under it hands back rather than
+    -- walking at what it was told to run from. Both rows say so, from one
+    -- shared sentence, so a player reading either is told the same thing.
+    it("tells both flee rows what being cornered does (#67)", function()
+      assert.is_string(R.CORNERED_LABEL)
+      assert.is_truthy(R.CORNERED_LABEL:find("cornered", 1, true))
+      for i, a in ipairs(R.ACTIONS) do
+        assert.is_truthy(a.desc:find(R.CORNERED_LABEL, 1, true),
+          "action " .. i .. " does not carry the cornered sentence")
+      end
+    end)
+
     it("describes a flee entry by its fixed prose, and nothing else", function()
       local d = R.describeAction({ action = "flee", from = "strongest", hold = true })
       assert.are.equal("Flee from the strongest hostile", d.name)

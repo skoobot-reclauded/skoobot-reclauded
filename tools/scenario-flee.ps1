@@ -36,6 +36,13 @@
       E. the talent screen. Available lists both flee rows, kind Action;
          "2" on one is refused (Combat only), "1" places it, the pane shows
          the module's prose, and the bot reads it back in the rotation.
+      F. cornered (#67). canMove stubbed to refuse for one decision, so the
+         flee has no step every run rather than when the terrain obliges.
+         With the flee ALONE in Combat the bot must hand back "cornered: no
+         grid farther from <name>, and the rotation is flee only" instead of
+         walking at the thing it was told to run from. With a talent under
+         the flee it must NOT: closing the distance is what brings that
+         talent into range, and that is the player's own instruction.
 
     The four SCOUTER_* conditions are IGNORE for the run (the strong spawn
     would trip them) and put back; the spawns are removed; the save is never
@@ -229,6 +236,48 @@ function fl.stepOnce(from, which)
     d0, d1, tostring(p.x ~= px or p.y ~= py), tostring(p.x == x and p.y == y), actions,
     tostring(h and h.name), tostring(reason))
 end
+-- Part F (#67): cornered. A flee with no step, and nothing under it.
+--
+-- Cornering a character on a real map is terrain luck, so the block is made
+-- deterministic instead: canMove is stubbed to refuse for the length of one
+-- decision, which is exactly what a dead end looks like to fleeStep -- no
+-- neighbour is a candidate, so it reports "no grid farther from <name>".
+-- A measurement may stub the engine like this; the product may not. It is
+-- put back in the same frame, and reported.
+--
+-- Nothing else in the path reads canMove before the stop: caps.move is the
+-- condition list (pinned, dead), not the terrain, and the Astar tail is
+-- BELOW the cornered check.
+function fl.cornered(withTalent)
+  local p = game.player
+  fl.reset()
+  if fl.hostiles() == 0 then return "OUTOFSIGHT" end
+  local r = b.rules.get(p)
+  for _, s in ipairs(b.rules.module.SECTIONS) do
+    local list = r[s]
+    for i = #list, 1, -1 do list[i] = nil end
+  end
+  b.rules.module.place(r, { action = "flee", from = "nearest" }, "Combat")
+  local tid
+  if withTalent then
+    tid = p:knowTalent("T_ATTACK") and "T_ATTACK" or nil
+    if not tid then return "SETUP the fixture does not know Attack" end
+    b.rules.module.place(r, { tid = tid }, "Combat")
+  end
+  local rot = b.rules.rotation()
+
+  local realCanMove = p.canMove
+  p.canMove = function() return false end
+  local ok, err = pcall(function() b.start() end)
+  p.canMove = realCanMove
+
+  local active, reason, actions = b.active, b.last_reason, b.actions
+  if b.active then b.stop("measured") end
+  fl.reset()
+  return ("CORNERED rot=%d talent=%s ok=%s err=%s active=%s actions=%d restored=%s reason=%s"):format(
+    #rot, tostring(tid), tostring(ok), tostring(err), tostring(active), actions,
+    tostring(p.canMove == realCanMove), tostring(reason))
+end
 -- Part B: the hostile looks, then the step is read without acting.
 function fl.dmapStep()
   local p = game.player
@@ -396,6 +445,35 @@ return "installed"
     $strongLines = @($log | Where-Object { $_ -match '\[SKOOBOT\] \[Action\] Fleeing from strong ' })
     Ok ($strongLines.Count -gt 0) 'the log names the strong one as what was fled from'
 
+
+    # ----- F: cornered (#67) -------------------------------------------------
+    Write-Host ''
+    Write-Host '  --- F. a flee with no step, and nothing under it, hands back'
+    # The strong one from part C is still adjacent-ish and in view; that is
+    # all this needs. canMove is stubbed inside the probe so the block is the
+    # same every run instead of depending on the terrain.
+    $f1 = Probe 'return fl.cornered(false)' 60
+    Write-Host "  $($f1.Result)"
+    if ($f1.Result -match '^(OUTOFSIGHT|SETUP)') { Inconclusive $f1.Result }
+    $null = Assert-Result $f1 'the decision did not raise' -Match ' ok=true err=nil '
+    $null = Assert-Result $f1 'the rotation was the flee alone' -Match ' rot=1 talent=nil '
+    $null = Assert-Result $f1 'the bot handed back' -Match ' active=false '
+    $null = Assert-Result $f1 'the reason says cornered, and what there was no step away from' -Match ' reason=cornered: no grid farther from '
+    $null = Assert-Result $f1 'and says the rotation had nothing else in it' -Match 'and the rotation is flee only$'
+    $null = Assert-Result $f1 'canMove was put back' -Match ' restored=true '
+
+    # The other half of the ruling, and the more important regression: with a
+    # talent under the flee, being cornered is "fight when you cannot run",
+    # which is what the player asked for. It must NOT stop.
+    Write-Host ''
+    Write-Host '  --- F (cont.). with a talent under it, cornered fights instead'
+    $f2 = Probe 'return fl.cornered(true)' 60
+    Write-Host "  $($f2.Result)"
+    if ($f2.Result -match '^(OUTOFSIGHT|SETUP)') { Inconclusive $f2.Result }
+    $null = Assert-Result $f2 'the decision did not raise' -Match ' ok=true err=nil '
+    $null = Assert-Result $f2 'the rotation was the flee and a talent' -Match ' rot=2 talent=T_ATTACK '
+    Ok ($f2.Result -notmatch 'reason=cornered') 'it did not hand back as cornered' $f2.Result
+    $null = Assert-Result $f2 'canMove was put back here too' -Match ' restored=true '
     # ----- E: the talent screen ---------------------------------------------
     Write-Host ''
     Write-Host '  --- E. the talent screen lists the flee rows, Combat only'

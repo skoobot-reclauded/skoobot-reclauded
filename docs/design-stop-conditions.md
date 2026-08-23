@@ -466,7 +466,7 @@ The recommendation, with its reasons as strings:
 | posture | when | the FIGHT branch does |
 |---|---|---|
 | `handback` | a flag the player has **not** accepted is set; or the player cannot act or target (§3.1 blocks); or own power is 0; or air is under 25% | stops with the reasons joined — in practice the first case never reaches FIGHT, because the turn-site condition stopped the bot already with the same reason |
-| `retreat` | an accepted single-enemy flag (`individual` or `stronger`), the enemy **not adjacent**, the player able to move, and fewer than `RETREAT_LIMIT` (5) steps already taken in a row — against something as fast as the player a chase holds its distance for ever, and every step is a turn not spent fighting | one flee step from the strongest (#59's `fleeStep`) before the rotation; with no step, the rotation as usual. The activation counts the steps; any other posture starts the count over |
+| `retreat` | an accepted single-enemy flag (`individual` or `stronger`), the enemy **not adjacent**, the player able to move, and fewer than `RETREAT_LIMIT` (5) steps already taken in a row — against something as fast as the player a chase holds its distance for ever, and every step is a turn not spent fighting | one flee step from the strongest -- by the WEIGHTED figure since #80, the same one this table is written in (#59's `fleeStep`) -- before the rotation; with no step, the rotation as usual. The activation counts the steps; any other posture starts the count over |
 | `hold` | an accepted crowd or count flag, and no single-enemy one | the rotation on what is in reach; with nothing in reach, **waits a turn** (`Actor:waitTurn`, a real action for the progress invariant) instead of walking into the crowd |
 | `fight` | nothing over a limit; or the threat is over a limit, accepted, and already adjacent — a step away from something next to you gives it a free hit; or over a limit, accepted, and the player pinned | the rotation, then the approach, as v1 |
 
@@ -502,6 +502,9 @@ counted one is what the terms and the stop reasons carry. Ctrl still shows the c
 - **A non-linear life curve** for own power. The terms are ratios of that figure, so a curve
   there re-tunes every knob under the player; if it comes, it comes with a migration of the
   defaults.
-- **Weighing the strongest for the retreat step by the weighted figure.** `fleeStep` from
-  `strongest` ranks by `bot.power`, the raw heuristic, as #59 documented; with one enemy over
-  the limit it makes no difference, and changing #59's rule is #59's follow-up.
+- ~~**Weighing the strongest for the retreat step by the weighted figure.**~~ **Done (#80).**
+  `fleeTarget` from `strongest` ranked by `bot.power`, the raw heuristic, as #59 documented,
+  while `score.figures.strongest` ranked by the weighted figure and the `retreat` posture
+  fired that very step. It now reads `h.power` — the weighted figure spotHostiles records on
+  every entry — with the same `or 0` and the same nearer-on-tie rule as `score.lua`, so the
+  two cannot pick different enemies.

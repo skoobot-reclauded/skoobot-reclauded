@@ -51,6 +51,14 @@ for _, f in ipairs(M.FLEE_FROM) do FLEE_FROM_SET[f] = true end
 
 -- The built-in actions the talent screen lists beside the character's talents
 -- (#59). Fixed prose: an action has no talent description to show.
+
+-- What a blocked flee does when there is nothing else placed (#67). One
+-- sentence, shared by both rows, so the two cannot drift apart.
+M.CORNERED_LABEL =
+    "A flee does not stop the bot by itself -- unless it is the whole rotation: cornered with no talent "
+ .. "placed below it, the bot hands back saying so rather than walking into the thing it was told to run "
+ .. "from."
+
 M.ACTIONS = {
     { action = "flee", from = "nearest",
       name = "Flee from the nearest hostile",
@@ -58,8 +66,7 @@ M.ACTIONS = {
           .. "grid that hostile has the least sight of -- out of its view if there is one, else simply farther "
           .. "from it. Where the rotation reaches this is when it fires: first in Combat, the character backs away "
           .. "whenever anything is in view; last, it is what the bot does when nothing else can be used. When no "
-          .. "such step exists the rotation moves on as if a talent were on cooldown; a flee never stops the bot "
-          .. "by itself." },
+          .. "such step exists the rotation moves on as if a talent were on cooldown. " .. M.CORNERED_LABEL },
     { action = "flee", from = "strongest",
       name = "Flee from the strongest hostile",
       desc = "One step away from the strongest hostile in view -- the highest COUNTED power, the figure after "
@@ -69,7 +76,7 @@ M.ACTIONS = {
           .. "sight of -- out of its view if there is one, else simply farther from it. Where the rotation "
           .. "reaches this is when it fires. When no such step exists the rotation moves on as if a talent were "
           .. "on cooldown. Both flee rows may be placed: \"from the strongest, failing that from the nearest\" "
-          .. "is a legitimate rotation." },
+          .. "is a legitimate rotation. " .. M.CORNERED_LABEL },
 }
 
 -- What the hold flag means, for the row that carries it (#15). The act loop

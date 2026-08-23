@@ -1166,7 +1166,8 @@ local function SAI_flee(entry, hostiles)
     local x, y, h = fleeStep(entry, hostiles)
     if not x then
         chan.debug("[Combat] [Flee] Not available (%s): %s", tostring(h), tostring(rules.key(entry)))
-        return false
+        -- #67 wants the reason, to say what cornered the character.
+        return false, tostring(h)
     end
     local dir = game.level.map:compassDirection(x - game.player.x, y - game.player.y)
     if bot.do_nothing then
@@ -1579,8 +1580,11 @@ function skoobot_act(noAction)
             bot.state = STATE_REST
             return skoobot_act(true)
         end
-
-        local combatTalents = filterFailedTalents(getCombatRotation())
+        -- #67 needs the rotation as the PLAYER wrote it, not the filtered
+        -- view: whether closing the distance could ever serve a talent is a
+        -- question about the configuration, not about what is on cooldown.
+        local rotation = getCombatRotation()
+        local combatTalents = filterFailedTalents(rotation)
 
         if #combatTalents > 0 then
             local picks = {getLowestHealthEnemy(targets), getNearestHostile()}
@@ -1639,10 +1643,15 @@ function skoobot_act(noAction)
                 tier = {}
                 return false
             end
+            -- #67: what cornered the character, if a flee was tried and had
+            -- nowhere to go. Kept for the fallthrough below.
+            local blockedFlee = nil
             for _, item in ipairs(combatTalents) do
                 if type(item) == "table" then
                     if fireTier() then checkForAdditionalAction() return end
-                    if SAI_flee(item, hostiles) then checkForAdditionalAction() return end
+                    local fled, why = SAI_flee(item, hostiles)
+                    if fled then checkForAdditionalAction() return end
+                    blockedFlee = why or blockedFlee
                 else
                     tier[#tier + 1] = item
                 end
@@ -1651,12 +1660,37 @@ function skoobot_act(noAction)
 
             -- no legal target: get closer -- unless the character cannot
             -- move, in which case the step is impossible and the reason
-            -- names the block (#12); or the posture is to hold (#11), in
+            -- names the block (#12); or a flee was the whole rotation and
+            -- had nowhere to go (#67); or the posture is to hold (#11), in
             -- which case a turn is spent waiting for them to come.
             if caps.move then
                 return stop(notice.CANNOT_ACT, "cannot move (" .. conditions.blockedText(caps.move)
                     .. "), and no Combat talent reaches " .. targets[1].name)
             end
+
+            -- #67: CORNERED. The tail below is v1's -- when no talent fired,
+            -- walk at targets[1] -- and for a rotation of flees alone that
+            -- is a bump attack: the exact opposite of the row the player
+            -- placed. Owner's ruling: stop and say so.
+            --
+            -- Only when the rotation holds NO talent. With one below the
+            -- flee, closing the distance is what brings it into range, and
+            -- "fight when you cannot run" is then what the player asked for
+            -- -- so the tail is right there and is left alone. The question
+            -- is asked of `rotation`, the player's own list, not of
+            -- `combatTalents`: a talent that merely failed this iteration
+            -- still says the player wants to fight when cornered.
+            if blockedFlee then
+                local hasTalent = false
+                for _, item in ipairs(rotation) do
+                    if type(item) ~= "table" then hasTalent = true break end
+                end
+                if not hasTalent then
+                    return stop(notice.CANNOT_ACT, "cornered: " .. blockedFlee
+                        .. ", and the rotation is flee only")
+                end
+            end
+
             if verdict.posture == score.HOLD then
                 SAI_wait(targets[1])
                 checkForAdditionalAction()

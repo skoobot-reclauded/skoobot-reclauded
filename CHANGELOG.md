@@ -106,6 +106,17 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   one part of the figure every power stop ends with, where the limit you set counts as 1, so
   "threat 3" means three times past it. They read as five independent switches before, which
   is what they were until the scored evaluation replaced the flat list.
+- **Cornered with nothing but a flee, the bot hands back** (#67). A rotation of *Flee from…*
+  and nothing else, with no step left to take, used to walk into the thing it had been told to
+  run from — the rotation's tail is "get closer", and with no talent above it that is a bump
+  attack. It now stops with *cornered: no grid farther from …, and the rotation is flee only*.
+  Put any talent under the flee and the old behaviour is back, on purpose: closing the distance
+  is what brings that talent into range, and "fight when you cannot run" is then what you asked
+  for.
+- **"Flee from the strongest" now means the strongest as the bot counts it** (#80). It ranked
+  by the raw power level while every stop reason, the threat score and the tooltip's "counts
+  as" figure used the rank-weighted one. With a rare and a boss in view at once the two
+  disagreed, and the bot could back away from the wrong one.
 
 ### Fixed
 
