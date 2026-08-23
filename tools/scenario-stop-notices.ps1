@@ -293,7 +293,9 @@ return "installed"
         Write-Host "  INFO  inconclusive here ($($s6.Result)); the rendering is covered above"
     } else {
         Check ($s6.Result -match 'reason=Cannot act: no Combat talent is ready') 'the cooldown stop is a CANNOT_ACT notice'
-        Check ($s6.Result -match ('SkooBot: Reclauded menu, ' + [regex]::Escape($menuKey) + '\)')) 'the hint names the menu key that is bound (#57)'
+        # The key may be followed by more hint (#18 added a second clause), so
+        # accept a comma or the closing bracket after it.
+        Check ($s6.Result -match ('SkooBot: Reclauded menu, ' + [regex]::Escape($menuKey) + '[,)]')) 'the hint names the menu key that is bound (#57)'
         Check ($s6.Result -match 'banner=#ORANGE#SkooBot cannot act:') 'orange banner for cannot-act'
         Check ($s6.Result -match 'dturn=0') 'query advanced no game turn'
     }
