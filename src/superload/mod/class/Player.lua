@@ -51,6 +51,7 @@ local _M = loadPrevious(...)
 local power = dofile("/data-skoobot_reclauded/power.lua")
 local air = dofile("/data-skoobot_reclauded/air.lua")
 local rules = dofile("/data-skoobot_reclauded/rules.lua")
+local loadout = dofile("/data-skoobot_reclauded/loadout.lua")
 local notice = dofile("/data-skoobot_reclauded/notice.lua")
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
 
@@ -840,6 +841,75 @@ bot.rules = {
     resolve  = function(p, e) return resolveRule(p or game.player, e) end,
 }
 
+-------------------------------------------------------------------------------
+-- Loadout discovery (#18)
+-------------------------------------------------------------------------------
+
+--- What data/loadout.lua needs to know about one talent: the plain fields
+--- of its definition, with the two function-form fields the engine resolves
+--- against the actor -- cooldown and requires_target -- resolved here, behind
+--- pcall, because a definition can error without a target and one odd talent
+--- must not take the proposal down. `tactical` is passed as it is, function
+--- or table: the module calls a function form itself with this actor and no
+--- target. Object-use talents (the worn item's "Activate" slot) are left to
+--- the talent screen's item rules, which key on the item's name (#55).
+local function loadoutTalent(p, tid, t)
+    local ok, cd = pcall(p.getTalentCooldown, p, t)
+    if not ok or type(cd) ~= "number" then cd = nil end
+    local okr, rt = pcall(p.getTalentRequiresTarget, p, t)
+    if not okr then rt = t.requires_target and true or false end
+    return {
+        tid = tid,
+        name = safeName(p, t),
+        level = p:getTalentLevelRaw(tid) or 0,
+        active = p:isTalentActive(tid) and true or false,
+        t = {
+            mode = t.mode, tactical = t.tactical,
+            no_npc_use = t.no_npc_use, no_dumb_use = t.no_dumb_use,
+            sustain_slots = t.sustain_slots, hide = t.hide,
+            on_pre_use = t.on_pre_use,
+            cooldown = cd, requires_target = rt and true or false,
+        },
+    }
+end
+
+local function proposeLoadout(p)
+    local list = {}
+    for tid, _ in pairs(p.talents) do
+        local t = p:getTalentFromId(tid)
+        if t and not t.is_object_use and p:knowTalent(tid) then
+            list[#list + 1] = loadoutTalent(p, tid, t)
+        end
+    end
+    table.sort(list, function(a, b) return a.tid < b.tid end)
+    local proposal = loadout.discover(list, { self = p })
+    log(("[Loadout] Proposed %d entries, %d unassigned, %d skipped, %d choices"):format(
+        proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices))
+    return proposal
+end
+
+--- Discovery never writes on its own: propose() returns a proposal and
+--- apply() writes one through data/rules.lua, in "merge" (the default: hand
+--- rows untouched, its own rows refreshed) or "replace" (everything cleared
+--- first -- the talent screen confirms before calling with it). The bot's
+--- own rows carry suggested = true; a hand edit in the talent screen clears
+--- the mark, so a re-run never touches a row the player moved.
+bot.loadout = {
+    module   = loadout,
+    propose  = function(p) return proposeLoadout(p or game.player) end,
+    apply    = function(proposal, mode, p)
+        p = p or game.player
+        local report = loadout.apply(proposal, getRules(p), rules, mode)
+        log(("[Loadout] Applied (%s): %d added, %d removed, %d kept"):format(
+            report.mode, report.added, report.removed, report.kept))
+        return report
+    end,
+    unplaced = function(proposal, p)
+        p = p or game.player
+        return loadout.unplaced(proposal, getRules(p), rules)
+    end,
+}
+
 -- TODO (v1): exclude enemies in LOS but not LOE -- cannot Rush over pits, and
 -- someone standing in front of the target blocks a non-piercing attack.
 local function getAvailableTalents(target, talentsToUse)
@@ -1215,8 +1285,11 @@ function skoobot_act(noAction)
             -- everything is on cooldown
             log("[Combat] All Combat talents on cooldown. Waiting.")
             -- #57: the menu key is looked up, not quoted from the default.
+            -- #18: this is the moment a new character hits the blank list, so
+            -- the hint names the way out of it.
             return stop(notice.CANNOT_ACT, "no Combat talent is ready -- none configured, or all on cooldown",
-                { hint = "set talent usage in the SkooBot: Reclauded menu, " .. bot.keyFor("MENU_SKOOBOT_RECLAUDED") })
+                { hint = "set talent usage in the SkooBot: Reclauded menu, " .. bot.keyFor("MENU_SKOOBOT_RECLAUDED")
+                    .. ", or let the bot suggest a loadout from the talent screen" })
         end
     end
 end

@@ -36,6 +36,20 @@
 -- when pressed on an Available row; Shift+Up and Shift+Down reorder it.
 -- Ctrl+Up/Down belong to the list widget itself, which sees every key before
 -- this dialog does (engine/ui/Dialog.lua keyEvent).
+--
+-- SUGGESTED LOADOUTS (#18). The first row of the list, "Suggest a loadout",
+-- carries the count of talents the bot could place that are in no section,
+-- and activating it (Enter or a click) swaps the list for a PROPOSAL built by
+-- data/loadout.lua from the game's own talent metadata: the four sections
+-- with the suggested rows in priority order and the reason for each, then
+-- the talents it would not place and why, then the mutually exclusive
+-- sustain groups it leaves to the player. Nothing is written while the
+-- proposal is shown. Enter on any row offers Merge (the default: add what is
+-- new, keep every row placed by hand), Replace (clear everything first --
+-- confirmed when the current list is not empty) or Cancel; Escape cancels.
+-- Rows the suggestion writes carry `suggested = true`; any hand edit to such
+-- a row here clears the mark, so a later Merge never moves a row the player
+-- touched.
 
 require "engine.class"
 local Dialog = require "engine.ui.Dialog"
@@ -64,7 +78,13 @@ local TUTORIAL = table.concat({
 		"or onto another talent to put it before that one. Keyboard: Enter or the letter opens the actions; " ..
 		"1-4 add (from Available) or move (from a section) the selected talent; 0 or Delete removes it from " ..
 		"its section; Shift+Up/Down reorders it. Sustained talents only go in Sustain.",
+	"Not sure where to start? The first row suggests a loadout from the game's own talent data; nothing " ..
+		"is written until you choose Merge or Replace.",
 }, "\n") .. "\n"
+
+local PROPOSAL_INTRO = "This is a suggestion, read from the game's own talent data: nothing has been written. " ..
+	"Select a row to see why it is placed where it is. Press Enter on any row to choose Merge (add what is new, " ..
+	"keep every row you placed yourself), Replace (clear the current rules first) or Cancel; Escape cancels."
 
 -- Letters a-z, A-Z only: makeKeyChar continues with digits, which are taken.
 local MAX_LETTERS = 52
@@ -73,8 +93,13 @@ function _M:init(actor)
 	self.actor = actor
 	self.R = skoobot_reclauded.rules
 	self.rm = self.R.module
+	self.L = skoobot_reclauded.loadout
 	self.folded = {}
 	self.status_key = {}
+	-- The proposal behind the first row's count. Built once: the talents
+	-- known do not change while the screen is open, and only the rules do.
+	local ok, hint = pcall(self.L.propose, self.actor)
+	self.hint = ok and hint or nil
 	Dialog.init(self, "SkooBot: Reclauded - talent rules", math.max(800, game.w * 0.8), math.max(600, game.h * 0.8))
 
 	local vsep = Separator.new{dir="horizontal", size=self.ih - 10}
@@ -127,7 +152,9 @@ function _M:init(actor)
 		_BACKSPACE = function() self:unassignSelected() end,
 	}
 	self.key:addBinds{
-		EXIT = function() game:unregisterDialog(self) end,
+		EXIT = function()
+			if self.proposal then self:cancelProposal() else game:unregisterDialog(self) end
+		end,
 	}
 end
 
@@ -139,11 +166,20 @@ end
 -- The list
 -------------------------------------------------------------------------------
 
-local function header(section, label, desc, nodes, shown)
+local function header(section, label, desc, nodes, shown, foldkey)
 	return {
 		char="", name=tstring{{"font", "bold"}, label, {"font", "normal"}}, kind="", tree="", used="",
-		desc=desc, nodes=nodes, shown=shown, section=section,
+		desc=desc, nodes=nodes, shown=shown, section=section, foldkey=foldkey,
 		color=function() return colors.simple(section and colors.LIGHT_GREEN or colors.GREY) end,
+	}
+end
+
+--- A row that is an action rather than a rule: the suggest row, the apply row.
+local function actionRow(action, label, desc)
+	return {
+		char="", name=tstring{{"font", "bold"}, label, {"font", "normal"}}, cname=label, kind="", tree="", used="",
+		desc=desc, action=action,
+		color=function() return colors.simple(colors.GOLD) end,
 	}
 end
 
@@ -185,10 +221,28 @@ function _M:row(entry, section, rules)
 	}
 end
 
+--- How many talents the suggestion could place that are in no section.
+function _M:unplacedCount()
+	if not self.hint then return 0 end
+	local ok, list = pcall(self.L.unplaced, self.hint, self.actor)
+	return ok and #list or 0
+end
+
 function _M:generateList()
+	if self.proposal then return self:generateProposalList() end
 	local p, R, rm = self.actor, self.R, self.rm
 	local rules = R.get(p)
 	local tree, chars = {}, {}
+
+	-- #18: the way in for a blank list, carrying the count that says the
+	-- list is behind the character (design #18 item 6.3).
+	local n = self:unplacedCount()
+	local label = n > 0 and ("%d unassigned -- suggest a loadout?"):format(n) or "Suggest a loadout..."
+	tree[#tree + 1] = actionRow("suggest", label,
+		"Suggest a loadout from the game's own talent data: which talents attack, heal, defend, or are kept up. " ..
+		"You see the suggestion first and choose Merge, Replace or Cancel; nothing is written before that." ..
+		(n > 0 and ("\n\n%d talent%s the bot could use %s in no section."):format(n, n == 1 and "" or "s",
+			n == 1 and "is" or "are") or ""))
 
 	for i, section in ipairs(rm.SECTIONS) do
 		local nodes = {}
@@ -225,7 +279,7 @@ function _M:generateList()
 
 	local letter = 1
 	for _, node in ipairs(tree) do
-		for _, item in ipairs(node.nodes) do
+		for _, item in ipairs(node.nodes or {}) do
 			if letter <= MAX_LETTERS then
 				item.char = self:makeKeyChar(letter)
 				chars[item.char] = item
@@ -236,6 +290,180 @@ function _M:generateList()
 
 	self.tree = tree
 	self.chars = chars
+end
+
+-------------------------------------------------------------------------------
+-- The proposal view (#18)
+-------------------------------------------------------------------------------
+
+--- One proposed row: the talent, in the existing columns -- name with its
+--- priority, kind, the reason in the Tree column, the sections it is already
+--- in -- with the full reason and the talent's description on the right.
+function _M:proposalRow(e, placed, rules)
+	local info = self.R.describe(self.actor, {tid=e.tid})
+	local plain = (tostring(info.name):gsub("#[^#]*#", ""))
+	local kind = KIND_LABELS[info.kind] or tostring(info.kind)
+	local inS, used = membership(self.rm, rules, {tid=e.tid})
+	local marks = {}
+	if e.hidden then marks[#marks + 1] = "hidden" end
+	if e.conditional then marks[#marks + 1] = "conditional" end
+	local where = e.section and ("Suggested for %s, priority %d."):format(self.rm.LABELS[e.section], e.priority or 0)
+		or "Not placed."
+	local desc = where .. "\nReason: " .. tostring(e.reason) .. "."
+	if placed then
+		desc = desc .. "\n\nAlready in a section you filled: Merge leaves it where it is; Replace moves it here."
+	end
+	desc = desc .. "\n\n" .. tostring(info.desc)
+	return {
+		char="", cname=plain, kind=kind, used=used, inSections=inS,
+		name=(e.priority and (tostring(e.priority) .. "  ") or "") .. tostring(info.name) ..
+			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or ""),
+		tree=tostring(e.reason), desc=desc, ptid=e.tid, psection=e.section, placed=placed,
+		color=function() return placed and {0x80, 0x80, 0x80} or {0xFF, 0xFF, 0xFF} end,
+	}
+end
+
+function _M:generateProposalList()
+	local P, rm, rules = self.proposal, self.rm, self.R.get(self.actor)
+	local tree, chars = {}, {}
+
+	-- Talents the player has placed by hand anywhere: Merge leaves those alone.
+	local hand = {}
+	for _, s in ipairs(rm.SECTIONS) do
+		for _, e in ipairs(rules[s]) do
+			if e.tid and not e.suggested then hand[e.tid] = true end
+		end
+	end
+
+	tree[#tree + 1] = actionRow("apply", "Apply this suggestion...  (Enter: Merge / Replace / Cancel)", PROPOSAL_INTRO)
+
+	for i, section in ipairs(rm.SECTIONS) do
+		local nodes = {}
+		for _, e in ipairs(P.entries) do
+			if e.section == section then nodes[#nodes + 1] = self:proposalRow(e, hand[e.tid] == true, rules) end
+		end
+		tree[#tree + 1] = header(section, ("%d. %s -- suggested"):format(i, rm.LABELS[section]),
+			rm.DESCRIPTIONS[section] .. "\n\nThe rows below are a suggestion, in the order the bot would try them: " ..
+			"longest cooldown first, so the big hitters fire when they are ready and the rotation falls through " ..
+			"to the fillers.", nodes, true, "proposal:" .. section)
+	end
+
+	local out = {}
+	for _, e in ipairs(P.unassigned) do out[#out + 1] = self:proposalRow(e, false, rules) end
+	for _, e in ipairs(P.skipped) do out[#out + 1] = self:proposalRow(e, false, rules) end
+	tree[#tree + 1] = header(nil, ("Not placed (%d)"):format(#out),
+		"Talents the suggestion leaves out, each with its reason: the game gives no tactical data for it, " ..
+		"marks it as not for an AI, or gives it a role the bot does not have -- escapes, buffs, specials. " ..
+		"Place any of these by hand if you want the bot to use them.", out, #out > 0, "proposal:unassigned")
+
+	local ch = {}
+	for _, c in ipairs(P.choices) do
+		local names = {}
+		for i, tid in ipairs(c.tids) do
+			local info = self.R.describe(self.actor, {tid=tid})
+			names[i] = (tostring(info.name):gsub("#[^#]*#", ""))
+		end
+		ch[#ch + 1] = {
+			char="", cname=c.slot, kind="", tree=tostring(c.reason), used="",
+			name=table.concat(names, " / "),
+			desc=("These %d sustains share the %s slot: only one can be up, and the data gives no reason to prefer " ..
+				"one, so the suggestion places none of them. Put the one you want in Sustain by hand."):format(
+				#c.tids, c.slot),
+			pchoice=c,
+			color=function() return {0xFF, 0xFF, 0xFF} end,
+		}
+	end
+	tree[#tree + 1] = header(nil, ("Your choice (%d)"):format(#ch),
+		"Groups of mutually exclusive sustains -- the chants, the hymns -- where the suggestion places none " ..
+		"and leaves the pick to you.", ch, #ch > 0, "proposal:choices")
+
+	local letter = 1
+	for _, node in ipairs(tree) do
+		for _, item in ipairs(node.nodes or {}) do
+			if letter <= MAX_LETTERS then
+				item.char = self:makeKeyChar(letter)
+				chars[item.char] = item
+				letter = letter + 1
+			end
+		end
+	end
+
+	self.tree = tree
+	self.chars = chars
+end
+
+--- Build a proposal and show it. Nothing is written.
+function _M:suggest()
+	local ok, proposal = pcall(self.L.propose, self.actor)
+	if not ok then
+		self:say("#LIGHT_RED#Could not build a suggestion: " .. tostring(proposal))
+		return false
+	end
+	self.proposal = proposal
+	self.hint = proposal
+	print(("[SKOOBOT] [TalentDialog] suggestion shown: %d entries, %d unassigned, %d skipped, %d choices"):format(
+		proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices))
+	self:refresh()
+	self:selectItem(self.c_list.list[1])
+	self:say(PROPOSAL_INTRO)
+	return true
+end
+
+function _M:cancelProposal()
+	if not self.proposal then return end
+	self.proposal = nil
+	print("[SKOOBOT] [TalentDialog] suggestion cancelled")
+	self:refresh()
+	self:say("Suggestion cancelled. Nothing was written.")
+end
+
+--- Write the shown proposal. `mode` is "merge" or "replace"; Replace asks
+--- first when there is anything to lose.
+function _M:applyProposal(mode)
+	if not self.proposal then return false end
+	local rules = self.R.get(self.actor)
+	local current = self.rm.count(rules)
+	if mode == "replace" and current > 0 and not self.replace_confirmed then
+		local text = ("This clears all %d current rows -- including the ones you placed by hand -- and writes " ..
+			"the %d suggested entries. Merge would keep your rows."):format(current, #self.proposal.entries)
+		local d = Dialog:yesnoLongPopup("Replace the talent rules?", text, 500, function(yes)
+			if yes then
+				self.replace_confirmed = true
+				self:applyProposal("replace")
+				self.replace_confirmed = nil
+			end
+		end, "Replace", "Keep them")
+		-- Enter must not be the destructive answer: focus the safe button.
+		for _, u in ipairs(d.uis or {}) do
+			if u.ui and u.ui.text == "Keep them" then d:setFocus(u.ui) end
+		end
+		return false
+	end
+	local report = self.L.apply(self.proposal, mode, self.actor)
+	self.proposal = nil
+	print(("[SKOOBOT] [TalentDialog] suggestion applied (%s): %d added, %d removed, %d kept"):format(
+		report.mode, report.added, report.removed, report.kept))
+	self:refresh()
+	self:say(("%s: %d added, %d removed, %d left as you placed them."):format(
+		mode == "replace" and "Replaced" or "Merged", report.added, report.removed, report.kept))
+	return true
+end
+
+--- The Merge / Replace / Cancel menu.
+function _M:applyMenu()
+	if not self.proposal then return end
+	local rules = self.R.get(self.actor)
+	local new = #self.L.unplaced(self.proposal, self.actor)
+	local current = self.rm.count(rules)
+	local list = {
+		{name=("Merge: add %d new, keep every row you placed"):format(new),
+			action=function() self:applyProposal("merge") end},
+		{name=("Replace: clear the %d current row%s, write the %d suggested"):format(
+			current, current == 1 and "" or "s", #self.proposal.entries),
+			action=function() self:applyProposal("replace") end},
+		{name="Cancel: write nothing", action=function() end},
+	}
+	game:registerDialog(CustomActionDialog.new("Apply the suggested loadout", list))
 end
 
 --- Rebuild the list after an edit, keeping the rule with key `keep` selected:
@@ -302,7 +530,10 @@ function _M:place(entry, section, before, from)
 		self:say("#LIGHT_RED#" .. tostring(why))
 		return false
 	end
-	local at = self.rm.place(self.R.get(self.actor), entry, section, before, from)
+	local rules = self.R.get(self.actor)
+	local at = self.rm.place(rules, entry, section, before, from)
+	-- A hand edit: the row is the player's now, whoever wrote it (#18).
+	if at and rules[section][at] then rules[section][at].suggested = nil end
 	print(("[SKOOBOT] [TalentDialog] %s -> %s at %s%s"):format(tostring(self.rm.key(entry)), section,
 		tostring(at), from and (" from " .. from) or ""))
 	self:refresh(self.rm.key(entry), section)
@@ -329,13 +560,25 @@ function _M:unassign(entry, section)
 end
 
 function _M:shift(entry, section, delta)
-	local at = self.rm.shift(self.R.get(self.actor), entry, section, delta)
-	if at then self:refresh(self.rm.key(entry), section) end
+	local rules = self.R.get(self.actor)
+	local at = self.rm.shift(rules, entry, section, delta)
+	if at then
+		if rules[section][at] then rules[section][at].suggested = nil end
+		self:refresh(self.rm.key(entry), section)
+	end
 	return at
+end
+
+--- While a proposal is shown there is nothing to edit: say so, once.
+function _M:previewing()
+	if not self.proposal then return false end
+	self:say("This is a suggestion. Press Enter to Merge or Replace it, or Escape to go back, before editing.")
+	return true
 end
 
 --- The digit keys: add from Available, move from a section.
 function _M:moveSelected(section)
+	if self:previewing() then return false end
 	local item = self:selected()
 	if not item or not item.entry then
 		self:say("Select a talent first.")
@@ -346,12 +589,14 @@ function _M:moveSelected(section)
 end
 
 function _M:unassignSelected()
+	if self:previewing() then return false end
 	local item = self:selected()
 	if not item or not item.entry then return false end
 	return self:unassign(item.entry, item.section)
 end
 
 function _M:shiftSelected(delta)
+	if self:previewing() then return nil end
 	local item = self:selected()
 	if not item or not item.entry or not item.section then return nil end
 	return self:shift(item.entry, item.section, delta)
@@ -367,10 +612,19 @@ function _M:use(item, button)
 	if button == "drag-end" then return self:drop(item) end
 	if item.nodes then
 		if button == "right" then return end
-		local k = item.section or AVAILABLE
+		local k = item.foldkey or item.section or AVAILABLE
 		self.folded[k] = not self.folded[k]
 		self.c_list:treeExpand(not self.folded[k], item)
 		return
+	end
+	if item.action == "suggest" then
+		self:selectItem(item)
+		return self:suggest()
+	end
+	if self.proposal then
+		-- Any row of the proposal: the one question there is to answer.
+		self:selectItem(item)
+		return self:applyMenu()
 	end
 	if not item.entry then return end
 	self:selectItem(item)
@@ -418,7 +672,7 @@ end
 --- startDrag) and ignores the rest. The payload remembers where the drag
 --- started: a section (so the drop is a move) or Available (an add).
 function _M:onDrag(item)
-	if not item or not item.entry then return end
+	if self.proposal or not item or not item.entry then return end
 	local cursor
 	local t = item.tid and self.actor:getTalentFromId(item.tid)
 	if t and t.display_entity then
@@ -437,6 +691,11 @@ function _M:drop(item)
 	local drag = game.mouse.dragged
 	local payload = drag and drag.payload
 	if not payload or payload.kind ~= DRAG_KIND or not payload.entry then return end
+	if self.proposal then
+		game.mouse:usedDrag()
+		self:previewing()
+		return
+	end
 	game.mouse:usedDrag()
 	local from = payload.from
 	if item.nodes then
