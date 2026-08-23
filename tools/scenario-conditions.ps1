@@ -272,19 +272,19 @@ function cd.blackout(gap)
   b.activation.from_query = nil
   b.activation.turn_gap = gap
   b.data(p).stopwarn = {}
+  -- The gap as the activation held it just BEFORE the measured decision.
+  -- Read after, it is always nil: a stop clears the activation, so the
+  -- read-back would say "no gap" on exactly the runs where the gap worked.
+  local held = b.activation and b.activation.turn_gap
   local before = game.turn
   local ld = game.uiset and game.uiset.logdisplay
   local nlog = ld and ld.log and #ld.log or 0
   b.query()
-  -- Read the gap BACK off the activation. bot.query() drops one a previous
-  -- query left (`from_query`), and a stop can clear one too, so the number
-  -- the condition saw is not necessarily the number written above -- and a
-  -- dropped activation reads as gap 0, which looks exactly like "no
-  -- blackout" and is the one way this probe can lie. Reported so a failure
-  -- says which it was. Hostiles too: the power conditions are STOP here and
-  -- come before BLACKOUT in the list, so anything wandering in would answer
-  -- with its own reason.
-  local held = b.activation and b.activation.turn_gap
+  -- hostiles and the priming reason are the preconditions worth asserting.
+  -- The power conditions are STOP in this scenario and come before BLACKOUT
+  -- in the list, so anything wandering into view answers with its own reason
+  -- and this probe measures nothing -- which is how it flaked once in a full
+  -- library run, before part 0b was moved after the quiet spot.
   return ("BLACKOUT gap=%d held=%s hostiles=%d primed=%s dturn=%d reason=%s log=%s"):format(
     gap, tostring(held), cd.hostiles(), primed, game.turn - before,
     tostring(b.last_reason), cd.newLog(nlog))
@@ -344,7 +344,7 @@ return "installed"
     # library run, 2026-08-23; both cases pass alone.)
     $b3 = Probe 'return cd.blackout(11)'
     Write-Host "  $($b3.Result)"
-    $null = Assert-Result $b3 'the gap reached the condition intact' -Match ' held=11 hostiles=0 '
+    $null = Assert-Result $b3 'the gap reached the condition intact, on a clear field' -Match ' held=11 hostiles=0 primed=nil '
     $null = Assert-Result $b3 'one turn is singular' -Match 'reason=Handed back: lost 1 turn while unable to act'
     $b2 = Probe 'return cd.blackout(35)'
     Write-Host "  $($b2.Result)"
