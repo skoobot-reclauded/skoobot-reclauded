@@ -329,13 +329,42 @@ local function getUnspentTotal()
 end
 
 local function activationInit()
-    return { turnCount = 0, unspentTotal = getUnspentTotal() }
+    local p = game.player
+    return {
+        turnCount = 0,
+        unspentTotal = getUnspentTotal(),
+        -- #62 (salvage-mishander.md item 8): the tile this activation began
+        -- on, so the explore branch can tell the stairs the player toggled the
+        -- bot on from stairs the bot walked onto. The level is recorded too,
+        -- since the same coordinates on another level are another tile.
+        -- left_start is set by loopInit once the player has been anywhere
+        -- else, and from then on the start tile is just another tile.
+        start_level = game.level, start_x = p.x, start_y = p.y, left_start = false,
+    }
+end
+
+--- Is the player still on the tile this activation began on, never having
+--- left it? (#62, item 8.) False once left_start is set: stairs walked back
+--- onto are stairs walked onto, and a fully explored dead-end level brings
+--- auto-explore back to the stairs it came down by.
+local function onActivationStartTile()
+    local act, p = bot.activation, game.player
+    return act ~= nil and not act.left_start and act.start_level == game.level
+        and act.start_x == p.x and act.start_y == p.y
 end
 
 local function loopInit()
     local loop = {}
     loop.thinkCount = 0
     loop.talentfailed = {}
+
+    -- #62 (item 8): this runs once per real turn, at the position the turn
+    -- starts from, so it sees every tile the player has stood on.
+    local act = bot.activation
+    if act and not act.left_start
+       and (act.start_level ~= game.level or act.start_x ~= game.player.x or act.start_y ~= game.player.y) then
+        act.left_start = true
+    end
 
     log("[Survival] Evaluating life change...")
     loop.delta = game.player.life - (bot.prevloop and bot.prevloop.life or game.player.life)
@@ -1068,7 +1097,18 @@ function skoobot_act(noAction)
             "a glowing chest is nearby -- open it yourself, they can be guarded", notice.HANDED_BACK) then
             return
         end
-        if game.level.map:checkEntity(game.player.x, game.player.y, engine.Map.TERRAIN, "change_level") then
+        -- #62 (salvage-mishander.md item 8). v1 handed back on ANY level-change
+        -- tile, including the stairs the player had just arrived by -- so a
+        -- player who toggles the bot on arrival got "level change found" and
+        -- nothing else, and mishander, who wanted to bind auto-explore to the
+        -- bot entirely, hit it every level. Their fix was a turn counter; this
+        -- is the state it stood in for: the tile the activation started on is
+        -- exempt until the player has left it. Auto-explore itself stops on
+        -- stairs, so the bot still reaches them and hands back there as before
+        -- -- a level change is only ever the player's decision.
+        local onLevelChange = game.level.map:checkEntity(game.player.x, game.player.y,
+            engine.Map.TERRAIN, "change_level")
+        if onLevelChange and not onActivationStartTile() then
             stop(notice.HANDED_BACK, "standing on a level change")
         elseif game.player:attr("never_move") then
             -- FIXED (T-012). v1 called auto-explore while unable to move, which
