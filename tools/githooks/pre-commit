@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Parse, lint and unit-test what is about to be committed.
+# Check the author, then parse, lint and unit-test what is about to be committed.
 #
 # Why this exists at all: v1 leaked four globals, and one of them was a silent
 # behavioural bug -- `if not x == y`, which Lua parses as `(not x) == y`. The
@@ -27,6 +27,54 @@ set -e
 
 say() { printf '[pre-commit] %s\n' "$1"; }
 die() { printf '[pre-commit] %s\n' "$1" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# 0. Author identity.
+#
+# Every commit in this repo is authored by the machine account: the push step
+# refuses any outgoing commit that is not, and a refusal there is a rewrite
+# here, after the fact. Catching it before the commit exists is cheaper and
+# leaves nothing to rewrite. The first eleven commits were made as the owner
+# for exactly this reason -- git fell back to the global identity -- and were
+# rewritten while the repo was still unpushed (#39).
+#
+# `git var GIT_AUTHOR_IDENT` is the author the commit WILL carry, not merely
+# the configured one: `git commit` resolves --author, GIT_AUTHOR_EMAIL in the
+# environment, -c user.email, and an --amend's original author, then exports
+# GIT_AUTHOR_NAME/EMAIL/DATE into this hook's environment before running it,
+# and `git var` reads those first. `git config user.email` is shown alongside
+# so the message can say whether the wrong value came from the configuration
+# or from an override in the environment.
+# ---------------------------------------------------------------------------
+WANT_EMAIL='319607269+skoobot-reclauded-bot@users.noreply.github.com'
+
+AUTHOR_IDENT=$(git var GIT_AUTHOR_IDENT)
+AUTHOR_EMAIL=${AUTHOR_IDENT#*<}
+AUTHOR_EMAIL=${AUTHOR_EMAIL%%>*}
+CONFIG_EMAIL=$(git config user.email || true)
+
+if [ "$AUTHOR_EMAIL" != "$WANT_EMAIL" ]; then
+    if [ "$AUTHOR_EMAIL" = "$CONFIG_EMAIL" ]; then
+        _source="the configured user.email for this checkout."
+    else
+        _source="an override outside the configuration: --author,
+             GIT_AUTHOR_EMAIL in the environment, or an --amend keeping its
+             original author (the configured user.email is '$CONFIG_EMAIL')."
+    fi
+    die "refusing to commit as '${AUTHOR_IDENT%%>*}>'.
+             Every commit here is authored by the machine account, and the push
+             step refuses anything else. The author above came from
+             $_source
+             Fix: in this checkout,
+                 git config user.name  skoobot-reclauded-bot
+                 git config user.email $WANT_EMAIL
+             or rely on the includeIf in the global gitconfig, which applies
+             that identity to any clone or worktree under
+             Documents\\skoobot-reclauded* -- and therefore not to one anywhere
+             else. Then drop the override, if there was one, and commit again.
+             Escape hatch, for a genuine emergency only: git commit --no-verify"
+fi
+say "author is the machine account"
 
 # Resolve a tool, allowing for Windows launchers.
 #
