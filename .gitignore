@@ -13,3 +13,9 @@ luacov.*.out
 *.swp
 Thumbs.db
 desktop.ini
+
+# Credentials never belong here. The vault (.kdbx) and its DPAPI-wrapped key
+# (.dpapi) live outside the repo by procedure; this is belt and braces, so a
+# stray copy cannot be staged by a glob either (#40).
+*.kdbx
+*.dpapi
