@@ -76,17 +76,40 @@ describe("data/rules.lua", function()
     end)
   end)
 
-  describe("the built-in actions (#59)", function()
-    it("lists a flee from the nearest and from the strongest, each with fixed prose", function()
-      assert.are.equal(2, #R.ACTIONS)
+  describe("the built-in actions (#59, #69)", function()
+    it("lists three flee rows, each with fixed prose", function()
+      assert.are.equal(3, #R.ACTIONS)
       assert.are.same({ "nearest", "strongest" }, R.FLEE_FROM)
       for i, a in ipairs(R.ACTIONS) do
         assert.are.equal("flee", a.action)
-        assert.are.equal(R.FLEE_FROM[i], a.from)
+        assert.is_truthy(R.isAction(a), "row " .. i .. " is not a placeable action")
         assert.is_string(a.name)
         assert.is_string(a.desc)
         assert.is_true(#a.desc > 40)
       end
+      assert.are.equal("nearest", R.ACTIONS[1].from)
+      assert.are.equal("strongest", R.ACTIONS[2].from)
+      -- #69: the keep-sight row is the plain `nearest` step with a filter,
+      -- not a third `from` -- so a "keep sight from the strongest" row later
+      -- needs no new `from` value and no migration.
+      assert.are.equal("nearest", R.ACTIONS[3].from)
+      assert.is_true(R.ACTIONS[3].keep_los)
+      assert.is_nil(R.ACTIONS[1].keep_los)
+      assert.is_nil(R.ACTIONS[2].keep_los)
+    end)
+
+    -- #69: keep_los is part of the IDENTITY, unlike `hold` (#15), which is a
+    -- flag on a placement. The two nearest-flee rows must be different
+    -- rules, or placing one would silently be placing the other -- and both
+    -- in one rotation ("keep sight, failing that break it") is the point.
+    it("keys the keep-sight flee apart from the plain one (#69)", function()
+      local plain = { action = "flee", from = "nearest" }
+      local los   = { action = "flee", from = "nearest", keep_los = true }
+      assert.are.equal("action:flee:nearest", R.key(plain))
+      assert.are.equal("action:flee:nearest:los", R.key(los))
+      assert.is_false(R.same(plain, los))
+      -- `hold`, by contrast, is not identity: same rule, different placement.
+      assert.is_true(R.same(plain, { action = "flee", from = "nearest", hold = true }))
     end)
 
     -- #67: a blocked flee with nothing under it hands back rather than
@@ -107,6 +130,13 @@ describe("data/rules.lua", function()
       assert.are.equal(R.ACTIONS[2].desc, d.desc)
       assert.are.equal("Flee from the nearest hostile", R.describeAction({ action = "flee", from = "nearest" }).name)
       assert.is_nil(R.describeAction({ tid = "T_RUSH" }))
+      -- #69: the keep-sight row must not be described as the plain one.
+      -- They share `from`, so a match on action+from alone would return
+      -- whichever came first in ACTIONS and put the wrong prose on the pane.
+      local los = R.describeAction({ action = "flee", from = "nearest", keep_los = true })
+      assert.are.equal("Flee but keep sight", los.name)
+      assert.are.equal(R.ACTIONS[3].desc, los.desc)
+      assert.are_not.equal(los.desc, R.describeAction({ action = "flee", from = "nearest" }).desc)
       assert.is_nil(R.describeAction({ action = "flee", from = "weakest" }))
     end)
 
@@ -123,6 +153,11 @@ describe("data/rules.lua", function()
       assert.are_not.equal(R.ACTIONS[1], e)
       e.hold = true
       assert.is_nil(R.ACTIONS[1].hold)
+      -- #69: and it carries keep_los, or a placed row would lose the very
+      -- thing that makes it a different rule.
+      local l = R.actionEntry(R.ACTIONS[3])
+      assert.are.same({ action = "flee", from = "nearest", keep_los = true }, l)
+      assert.are_not.equal(R.ACTIONS[3], l)
     end)
   end)
 

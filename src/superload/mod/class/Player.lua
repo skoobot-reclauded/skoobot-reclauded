@@ -1174,6 +1174,18 @@ end
 --- the farther grid, then to the first in the engine's direction order.
 --- A character who cannot move (never_move: pinned, held, overloaded) has no
 --- step; attempting the impossible is the liveness bug T-012 fixed.
+---
+--- #69: with `keep_los` set, only neighbours that still have line of sight to
+--- that hostile are candidates -- the shape of the engine's own
+--- `aiCanFleeDmapKeepLos` (mod/class/interface/ActorAI.lua; Nicolas
+--- Casalini, GPL-3.0), which is what a ranged character wants: back off and
+--- keep shooting, where the plain flee happily steps behind a tree and
+--- wastes the turn if the next row is a bolt. Everything else is unchanged,
+--- so the same "least seen, then farthest" rule picks among the grids that
+--- qualify -- the LOS test is a filter on the candidates, not a different
+--- preference. The engine's version skips its own canMove check when the
+--- grid is one the hostile has never looked at; this does not, because a
+--- grid the player cannot enter is not a step whoever has seen it.
 local function fleeStep(entry, hostiles)
     local p = game.player
     if not p.x then return nil, nil, "no position" end
@@ -1181,12 +1193,13 @@ local function fleeStep(entry, hostiles)
     local h = fleeTarget(entry, hostiles)
     if not h then return nil, nil, "no hostile in view" end
     local a = h.actor
+    local keepLos = entry.keep_los and true or false
     local here = a.distanceMap and a:distanceMap(p.x, p.y) or nil
     local hereDist = core.fov.distance(p.x, p.y, a.x, a.y)
     local bx, by, bmap, bdist
     for _, dir in ipairs(util.adjacentDirs()) do
         local sx, sy = util.coordAddDir(p.x, p.y, dir)
-        if p:canMove(sx, sy) then
+        if p:canMove(sx, sy) and (not keepLos or p:hasLOS(a.x, a.y, nil, nil, sx, sy)) then
             local dist = core.fov.distance(sx, sy, a.x, a.y)
             local cmap, better
             if here then
@@ -1210,7 +1223,10 @@ local function fleeStep(entry, hostiles)
             end
         end
     end
-    if not bx then return nil, nil, "no grid farther from " .. tostring(h.name) end
+    if not bx then
+        return nil, nil, "no grid farther from " .. tostring(h.name)
+            .. (keepLos and " that keeps it in sight" or "")
+    end
     return bx, by, h
 end
 

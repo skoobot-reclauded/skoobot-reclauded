@@ -25,6 +25,13 @@
          (NPC:doFOV), so its map now has a value for our grid; the step must
          then go to a grid whose value is lower than ours or absent, and --
          starting adjacent -- never to another grid adjacent to the hostile.
+     B2. keep sight (#69). From the same spot, the plain step and the
+         keep-sight step read side by side. The keep-sight one must leave the
+         hostile in line of sight and must still increase the distance -- or,
+         if no such grid exists, say which of the two kinds of "no step" that
+         was. The plain step is deliberately NOT required to break sight: on
+         open ground the two agree, and demanding a difference would be
+         demanding a tree.
       C. strongest. A fresh quiet spot; a weak hostile on one side and a
          strong one (+500 armour: power.level reads combat_armor directly)
          on the other, both adjacent, flee-from-strongest in Combat. The one
@@ -33,7 +40,8 @@
       D. query mode. The same setup through bot.query(), run BEFORE C's act
          while the geometry is known: the message log must read "AI would
          flee from <strong> to the <direction>" and no game.turn may pass.
-      E. the talent screen. Available lists both flee rows, kind Action;
+      E. the talent screen. Available lists all three flee rows, kind Action
+         ("Flee but keep sight" is #69's);
          "2" on one is refused (Combat only), "1" places it, the pane shows
          the module's prose, and the bot reads it back in the rotation.
       F. cornered (#67). canMove stubbed to refuse for one decision, so the
@@ -54,7 +62,7 @@
     Run:
         powershell -ExecutionPolicy Bypass -File .\tools\scenario-flee.ps1
 
-    #59, #27.
+    #59, #67, #69, #80, #27.
 #>
 [CmdletBinding()]
 param(
@@ -236,6 +244,26 @@ function fl.stepOnce(from, which)
     d0, d1, tostring(p.x ~= px or p.y ~= py), tostring(p.x == x and p.y == y), actions,
     tostring(h and h.name), tostring(reason))
 end
+-- Part G (#69): the keep-sight step, read without acting, beside the plain
+-- one from the same spot. The guarantee under test is one-directional --
+-- the keep-sight step ALWAYS leaves the hostile in sight, where the plain
+-- one may or may not -- so that is what is asserted; on open ground the two
+-- often agree, and requiring them to differ would be requiring a tree.
+function fl.losStep()
+  local p = game.player
+  local m = fl.spawned[1]
+  fl.reset()
+  if fl.hostiles() == 0 then return "OUTOFSIGHT" end
+  local d0 = fl.dist(p, m.x, m.y)
+  local ax, ay, ah = b.rules.flee({ action = "flee", from = "nearest" })
+  local lx, ly, lh = b.rules.flee({ action = "flee", from = "nearest", keep_los = true })
+  local function seen(x, y) return (x and p:hasLOS(m.x, m.y, nil, nil, x, y)) and true or false end
+  local function far(x, y) return x and core.fov.distance(x, y, m.x, m.y) or -1 end
+  return ("LOSSTEP d0=%d | plain=%s,%s plainseen=%s plaind=%d plainwhy=%s | los=%s,%s losseen=%s losd=%d loswhy=%s"):format(
+    d0,
+    tostring(ax), tostring(ay), tostring(seen(ax, ay)), far(ax, ay), tostring(ax and "-" or ah),
+    tostring(lx), tostring(ly), tostring(seen(lx, ly)), far(lx, ly), tostring(lx and "-" or lh))
+end
 -- Part F (#67): cornered. A flee with no step, and nothing under it.
 --
 -- Cornering a character on a real map is terrain luck, so the block is made
@@ -394,6 +422,27 @@ return "installed"
         Ok ($d0 -eq 1 -and $d1 -ge 2) "starting adjacent, the step never lands next to the hostile (d0=$d0 d1=$d1)"
     }
 
+
+    # ----- B2: keep sight (#69) ---------------------------------------------
+    Write-Host ''
+    Write-Host '  --- B2. the keep-sight step leaves the hostile in view'
+    $g = Probe 'return fl.losStep()' 60
+    Write-Host "  $($g.Result)"
+    if ($g.Result -match '^(OUTOFSIGHT|SETUP)') { Inconclusive $g.Result }
+    if ($g.Result -match 'los=nil,nil') {
+        # No LOS-keeping step from this spot is a legitimate answer, and the
+        # reason must say which of the two kinds of "no step" it was.
+        $null = Assert-Result $g 'when there is no keep-sight step, the reason says so' -Match 'loswhy=no grid farther from [^|]*that keeps it in sight'
+        Note "no keep-sight step available from this spot: $($g.Result)"
+    } else {
+        $null = Assert-Result $g 'the keep-sight step keeps the hostile in sight' -Match ' losseen=True '
+        $null = Assert-Result $g 'and is still a step AWAY, not merely a step' -Match 'd0=(\d+) .*losd=(\d+)'
+        $m0 = [regex]::Match($g.Result, 'd0=(\d+)'); $ml = [regex]::Match($g.Result, 'losd=(\d+)')
+        Ok ([int]$ml.Groups[1].Value -gt [int]$m0.Groups[1].Value) 'the keep-sight step increases the distance' $g.Result
+    }
+    # The plain step is deliberately NOT required to break sight: on open
+    # ground the two agree, and demanding a difference would be demanding a
+    # tree. The guarantee is one-directional and that is what is asserted.
     # ----- C: strongest ------------------------------------------------------
     Write-Host ''
     Write-Host '  --- C. flee from the strongest: away from the one with the power'
@@ -514,8 +563,8 @@ end)
 return ok and res or ("ERR " .. tostring(res))
 '@
     Write-Host "  $($open.Result)"
-    $null = Assert-Result $open 'Available lists both flee rows' -Match 'rows=2 names=\[Flee from the nearest hostile\|Flee from the strongest hostile\]'
-    $null = Assert-Result $open 'their kind is Action, and they come last' -Match 'kinds=\[Action\|Action\] lastkind=Action'
+    $null = Assert-Result $open 'Available lists all three flee rows, sorted by name' -Match 'rows=3 names=\[Flee but keep sight\|Flee from the nearest hostile\|Flee from the strongest hostile\]'
+    $null = Assert-Result $open 'their kind is Action, and they come last' -Match 'kinds=\[Action\|Action\|Action\] lastkind=Action'
 
     $screen = Probe @'
 local ok, res = pcall(function()

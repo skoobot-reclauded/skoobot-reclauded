@@ -129,6 +129,12 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   about to lapse on — which cost the rotation a turn and bought nothing. The bot now reads how
   long each impairment has left. It still errs toward holding: an impairment it cannot trace to
   a live effect, or one with several sources, is treated as lasting.
+- **A third flee row: "Flee but keep sight"** (#69). For a character who fights at range. The
+  plain flee takes the neighbouring grid the hostile has least sight of, which happily means
+  stepping behind a tree — a wasted turn if the next row in the rotation is a bolt. This one
+  considers only grids that still have line of sight to that hostile, and picks among them by
+  the same rule. It is its own row, so it can sit above a plain flee: keep sight if you can,
+  break it if you must.
 
 ### Fixed
 

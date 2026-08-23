@@ -39,11 +39,12 @@
 -- does (engine/ui/Dialog.lua keyEvent). Letters are all taken by the rows
 -- (a-z, A-Z), which is why the hold key is Space rather than a letter.
 --
--- BUILT-IN ACTIONS (#59). Available also lists the two flee rows -- "Flee
--- from the nearest hostile", "Flee from the strongest hostile" -- from
--- data/rules.lua's ACTIONS. They place like a talent, into Combat only
--- (rules.allowed typing), both may be placed, and their description is the
--- module's fixed prose.
+-- BUILT-IN ACTIONS (#59, #69). Available also lists the three flee rows --
+-- "Flee but keep sight", "Flee from the nearest hostile", "Flee from the
+-- strongest hostile" -- from data/rules.lua's ACTIONS, taken generically, so
+-- a fourth needs nothing here. They place like a talent, into Combat only
+-- (rules.allowed typing), any of them may be placed, and their description
+-- is the module's fixed prose.
 --
 -- HOLD WHILE IMPAIRED (#15). A Combat row carries a per-placement flag,
 -- `hold = true`, shown in the Kind column and described in the pane; the bot

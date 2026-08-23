@@ -24,9 +24,10 @@
 -- An entry is {tid = "T_..."} for a talent, {object = "<item name>"} for an
 -- activatable item -- items are keyed by name, the way ToME's own inventory
 -- hotkeys are, because their talent id is a rotating slot (#55) -- or
--- {action = "flee", from = "nearest" | "strongest"} for a built-in action
--- (#59): a move the bot itself knows, placed in the rotation like a talent,
--- with `from` as its one parameter. The kind is discriminated by which field
+-- {action = "flee", from = "nearest" | "strongest", keep_los = true?} for a
+-- built-in action (#59, #69): a move the bot itself knows, placed in the
+-- rotation like a talent, with `from` as its one parameter and `keep_los`
+-- as a variant of the step. The kind is discriminated by which field
 -- is set, so a later built-in action needs no migration either. Order within
 -- a section IS priority: the first entry is tried first. A rule appears at
 -- most once in a section, but may be in several sections -- a healing
@@ -77,6 +78,15 @@ M.ACTIONS = {
           .. "reaches this is when it fires. When no such step exists the rotation moves on as if a talent were "
           .. "on cooldown. Both flee rows may be placed: \"from the strongest, failing that from the nearest\" "
           .. "is a legitimate rotation. " .. M.CORNERED_LABEL },
+    { action = "flee", from = "nearest", keep_los = true,
+      name = "Flee but keep sight",
+      desc = "One step away from the nearest hostile in view that still leaves it in sight, then the turn ends. "
+          .. "For a character who fights at range: the plain flee happily steps behind a tree, which is a wasted "
+          .. "turn if the next thing in the rotation is a bolt. Among the neighbouring grids that keep line of "
+          .. "sight to that hostile, the one it has the least sight of wins, the same rule the other two use -- so "
+          .. "this backs away along the open ground rather than out of the fight. When no such step exists the "
+          .. "rotation moves on as if a talent were on cooldown; place a plain flee under this one to break sight "
+          .. "as a second choice. " .. M.CORNERED_LABEL },
 }
 
 -- What the hold flag means, for the row that carries it (#15). The act loop
@@ -121,20 +131,29 @@ function M.isAction(entry)
 end
 
 --- The identity of an entry: what makes two entries the same rule.
--- @return a string, or nil for anything that is not a rule
+--- @return a string, or nil for anything that is not a rule
 function M.key(entry)
     if type(entry) ~= "table" then return nil end
     if type(entry.tid) == "string" and entry.tid ~= "" then return "tid:" .. entry.tid end
     if type(entry.object) == "string" and entry.object ~= "" then return "object:" .. entry.object end
-    if M.isAction(entry) then return "action:" .. entry.action .. ":" .. entry.from end
+    -- #69: keep_los is part of the IDENTITY, unlike `hold` (#15), which is a
+    -- flag on a placement. "Flee but keep sight" is its own row in Available
+    -- and may sit in the rotation alongside the plain flee -- keep sight
+    -- first, break it as a second choice -- so the two must not key alike.
+    if M.isAction(entry) then
+        return "action:" .. entry.action .. ":" .. entry.from .. (entry.keep_los and ":los" or "")
+    end
     return nil
 end
 
 --- The fixed name and description of a built-in action, or nil.
 function M.describeAction(entry)
     if not M.isAction(entry) then return nil end
+    local los = entry.keep_los and true or false
     for _, a in ipairs(M.ACTIONS) do
-        if a.action == entry.action and a.from == entry.from then return a end
+        if a.action == entry.action and a.from == entry.from and (a.keep_los and true or false) == los then
+            return a
+        end
     end
     return nil
 end
@@ -142,7 +161,7 @@ end
 --- A fresh entry for a built-in action row: a copy, never the table in
 --- M.ACTIONS, so a placement can carry its own fields.
 function M.actionEntry(a)
-    return { action = a.action, from = a.from }
+    return { action = a.action, from = a.from, keep_los = a.keep_los or nil }
 end
 
 function M.same(a, b)
