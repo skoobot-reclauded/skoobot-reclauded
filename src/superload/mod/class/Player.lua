@@ -46,6 +46,12 @@
 --   levels, off below info by default, one "[SKOOBOT]" channel into
 --   te4_log.txt and warnings into the message log. v1's print() on every
 --   thought is the trace level now.
+-- * The stop conditions are one list in data/conditions.lua (#12): code,
+--   label, default, detector, site, message and what it blocks, walked by
+--   one loop here. v1's DEFAULT_CONDITIONS table and its checkForDebuffs /
+--   checkPowerLevel if-chains are gone, with their `== 1` tests; the act
+--   loop consults what the detected conditions block (move / act / target)
+--   so "cannot move but can act" has a defined response in every state.
 
 local Astar = require "engine.Astar"
 local KeyBind = require "engine.KeyBind"
@@ -59,6 +65,7 @@ local loadout = dofile("/data-skoobot_reclauded/loadout.lua")
 local notice = dofile("/data-skoobot_reclauded/notice.lua")
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
 local logm = dofile("/data-skoobot_reclauded/log.lua")
+local conditions = dofile("/data-skoobot_reclauded/conditions.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -168,39 +175,11 @@ bot.data = data
 
 -------------------------------------------------------------------------------
 -- Stop conditions (v1 getStopConditionList & co.)
+--
+-- The list itself -- codes, labels, defaults, detectors, what each blocks --
+-- is data/conditions.lua (#12). This section only keeps the save in step
+-- with it and reads the player's WARN/STOP/IGNORE choice back.
 -------------------------------------------------------------------------------
-
-local DEFAULT_CONDITIONS = {
-    {label="Debuff: STUNNED",           code="DEBUFF_STUNNED",        stoptype="WARN"},
-    {label="Debuff: CONFUSED",          code="DEBUFF_CONFUSED",       stoptype="WARN"},
-    {label="Debuff: DAZED",             code="DEBUFF_DAZED",          stoptype="WARN"},
-    {label="Debuff: FROZEN",            code="DEBUFF_FROZEN",         stoptype="WARN"},
-    {label="Debuff: ASLEEP",            code="DEBUFF_ASLEEP",         stoptype="WARN"},
-
-    {label="Life: BIGLOSS",             code="LIFE_BIGLOSS",          stoptype="WARN"},
-    {label="Life: LOWLIFE",             code="LIFE_LOWLIFE",          stoptype="STOP"},
-
-    {label="Dialog: LORE",              code="DIALOG_LORE",           stoptype="IGNORE"},
-
-    {label="Terrain: Glowing Chest",    code="TERRAIN_GLOWING_CHEST",  stoptype="WARN"},
-
-    {label="Power Level: ENEMYCOUNT",   code="SCOUTER_ENEMYCOUNT",    stoptype="STOP"},
-    {label="Power Level: BIGENEMY",     code="SCOUTER_BIGENEMY",      stoptype="STOP"},
-    {label="Power Level: STRONGERENEMY",code="SCOUTER_STRONGERENEMY", stoptype="STOP"},
-    {label="Power Level: CROWDPOWER",   code="SCOUTER_CROWDPOWER",    stoptype="STOP"},
-}
-
-local STOPTYPES = { WARN = true, STOP = true, IGNORE = true }
-
--- True when a saved list is exactly this version's conditions, in order.
-local function stopListIsCurrent(list)
-    if #list ~= #DEFAULT_CONDITIONS then return false end
-    for i, c in ipairs(DEFAULT_CONDITIONS) do
-        local v = list[i]
-        if type(v) ~= "table" or v.code ~= c.code or v.label ~= c.label then return false end
-    end
-    return true
-end
 
 -- FIXED (T-019). v1 wrote the list to the save once and never looked at it
 -- again, so a character never gained a condition added later and never lost
@@ -208,11 +187,11 @@ end
 -- caller that indexed it. v1 got away with that by never adding a condition;
 -- the port's first one, TERRAIN_GLOWING_CHEST (T-013), is consulted on every
 -- explore decision and took down every character created before it. The
--- saved list is now reconciled with DEFAULT_CONDITIONS whenever it differs:
--- same codes in the same order with fresh labels, keeping the user's
--- WARN/STOP/IGNORE choice wherever the code survives. Rebuilt in place, so
--- anything already holding the table sees the result. What the defaults
--- SHOULD be is T-026's question; this only keeps a save in step with them.
+-- saved list is now reconciled with the policy entries of conditions.LIST
+-- whenever it differs (conditions.reconcile): same codes in the same order
+-- with fresh labels, keeping the user's WARN/STOP/IGNORE choice wherever the
+-- code survives. Rebuilt in place, so anything already holding the table
+-- sees the result.
 local function getStopConditionList(p)
     local d = data(p)
     local list = d.stopconditions
@@ -220,17 +199,7 @@ local function getStopConditionList(p)
         list = {}
         d.stopconditions = list
     end
-    if not stopListIsCurrent(list) then
-        local chosen = {}
-        for _, v in ipairs(list) do
-            if type(v) == "table" and v.code and STOPTYPES[v.stoptype] then
-                chosen[v.code] = v.stoptype
-            end
-        end
-        for i = #list, 1, -1 do list[i] = nil end
-        for i, c in ipairs(DEFAULT_CONDITIONS) do
-            list[i] = {label=c.label, code=c.code, stoptype=chosen[c.code] or c.stoptype}
-        end
+    if conditions.reconcile(list) then
         chan.info("[StopConditions] Reconciled the saved stop-condition list with this version's %d conditions",
             #list)
     end
@@ -239,7 +208,7 @@ end
 
 -- FIXED (T-019). v1 returned nil for an unknown code and every caller indexed
 -- it. After reconciliation an unknown code can only be a programming error (a
--- lookup with no DEFAULT_CONDITIONS entry), so it fails closed: the bot treats
+-- lookup with no conditions.LIST entry), so it fails closed: the bot treats
 -- it as STOP, and the log names the code so the entry gets added.
 local function getStopCondition(p, code)
     for index, v in ipairs(getStopConditionList(p)) do
@@ -256,10 +225,19 @@ local function setStopCondition(p, code, stoptype)
     return true
 end
 
+local conditionContext   -- defined with the checks below
+
 bot.conditions = {
+    module = conditions,
     list = function() return getStopConditionList(game.player) end,
     get  = function(code) return getStopCondition(game.player, code) end,
     set  = function(code, stoptype) return setStopCondition(game.player, code, stoptype) end,
+    --- What the character cannot do right now (move / act / target), for
+    --- the harness: conditions.capabilities over the live player.
+    capabilities = function(p)
+        p = p or game.player
+        return conditions.capabilities(p, conditionContext(p, 0))
+    end,
 }
 
 -------------------------------------------------------------------------------
@@ -448,12 +426,15 @@ local function loopInit()
     if math.abs(loop.delta) > 0 then
         chan.debug("[Survival] Delta detected! = %s", loop.delta)
     end
-    if (loop.delta < 0) and (math.abs(loop.delta) / game.player.max_life >= cfg("LOWHEALTH_RATIO") / 2) then
+    -- LIFE_BIGLOSS is the one condition read here, at the loop site, because
+    -- the delta is computed here (#12). tryStop, not checkStop, as v1 had it:
+    -- a WARN fires on every big-loss turn rather than once.
+    local big = conditions.find("LIFE_BIGLOSS")
+    local ctx = { delta = loop.delta, cfg = cfg }
+    if big.detect(game.player, ctx) then
         -- v1: a stop here returns nil from the initialiser, leaving the loop
         -- table nil; the caller checks for that.
-        if tryStop(game.player, "LIFE_BIGLOSS", "lost more than "
-            .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 2)
-            .. "% of max life in one turn (half of LOWHEALTH_RATIO)") then return end
+        if tryStop(game.player, big.code, conditions.message(big, game.player, ctx)) then return end
     end
     return loop
 end
@@ -1238,63 +1219,49 @@ local function ownPowerLevel(p)
     return power.level(p, p.global_speed) * fraction
 end
 
-local function checkPowerLevel()
+--- What the condition detectors are given besides the player (#12): the
+--- hostile count, the loop scratch with the rank-weighted enemy figures
+--- (#62), the life-scaled own power, the settings, and the chest scan for
+--- the explore site. Built once per decision.
+function conditionContext(p, hostiles)
+    return {
+        hostiles    = hostiles,
+        loop        = bot.loop,
+        own         = ownPowerLevel(p),
+        cfg         = cfg,
+        chestInView = glowingChestInView,
+    }
+end
+
+--- One loop over the condition list for a site (#12), replacing v1's
+--- checkForDebuffs / checkPowerLevel if-chains and the explore branch's own
+--- checks: every policy entry with a detector is evaluated, in the list's
+--- order, and the first that fires under its WARN/STOP/IGNORE policy stops
+--- the bot. checkStop sees the ones that did not fire too, so a WARN
+--- re-arms when its condition clears. FIXED on the way (T-001, #12): v1
+--- tested the status attributes with `== 1`, but they are additive
+--- counters and confused is a 0-50 percentage, so a doubly stunned or a
+--- 30%-confused character read as unafflicted; the detectors read them as
+--- counters. v1's ASLEEP test was dead code by precedence (T-012); the
+--- detector is ToME's own gate.
+local function checkConditions(site, ctx)
     local p = game.player
-    local myPowerLevel = ownPowerLevel(p)
-    local mine = ("%.1f"):format(myPowerLevel)
-    if checkStop(p, "SCOUTER_BIGENEMY",
-        bot.loop.maxVisibleEnemyPower > cfg("MAX_INDIVIDUAL_POWER"),
-        "an enemy's power level, " .. bot.loop.maxVisibleEnemyPower .. ", is above MAX_INDIVIDUAL_POWER") then
-        return true
-    end
-    if checkStop(p, "SCOUTER_STRONGERENEMY",
-        bot.loop.maxVisibleEnemyPower > myPowerLevel + cfg("MAX_DIFF_POWER"),
-        "an enemy's power level, " .. bot.loop.maxVisibleEnemyPower
-            .. ", is more than MAX_DIFF_POWER above yours (" .. mine .. " at current life)") then
-        return true
-    end
-    -- #62 (salvage-mishander.md item 4): the crowd threshold is relative to
-    -- the character, not a constant. v1 compared the sum with
-    -- MAX_COMBINED_POWER alone, so the same crowd stopped a level-30 and a
-    -- level-3 character alike; now the sum has to exceed the character's
-    -- own (life-scaled) power by that much. The default stays 500, so the
-    -- setting's meaning changed under it: it is the margin above yours.
-    if checkStop(p, "SCOUTER_CROWDPOWER",
-        bot.loop.sumVisibleEnemyPower > myPowerLevel + cfg("MAX_COMBINED_POWER"),
-        "the combined enemy power level, " .. bot.loop.sumVisibleEnemyPower
-            .. ", is more than MAX_COMBINED_POWER above yours (" .. mine .. " at current life)") then
-        return true
-    end
-    if checkStop(p, "SCOUTER_ENEMYCOUNT",
-        bot.loop.enemyCount > cfg("MAX_ENEMY_COUNT"),
-        bot.loop.enemyCount .. " enemies in sight, above MAX_ENEMY_COUNT") then
-        return true
+    for _, def in ipairs(conditions.LIST) do
+        if def.site == site and def.default and def.detect then
+            local hit = def.detect(p, ctx) and true or false
+            if checkStop(p, def.code, hit, hit and conditions.message(def, p, ctx) or nil, def.severity) then
+                return true
+            end
+        end
     end
     return false
 end
 
-local function checkForDebuffs()
-    local p = game.player
-    -- v1: these test `== 1`, but the effect attributes are additive counters,
-    -- not flags -- confused is even a 0-50 percentage (T-001). So a doubly
-    -- stunned or 30%-confused character reads as unafflicted. Kept as v1's `== 1`
-    -- for parity; the correct capability detection lands with the WARN/STOP/
-    -- IGNORE reconciliation in T-026, where the model-validity reasoning for
-    -- each (design-stop-conditions.md 2) decides its default.
-    if checkStop(p, "DEBUFF_CONFUSED", p.confused == 1, "you are confused") then return true end
-    if checkStop(p, "DEBUFF_DAZED",    p.dazed == 1,    "you are dazed")    then return true end
-    if checkStop(p, "DEBUFF_STUNNED",  p.stunned == 1,  "you are stunned")  then return true end
-    if checkStop(p, "DEBUFF_FROZEN",   p.frozen == 1,   "you are frozen")   then return true end
-    -- FIXED (T-012). v1 wrote `p.sleep == 1 and not p.lucid_dreamer == 1`, which
-    -- parses as `... and (not p.lucid_dreamer) == 1` -- a boolean compared with a
-    -- number, always false, so a sleeping bot never handed back ("when I get
-    -- asleep", #46). The capability form is the correct gate: sleep is a counter
-    -- and the Solipsist's lucid_dreamer sustain stacks 5-25+, never 1 (T-001), so
-    -- `~= 1` would have been wrong too. A Solipsist benefits from sleep and sets
-    -- this condition to IGNORE.
-    if checkStop(p, "DEBUFF_ASLEEP", p:attr("sleep") and not p:attr("lucid_dreamer"),
-        "you are asleep") then return true end
-    return false
+--- What the character cannot do right now, from the blocks the detected
+--- conditions declare (#12, design 1.1). Liveness, not policy: consulted
+--- whatever the stop conditions are set to.
+local function capabilities(ctx)
+    return conditions.capabilities(game.player, ctx)
 end
 
 -------------------------------------------------------------------------------
@@ -1326,15 +1293,13 @@ function skoobot_act(noAction)
     end
 
     local hostiles = spotHostiles(game.player, true)
+    -- #12: the turn-site conditions -- the debuffs, LIFE_LOWLIFE (only with
+    -- something in view) and the four power checks -- in the list's order.
+    local ctx = conditionContext(game.player, #hostiles)
+    if checkConditions(conditions.SITE_TURN, ctx) then return end
     if #hostiles > 0 then
-        if checkStop(game.player, "LIFE_LOWLIFE",
-            game.player.life < game.player.max_life * cfg("LOWHEALTH_RATIO"),
-            "life is below LOWHEALTH_RATIO") then return end
         bot.state = STATE_FIGHT
     end
-
-    if checkPowerLevel() then return end
-    if checkForDebuffs() then return end
 
     if bot.activation.unspentTotal ~= getUnspentTotal() then
         return stop(notice.HANDED_BACK, "you have unspent points to allocate")
@@ -1412,11 +1377,9 @@ function skoobot_act(noAction)
         -- can decide whether to open it (they can be guarded). WARN by default:
         -- it stops once and re-arms when the chest leaves view, so a player who
         -- re-toggles past it has chosen to skip it. A Solipsist-style player who
-        -- never wants to be bothered sets this to IGNORE.
-        if checkStop(game.player, "TERRAIN_GLOWING_CHEST", glowingChestInView(game.player),
-            "a glowing chest is nearby -- open it yourself, they can be guarded", notice.HANDED_BACK) then
-            return
-        end
+        -- never wants to be bothered sets this to IGNORE. The explore-site
+        -- entry of the list (#12): TERRAIN_GLOWING_CHEST, at HANDED_BACK.
+        if checkConditions(conditions.SITE_EXPLORE, ctx) then return end
         -- #62 (salvage-mishander.md item 8). v1 handed back on ANY level-change
         -- tile, including the stairs the player had just arrived by -- so a
         -- player who toggles the bot on arrival got "level change found" and
@@ -1430,16 +1393,23 @@ function skoobot_act(noAction)
             engine.Map.TERRAIN, "change_level")
         if onLevelChange and not onActivationStartTile() then
             stop(notice.HANDED_BACK, "standing on a level change")
-        elseif game.player:attr("never_move") then
-            -- FIXED (T-012). v1 called auto-explore while unable to move, which
-            -- cannot make progress and spun -- the pin / dominate / entangle
-            -- freeze users reported (#46). "Can I move at all?" is one predicate
-            -- over every never_move source (16+ effects plus encumbrance), the
-            -- same attr the engine's own move() gates on, so it stays correct as
-            -- ToME adds effects -- unlike mishander's fork, which tested only
-            -- EFF_PINNED. The general liveness backstop is T-027; the framework
-            -- that folds this into the condition list is T-026.
-            stop(notice.STOPPED, "cannot move (pinned, held, or overloaded)")
+            return
+        end
+        -- FIXED (T-012). v1 called auto-explore while unable to move, which
+        -- cannot make progress and spun -- the pin / dominate / entangle
+        -- freeze users reported (#46). "Can I move at all?" is one predicate
+        -- over every never_move source (16+ effects plus encumbrance), the
+        -- same attr the engine's own move() gates on, so it stays correct as
+        -- ToME adds effects -- unlike mishander's fork, which tested only
+        -- EFF_PINNED. Since #12 the predicate is the CANNOT_MOVE entry of the
+        -- condition list, and the block is the union of everything detected
+        -- that declares one -- dazed, frozen, asleep at IGNORE included --
+        -- named in the reason. Exploring means moving, so a move block is a
+        -- hand-back here whatever the policies say (liveness, design 1.1);
+        -- the general backstop is the progress invariant (#13).
+        local caps = capabilities(ctx)
+        if caps.move then
+            stop(notice.STOPPED, "cannot move (" .. conditions.blockedText(caps.move) .. ")")
         else
             SAI_beginExplore()
         end
@@ -1452,6 +1422,23 @@ function skoobot_act(noAction)
         return skoobot_act(true)
 
     elseif bot.state == STATE_FIGHT then
+        -- #12 (design 1.1, the response half of #7's split): what the
+        -- detected conditions say the character cannot do. Fighting needs
+        -- no movement, so a move block changes nothing until the rotation
+        -- finds no talent that reaches -- a pinned character still attacks
+        -- what is next to it -- and then the hand-back says why instead of
+        -- trying a step the engine would refuse. An act block (asleep, with
+        -- the stop at IGNORE) means no talent can be used at all, and a
+        -- target block (encased in ice) that talents only reach the ice:
+        -- both hand back here rather than walk the rotation for nothing.
+        local caps = capabilities(ctx)
+        if caps.act then
+            return stop(notice.CANNOT_ACT, "cannot act (" .. conditions.blockedText(caps.act) .. ")")
+        end
+        if caps.target then
+            return stop(notice.CANNOT_ACT, "cannot target anything (" .. conditions.blockedText(caps.target) .. ")")
+        end
+
         local targets = {}
         for _, enemy in pairs(hostiles) do
             -- attacking is a talent, so it does not need adding as a choice
@@ -1536,7 +1523,13 @@ function skoobot_act(noAction)
             end
             if fireTier() then checkForAdditionalAction() return end
 
-            -- no legal target: get closer
+            -- no legal target: get closer -- unless the character cannot
+            -- move, in which case the step is impossible and the reason
+            -- names the block (#12).
+            if caps.move then
+                return stop(notice.CANNOT_ACT, "cannot move (" .. conditions.blockedText(caps.move)
+                    .. "), and no Combat talent reaches " .. targets[1].name)
+            end
             local a = Astar.new(game.level.map, game.player)
             local path = a:calc(game.player.x, game.player.y, targets[1].x, targets[1].y)
             log("[Combat] [Movement] Pathing towards " .. targets[1].name)
