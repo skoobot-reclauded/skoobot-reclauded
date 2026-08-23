@@ -93,6 +93,9 @@ end)
 return ok and res or ("ERR " .. tostring(res))
 '@
     $hasSustain = $seed -notmatch 'S=nil'
+    $A = ($seed -replace '^.*A=(\S+).*$','$1'); $B = ($seed -replace '^.*B=(\S+).*$','$1'); $C = ($seed -replace '^.*C=(\S+).*$','$1')
+    $S = ($seed -replace '^.*S=(\S+).*$','$1'); $OBJ = ($seed -replace '^.*tid=(\S+).*$','$1')
+    $rx = { param($s) [regex]::Escape($s) }
 
     # A helper every later probe uses: one section as "tid,tid,@item".
     $null = Probe 'helpers' @'
@@ -141,7 +144,7 @@ local ok, res = pcall(function()
   list[#list+1] = {tid=ts.A, usetype="Combat",   priority=1}
   list[#list+1] = {tid=ts.B, usetype="Combat",   priority=5}
   list[#list+1] = {tid=ts.C, usetype="",         priority=1}   -- the add chain's placeholder
-  list[#list+1] = {tid=ts.B, usetype="Recovery", priority=1}   -- duplicate, lower priority
+  list[#list+1] = {tid=ts.B, usetype="Recovery", priority=1}   -- the same rule in a second section: kept
   if ts.S then list[#list+1] = {tid=ts.S, usetype="Sustain", priority=1} end
   list[#list+1] = {tid=ts.objtid, usetype="Recovery", priority=2}   -- an item by its slot id
   d.autotalents = list
@@ -153,8 +156,9 @@ return ok and res or ("ERR " .. tostring(res))
 '@
     Check ($mig -match 'same=true') 'the rules table keeps its identity (normalised in place)'
     Check ($mig -match 'array=0') 'the v1 array part is emptied'
-    Check ($mig -match "combat=$([regex]::Escape(($seed -replace '^.*B=(\S+).*$','$1'))),$([regex]::Escape(($seed -replace '^.*A=(\S+).*$','$1'))) ") 'Combat keeps priority order (B before A), the placeholder and the duplicate dropped'
+    Check ($mig -match "combat=$(&$rx $B),$(&$rx $A) ") 'Combat keeps priority order (B before A), the placeholder dropped'
     Check ($mig -match 'recovery=@') 'the item rule is re-keyed on the item, not its slot id'
+    Check ($mig -match "recovery=@[^,/]+,$(&$rx $B) ") 'the same rule may be in two sections (B in Combat and Recovery), in priority order'
     if ($hasSustain) { Check ($mig -match 'sustain=\S') 'the sustained rule lands in Sustain' }
     Check ($mig -match 'dp=$') 'Damage Prevention is empty'
 
@@ -173,7 +177,8 @@ local ok, res = pcall(function()
   for _, it in ipairs(d.c_list.list) do
     if it.nodes then headers = headers + 1 else rows = rows + 1 end
     if it.cname and it.cname:find("Activate Object", 1, true) then generic = generic + 1 end
-    if it.entry and it.entry.object == ts.objname then itemrow = it end
+    -- the item is listed twice: in its section and in the Available palette; take the section row
+    if it.entry and it.entry.object == ts.objname and (not itemrow or it.section) then itemrow = it end
   end
   return ("class=%s headers=%d rows=%d generic=%d item=%s itemsection=%s itemlive=%s itemname=[%s]"):format(
     tostring(d.__CLASSNAME), headers, rows, generic, tostring(itemrow ~= nil), tostring(itemrow and itemrow.section),
@@ -222,10 +227,7 @@ local ok, res = pcall(function()
 end)
 return ok and res or ("ERR " .. tostring(res))
 '@
-    $A = ($seed -replace '^.*A=(\S+).*$','$1'); $B = ($seed -replace '^.*B=(\S+).*$','$1'); $C = ($seed -replace '^.*C=(\S+).*$','$1')
-    $S = ($seed -replace '^.*S=(\S+).*$','$1')
-    $rx = { param($s) [regex]::Escape($s) }
-    Check ($keys -match "c1=$(&$rx $B),$(&$rx $A),$(&$rx $C) ") '"1" appends the selected unassigned talent to Combat'
+    Check ($keys -match "c1=$(&$rx $B),$(&$rx $A),$(&$rx $C) ") '"1" on an Available row adds the talent at the end of Combat'
     Check ($keys -match "c4=$(&$rx $B),$(&$rx $A),$(&$rx $C) refused=true") '"4" on an activated talent is refused, with the reason shown'
     Check ($keys -match "up=$(&$rx $B),$(&$rx $C),$(&$rx $A) ") 'Shift+Up moves it up one place'
     Check ($keys -match "down=$(&$rx $B),$(&$rx $A),$(&$rx $C) ") 'Shift+Down moves it back down'
@@ -244,8 +246,10 @@ local ok, res = pcall(function()
   local d = ts.d
   local Mouse = require "engine.Mouse"
   local out = {}
-  local function drop(entry, target)
-    Mouse.dragged = {payload={kind="skoobot_reclauded_rule", entry=entry}}
+  -- `from` is the section the drag started in; nil means the Available list,
+  -- and a drop from there is an add that keeps the rule's other placements.
+  local function drop(entry, target, from)
+    Mouse.dragged = {payload={kind="skoobot_reclauded_rule", entry=entry, from=from}}
     d:use(target, "drag-end")
     local used = Mouse.dragged.used
     Mouse.dragged = nil
@@ -253,13 +257,13 @@ local ok, res = pcall(function()
   end
   local u1 = drop({tid=ts.C}, assert(ts.row(ts.A), "no row for A"))
   out[#out+1] = ("onrow=%s used=%s"):format(ts.dump("Combat"), tostring(u1))
-  local u2 = drop({tid=ts.C}, assert(ts.header("Recovery"), "no Recovery header"))
+  local u2 = drop({tid=ts.C}, assert(ts.header("Recovery"), "no Recovery header"), "Combat")
   out[#out+1] = ("onheader=%s/%s used=%s"):format(ts.dump("Combat"), ts.dump("Recovery"), tostring(u2))
-  local u3 = drop({tid=ts.C}, assert(ts.header(nil), "no Unassigned header"))
+  local u3 = drop({tid=ts.C}, assert(ts.header(nil), "no Available header"), "Recovery")
   out[#out+1] = ("unassign=%s/%s used=%s"):format(ts.dump("Combat"), ts.dump("Recovery"), tostring(u3))
   -- a sustained rule dropped on Combat is refused
   if ts.S then
-    local u4 = drop({tid=ts.S}, assert(ts.header("Combat"), "no Combat header"))
+    local u4 = drop({tid=ts.S}, assert(ts.header("Combat"), "no Combat header"), "Sustain")
     out[#out+1] = ("typed=%s/%s used=%s"):format(ts.dump("Combat"), ts.dump("Sustain"), tostring(u4))
   end
   -- a foreign drag is ignored
@@ -274,8 +278,8 @@ return ok and res or ("ERR " .. tostring(res))
 '@
     Check ($drop -match "onrow=$(&$rx $B),$(&$rx $C),$(&$rx $A) used=true") 'a drop on a row inserts before that row'
     # Item names carry spaces ("iron torque of mindblast"): match up to the next comma or slash.
-    Check ($drop -match "onheader=$(&$rx $B),$(&$rx $A)/@[^,/]+,$(&$rx $C) used=true") 'a drop on a section header appends to that section'
-    Check ($drop -match "unassign=$(&$rx $B),$(&$rx $A)/@[^,/]+ used=true") 'a drop on Unassigned unassigns'
+    Check ($drop -match "onheader=$(&$rx $B),$(&$rx $A)/@[^,/]+,$(&$rx $B),$(&$rx $C) used=true") 'a drop from a section onto another header moves it to the end of that section'
+    Check ($drop -match "unassign=$(&$rx $B),$(&$rx $A)/@[^,/]+,$(&$rx $B) used=true") 'a drop from a section onto Available removes it from that section only'
     if ($hasSustain) { Check ($drop -match "typed=$(&$rx $B),$(&$rx $A)/$(&$rx $S) used=true") 'a sustained rule dropped on Combat is refused and stays put' }
     Check ($drop -match "foreign_used=nil combat=$(&$rx $B),$(&$rx $A)") 'a drag of another kind is ignored'
 
@@ -301,7 +305,8 @@ return ok and res or ("ERR " .. tostring(res))
 '@
     Check ($menu -match 'cancel=true top=true') 'the action menu has a Cancel entry that closes it (#48)'
     Check ($menu -match "combat=$(&$rx $B),$(&$rx $A) ") 'Cancel changes nothing'
-    Check ($menu -match 'Move up' -and $menu -match 'Move down' -and $menu -match 'Unassign' -and $menu -match 'Move to Recovery') 'the menu offers moves, reorder and unassign for a placed rule'
+    Check ($menu -match 'Move up' -and $menu -match 'Move down' -and $menu -match 'Remove from Combat' -and $menu -match 'Move to Recovery') 'the menu offers moves, reorder and remove-from-section for a placed rule'
+    Check ($menu -match 'Also add to Damage Prevention' -and $menu -notmatch 'Also add to Recovery') 'the menu offers a second placement only where the rule is not already'
     Check ($menu -notmatch 'Move to Sustain') 'the menu does not offer Sustain to an activated talent'
 
     Write-Host ''
@@ -322,7 +327,7 @@ end)
 return ok and res or ("ERR " .. tostring(res))
 '@
     Check ($bot -match "combat=$(&$rx $B),$(&$rx $A) ") 'the bot reads Combat in list order'
-    Check ($bot -match "recovery_live=$(&$rx (($seed -replace '^.*tid=(\S+).*$','$1'))) ") 'the item rule resolves to its live talent id'
+    Check ($bot -match "recovery_live=$(&$rx $OBJ),$(&$rx $B) ") 'the item rule resolves to its live talent id, and the second placement of B is read in Recovery too'
     Check ($bot -match 'ghost_row=true ghost_kind=\[Item \(not carried\)\] ghost_live=false') 'a rule for an item not carried is shown dormant'
 }
 finally {

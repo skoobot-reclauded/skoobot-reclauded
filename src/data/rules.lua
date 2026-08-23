@@ -24,9 +24,12 @@
 -- An entry is {tid = "T_..."} for a talent, or {object = "<item name>"} for an
 -- activatable item -- items are keyed by name, the way ToME's own inventory
 -- hotkeys are, because their talent id is a rotating slot (#55). Order within
--- a section IS priority: the first entry is tried first. A rule is in at most
--- one section. Extra fields on an entry are kept as they are, so a later
--- per-rule flag (#15's "hold while impaired") needs no migration.
+-- a section IS priority: the first entry is tried first. A rule appears at
+-- most once in a section, but may be in several sections -- a healing
+-- infusion as both Damage Prevention and Recovery, as v1 allowed (owner test
+-- of #56). Each placement is its own table, so extra fields on an entry stay
+-- with that placement; a later per-rule flag (#15's "hold while impaired")
+-- needs no migration.
 --
 -- v1, and the port until #56, saved a flat list of {tid=, usetype=, priority=}
 -- in the same field. normalize() migrates that in place, once.
@@ -96,6 +99,28 @@ function M.allowed(kind, section)
     return true
 end
 
+--- Index of a rule within one section, or nil.
+function M.indexIn(t, section, entry)
+    local k = M.key(entry)
+    local list = k and t[section]
+    if not list then return nil end
+    for i, e in ipairs(list) do
+        if M.key(e) == k then return i end
+    end
+    return nil
+end
+
+--- Every placement of a rule, in section order.
+-- @return a list of {section=, index=}
+function M.where(t, entry)
+    local out = {}
+    for _, s in ipairs(M.SECTIONS) do
+        local i = M.indexIn(t, s, entry)
+        if i then out[#out + 1] = { section = s, index = i } end
+    end
+    return out
+end
+
 --- Bring a saved table to the current shape, IN PLACE, so that anything
 --- already holding it sees the result. Idempotent.
 --
@@ -103,10 +128,10 @@ end
 -- table (untouched); a v1 flat list; and a current table with v1-shaped
 -- entries pushed into its array part, which is what a scenario that predates
 -- #56 does. v1 entries are placed by their usetype, highest priority first
--- (ties keep their saved order), minus usetype and priority. An entry is kept
--- in one section only: the first occurrence wins, existing sections first.
--- Entries with no identity, an unknown usetype, or the add chain's `usetype=""`
--- placeholder are dropped.
+-- (ties keep their saved order), minus usetype and priority. Within a section
+-- a rule is kept once -- the first occurrence, i.e. the highest priority --
+-- and a rule may land in several sections. Entries with no identity, an
+-- unknown usetype, or the add chain's `usetype=""` placeholder are dropped.
 --
 -- @return the table, and {migrated = n, dropped = n}
 function M.normalize(t)
@@ -130,10 +155,9 @@ function M.normalize(t)
         return a.i < b.i
     end)
 
-    local seen = {}
     for _, s in ipairs(M.SECTIONS) do
         local list = t[s]
-        local kept = {}
+        local seen, kept = {}, {}
         for _, e in ipairs(list) do
             local k = M.key(e)
             if k and not seen[k] then
@@ -151,8 +175,7 @@ function M.normalize(t)
         local v = o.v
         local k = M.key(v)
         local s = type(v) == "table" and v.usetype
-        if k and SECTION_SET[s] and not seen[k] then
-            seen[k] = true
+        if k and SECTION_SET[s] and not M.indexIn(t, s, v) then
             local e = {}
             for field, value in pairs(v) do
                 if field ~= "usetype" and field ~= "priority" then e[field] = value end
@@ -168,43 +191,42 @@ function M.normalize(t)
     return t, report
 end
 
---- Where is this rule?
--- @return section, index; or nil
-function M.find(t, entry)
-    local k = M.key(entry)
-    if not k then return nil end
+--- Take a rule out of one section.
+-- @return the stored entry and its index; or nil
+function M.remove(t, entry, section)
+    local i = M.indexIn(t, section, entry)
+    if not i then return nil end
+    return table.remove(t[section], i), i
+end
+
+--- Take a rule out of every section.
+-- @return how many placements went
+function M.removeAll(t, entry)
+    local n = 0
     for _, s in ipairs(M.SECTIONS) do
-        for i, e in ipairs(t[s]) do
-            if M.key(e) == k then return s, i end
-        end
+        if M.remove(t, entry, s) then n = n + 1 end
     end
-    return nil
+    return n
 end
 
---- Take a rule out of whatever section holds it.
--- @return the stored entry, its section and index; or nil
-function M.remove(t, entry)
-    local s, i = M.find(t, entry)
-    if not s then return nil end
-    return table.remove(t[s], i), s, i
-end
-
---- Put a rule in a section: before `before` (an entry of that section), or at
---- the end. The rule is taken from wherever it was first, so this is the one
---- operation behind "add", "move between sections" and "reorder". The stored
---- table is what moves, so extra fields on it survive.
--- @return the index it landed at; or nil and a reason
-function M.place(t, entry, section, before)
+--- Put a rule in `section`: before `before` (an entry of that section), or at
+--- the end. If `from` names a section, the rule leaves it -- a move; without
+--- `from` the rule keeps its other placements -- an add, which is how the
+--- same talent gets into two sections. Within `section` a rule is placed
+--- once: if it is already there and no position is asked for, it stays where
+--- it is; with `before` it is repositioned. The stored table is what moves,
+--- so extra fields on it survive a move.
+-- @return the index it is at; or nil and a reason
+function M.place(t, entry, section, before, from)
     if not SECTION_SET[section] then return nil, "No such section." end
     local k = M.key(entry)
     if not k then return nil, "Not a rule." end
-    if before and M.key(before) == k then
-        local s, i = M.find(t, entry)
-        if s then return i end
-        before = nil
-    end
-    local stored = M.remove(t, entry)
-    local e = stored or entry
+    local moved
+    if from and from ~= section and SECTION_SET[from] then moved = M.remove(t, entry, from) end
+    local idx = M.indexIn(t, section, entry)
+    if idx and (not before or M.key(before) == k) then return idx end
+    local here = idx and table.remove(t[section], idx) or nil
+    local e = here or moved or entry
     local list = t[section]
     local at = #list + 1
     if before then
@@ -217,12 +239,12 @@ function M.place(t, entry, section, before)
     return at
 end
 
---- Move a rule within its section by `delta` places, clamped to the ends.
--- @return the new index; or nil if the rule is not placed
-function M.shift(t, entry, delta)
-    local s, i = M.find(t, entry)
-    if not s then return nil end
-    local list = t[s]
+--- Move a rule within one section by `delta` places, clamped to the ends.
+-- @return the new index; or nil if the rule is not in that section
+function M.shift(t, entry, section, delta)
+    local i = M.indexIn(t, section, entry)
+    if not i then return nil end
+    local list = t[section]
     local j = i + (delta or 0)
     if j < 1 then j = 1 elseif j > #list then j = #list end
     if j ~= i then
@@ -231,7 +253,7 @@ function M.shift(t, entry, delta)
     return j
 end
 
---- Drop every rule for which keep(entry, section) is false.
+--- Drop every placement for which keep(entry, section) is false.
 -- @return the removed entries
 function M.prune(t, keep)
     local removed = {}
@@ -257,7 +279,7 @@ function M.tids(t, section, resolve)
     return out
 end
 
---- How many rules there are, over every section.
+--- How many placements there are, over every section.
 function M.count(t)
     local n = 0
     for _, s in ipairs(M.SECTIONS) do n = n + #(t[s] or {}) end

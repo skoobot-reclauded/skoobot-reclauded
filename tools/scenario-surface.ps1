@@ -212,8 +212,10 @@ return ("title='%s' headers=%d rows=%d h=%d game.h=%d overflow=%s"):format(tostr
     $u6 = Probe 'assign' @'
 local t = game.dialogs[#game.dialogs]
 local row
-for _, it in ipairs(t.c_list.list) do if it.entry and not it.section and it.ekind == "activated" then row = it break end end
-if not row then return "ERR no unassigned activated talent" end
+for _, it in ipairs(t.c_list.list) do
+  if it.entry and not it.section and it.ekind == "activated" and not (it.inSections and it.inSections.Combat) then row = it break end
+end
+if not row then return "ERR no available activated talent outside Combat" end
 t:selectItem(row)
 t:moveSelected("Combat")
 local r = skoobot_reclauded.rules.get(game.player)
@@ -348,7 +350,7 @@ local d = require("mod.dialogs.skoobot_reclauded.TalentDialog").new(p)
 game:registerDialog(d)
 local rows = 0
 for _, it in ipairs(d.c_list.list) do if it.entry and not it.section then rows = rows + 1 end end
-local r = ("learned=%d title='%s' unassigned=%d h=%d game.h=%d overflow=%s"):format(learned, tostring(d.title), rows, d.h, game.h, tostring(d.h > game.h))
+local r = ("learned=%d title='%s' available=%d h=%d game.h=%d overflow=%s"):format(learned, tostring(d.title), rows, d.h, game.h, tostring(d.h > game.h))
 while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end
 return r
 '@ 90
@@ -358,7 +360,7 @@ return r
         # here is a regression.
         if ($many.Result -match 'overflow=false') { Finding 'OK' "T-014 fixed: the talent screen fits the screen ($($many.Result))" }
         else { Finding 'BROKEN' "T-014 regressed: the talent screen overflows ($($many.Result))" }
-        if ($many.Result -match 'unassigned=(\d+)' -and [int]$Matches[1] -ge 40) { Finding 'OK' 'the screen still lists every talent (scrolled, not truncated)' }
+        if ($many.Result -match 'available=(\d+)' -and [int]$Matches[1] -ge 40) { Finding 'OK' 'the screen still lists every talent (scrolled, not truncated)' }
         else { Finding 'BROKEN' "the screen dropped talents: $($many.Result)" }
     }
 
