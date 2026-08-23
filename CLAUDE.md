@@ -57,8 +57,12 @@ in this repo's GitHub Issues.**
   under PUC Lua 5.4 until T-045, which made the suite test a different language in both
   directions (`loadstring`/`setfenv`/`unpack` absent under test but correct in-game; `//` and
   bitwise operators compiling under test but fatal in-game). `spec/dialect_spec.lua` now fails
-  the run if that regresses. The residual gap is 2.1-vs-2.0.2 — `table.new` and `table.clear`
-  resolve under test and fail in-game — and only the harness catches it, not lint.
+  the run if that regresses. The residual gap is 2.1-vs-2.0.2 — `table.new`, `table.clear` and
+  `table.move` resolve under test and fail in-game. Lint cannot see it (luacheck's `luajit` std
+  is one set for both patch levels) and neither can a runtime probe, so `dialect_spec` **scans
+  the source** of everything the game loads — `src/` and the devbridge — and fails on the line
+  that names one (#63). Only the harness, or CI under a real 2.0 build (#63, waiting on #30),
+  proves the code actually runs there.
 - Parse-check with `luajit -bl <file> /dev/null`; lint with `luacheck .` — the tracked
   `.luacheckrc` carries the std and every per-path environment, so `--std` on the command line
   is redundant at best. The trailing-slash form `luacheck src/` checks **no files** and exits 3.

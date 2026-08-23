@@ -96,6 +96,71 @@ function M.hasRealFiles(rel)
   return found
 end
 
+--- Every `.lua` file under a repo-relative directory, as repo-relative paths
+--- with forward slashes, sorted.
+---
+--- Same lfs-or-shell shape as hasRealFiles above, and the same rule: a walk
+--- that cannot list anything ERRORS rather than returning {}. A scan that
+--- silently finds no files is a green assertion that checked nothing, which
+--- is the failure mode this helper exists to make impossible (#63).
+function M.luaFiles(rel)
+  local dir  = M.path(rel)
+  local out  = {}
+
+  local ok, lfs = pcall(require, "lfs")
+  if ok and lfs then
+    local function walk(d, prefix)
+      for entry in lfs.dir(d) do
+        if entry ~= "." and entry ~= ".." then
+          local full = d .. "/" .. entry
+          local a = lfs.attributes(full)
+          if a and a.mode == "directory" then
+            walk(full, prefix .. entry .. "/")
+          elseif entry:match("%.lua$") then
+            out[#out + 1] = prefix .. entry
+          end
+        end
+      end
+    end
+    walk(dir, rel .. "/")
+  else
+    local windows = package.config:sub(1, 1) == string.char(92)
+    local cmd
+    if windows then
+      cmd = 'dir /b /s /a-d "' .. dir:gsub("/", string.char(92)) .. '" 2>nul'
+    else
+      cmd = 'find "' .. dir .. '" -type f -name "*.lua" 2>/dev/null'
+    end
+    local pipe = io.popen(cmd)
+    if not pipe then
+      error("cannot list " .. dir .. ": no lfs and no io.popen")
+    end
+    for line in pipe:lines() do
+      line = line:gsub(string.char(92), "/"):gsub("%s+$", "")
+      if line:match("%.lua$") then
+        -- `dir /s` prints absolute paths, and `root` may itself be relative
+        -- ("." when the suite is loaded through package.path), so stripping
+        -- the root off does not work. Cut at the LAST occurrence of the
+        -- directory segment instead -- plain find, no pattern escaping.
+        local marker, at, from = "/" .. rel .. "/", nil, 1
+        while true do
+          local s = line:find(marker, from, true)
+          if not s then break end
+          at, from = s, s + 1
+        end
+        out[#out + 1] = at and (rel .. "/" .. line:sub(at + #marker)) or line
+      end
+    end
+    pipe:close()
+  end
+
+  if #out == 0 then
+    error("no .lua files found under " .. rel .. " -- the walk is broken, not the tree")
+  end
+  table.sort(out)
+  return out
+end
+
 --- The origin remote's URL, normalised to a bare https GitHub URL, or nil.
 --- Used to check the manifest's homepage against where the code actually
 --- lives, rather than against a constant that can rot in place.

@@ -164,9 +164,14 @@ game. A suite on the wrong interpreter is testing a different language in both d
 `.busted` pins the interpreter and `spec/dialect_spec.lua` fails the run if it is ever wrong
 again.
 
-One gap remains that tests cannot close: 2.1 and 2.0.2 are the same Lua 5.1 dialect, but 2.1
-adds library functions (`table.new`, `table.clear`) that resolve under test and fail in-game.
-Lint cannot see it either. Only the harness can.
+2.1 and 2.0.2 are the same Lua 5.1 dialect, but 2.1 adds library functions (`table.new`,
+`table.clear`, `table.move`) that resolve under test and fail in-game. Lint cannot see that —
+luacheck's `luajit` std is one set for both patch levels — and neither can a runtime probe
+from this side, since the call succeeds on the machine doing the checking. What
+`spec/dialect_spec.lua` does instead is **scan the source** of everything the game loads
+(`src/` and the devbridge) and fail on the line that names one (#63). That is not proof the
+code runs under 2.0.2 — only running it is, which is the harness, and the CI job that runs the
+suite under a real 2.0 build (#63, waiting on #30) — but it catches the call as it is written.
 
 ```bash
 luajit -bl src/init.lua /dev/null    # parse-check, no game launch
