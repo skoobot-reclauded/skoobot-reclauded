@@ -20,12 +20,13 @@
          now sitting after the stats block where the hook fires rather than
          at the very end -- checked on the player and on another actor of
          the level;
-      3. the refusal without a wrapper (#76): useTalent reports a refused
-         talent as FALSE and not nil, both before the coroutine (on cooldown)
-         and in the case no hook can see (the talent's own action returns
-         nil, so postUseTalent returns nil) -- which is the fact
-         SAI_useTalent now reads in place of the wrapper. The bot ACTING on
-         it is scenario-t010-marked-target's job;
+      3. the refusal without a wrapper (#76): useTalent reports a talent
+         whose own action returned nil -- the case no hook can see, since
+         Actor:postUseTalent fires only after `if not ret then return end` --
+         as boolean FALSE, and a talent suspended awaiting its own targeting
+         as NIL. That difference is the fact SAI_useTalent now reads in place
+         of the wrapper, and why it tests `== false` and not falsiness. The
+         bot ACTING on it is scenario-t010-marked-target's job;
       4. act: with the bot toggled on, the per-turn driver runs from
          Player:act -- its trace line is printed -- game.turn advances and
          actions are taken.
@@ -304,7 +305,7 @@ return ("[%s] %s"):format(tostring(a.name), hk.tooltip(a, nil))
     # 3. the refusal, without a wrapper
     # -----------------------------------------------------------------------
     Write-Host ''
-    Write-Host '  --- 3. useTalent reports a refusal, so no postUseTalent wrapper is needed'
+    Write-Host '  --- 3. useTalent tells a refusal from a pending talent, so no wrapper is needed'
     $quiet = Invoke-Bridge -Lua 'hk.reset() return tostring(hk.findQuiet())' -TimeoutSec 120
     if ($quiet.Result -ne 'True') { Inconclusive 'no spot with nothing in sight to decide from' }
     $put = Invoke-Bridge -Lua @'
@@ -313,42 +314,50 @@ local T = require "engine.interface.ActorTalents"
 hk.reset()
 local t = p:getTalentFromId("T_ATTACK")
 
--- (a) refused before the coroutine: on cooldown, with ignore_cd off. The
--- engine returns false at engine/interface/ActorTalents.lua:171.
-local hadCd = p.talents_cd and p.talents_cd[t.id]
-p.talents_cd = p.talents_cd or {}
-p.talents_cd[t.id] = 5
-local cd = p:useTalent(t.id, nil, nil, false, nil, true, true)
-p.talents_cd[t.id] = hadCd
-
--- (b) THE case no hook sees: the talent's own action refuses, so
+-- (a) THE case no hook can see: the talent's own action refuses, so
 -- postUseTalent returns nil (mod/class/Actor.lua: `if not ret then return
--- end`) and useTalent returns false at :197. Reproduced by stubbing the
--- action for exactly one call -- a measurement may do that; the product
--- may not -- and putting it straight back.
+-- end`) and useTalent returns FALSE at engine/interface/ActorTalents.lua:197.
+-- This is the fact SAI_useTalent reads in place of the retired wrapper.
+-- Reproduced by stubbing the action for exactly one call -- a measurement
+-- may do that; the product may not -- and putting it straight back.
 local def = T.talents_def[t.id]
 local realAction = def.action
 def.action = function() return nil end
-local ok, refused = pcall(p.useTalent, p, t.id, nil, nil, true, nil, true, true)
+local okR, refused = pcall(p.useTalent, p, t.id, nil, nil, true, nil, true, true)
 def.action = realAction
 
+-- (b) and the case that must NOT be read as a refusal: no forced target, so
+-- the real Attack opens targeting and its coroutine SUSPENDS. useTalent
+-- returns nil while it waits. A talent that may yet fire must not be marked
+-- failed, which is exactly why SAI_useTalent tests `== false` rather than
+-- falsiness (api-surface Remediation 3).
+local dlg0 = #game.dialogs
+local okP, pending = pcall(p.useTalent, p, t.id, nil, nil, true, nil, true, true)
+local grew = #game.dialogs - dlg0
+local targeting = game.target and game.target.target_type ~= nil
+
 hk.reset()
-return ("cooldown=%s(%s) | refused_ok=%s refused=%s(%s) | action_restored=%s"):format(
-  tostring(cd), type(cd), tostring(ok), tostring(refused), type(refused),
-  tostring(def.action == realAction))
+return ("refused_ok=%s refused=%s(%s) | pending_ok=%s pending=%s(%s) dlg_grew=%d targeting=%s | action_restored=%s dialogs_after=%d"):format(
+  tostring(okR), tostring(refused), type(refused),
+  tostring(okP), tostring(pending), type(pending), grew, tostring(targeting),
+  tostring(def.action == realAction), #game.dialogs)
 '@ -TimeoutSec 60
     Write-Host "  $($put.Result)"
-    # false, never nil: SAI_useTalent tests `ret == false` and not falsiness,
-    # because nil is a talent suspended awaiting targeting, which may yet
-    # fire. If the engine ever returned nil for a refusal instead, the bot
-    # would stop marking refusals and this is where that shows.
-    $null = Assert-Result $put 'a talent on cooldown is refused with false, not nil' -Match '^cooldown=false\(boolean\) '
-    $null = Assert-Result $put "a talent whose own action refuses does not raise" -Match ' refused_ok=true '
-    $null = Assert-Result $put '...and is also reported as false -- the case no hook can see' -Match ' refused=false\(boolean\) '
-    $null = Assert-Result $put 'the stubbed action was put back' -Match ' action_restored=true$'
-    # What this pair does NOT show is the bot acting on it: that a refused
-    # talent is skipped and the next priority tried inside one iteration is
-    # scenario-t010-marked-target, with a real marked-target talent.
+    $null = Assert-Result $put "a talent whose own action refuses does not raise" -Match '^refused_ok=true '
+    $null = Assert-Result $put '...and is reported as boolean FALSE -- the case no hook can see' -Match ' refused=false\(boolean\) '
+    $null = Assert-Result $put 'a talent left to open its own targeting does not raise either' -Match ' pending_ok=true '
+    $null = Assert-Result $put '...and is reported as NIL, not false: it is suspended, not refused' -Match ' pending=nil\(nil\) '
+    $null = Assert-Result $put 'the stubbed action was put back' -Match ' action_restored=true '
+    $null = Assert-Result $put 'and the probe left no dialog behind' -Match ' dialogs_after=0$'
+    # false and nil being genuinely different returns is the whole reason
+    # SAI_useTalent tests `ret == false` and not `not ret`. If the engine
+    # ever collapsed them, the bot would start marking pending talents as
+    # failed, and this is the pair of checks that would catch it.
+    #
+    # What this does NOT show is the bot acting on the refusal: that a
+    # refused talent is skipped and the next priority tried inside one
+    # iteration is scenario-t010-marked-target, with a real marked-target
+    # talent.
 
     # -----------------------------------------------------------------------
     # 4. act: the driver runs from Player:act

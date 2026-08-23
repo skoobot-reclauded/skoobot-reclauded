@@ -62,13 +62,14 @@ M.ACTIONS = {
           .. "by itself." },
     { action = "flee", from = "strongest",
       name = "Flee from the strongest hostile",
-      desc = "One step away from the strongest hostile in view -- the highest power level, the figure the "
-          .. "power-level stop conditions and the Ctrl-hover tooltip use, nearest on a tie -- then the turn ends. "
-          .. "The step is the neighbouring grid that hostile has the least sight of -- out of its view if there "
-          .. "is one, else simply farther from it. Where the rotation reaches this is when it fires. When no such "
-          .. "step exists the rotation moves on as if a talent were on cooldown; a flee never stops the bot by "
-          .. "itself. Both flee rows may be placed: \"from the strongest, failing that from the nearest\" is a "
-          .. "legitimate rotation." },
+      desc = "One step away from the strongest hostile in view -- the highest COUNTED power, the figure after "
+          .. "\"counts as\" in the Ctrl-hover tooltip, which is what the power-level stops and the bot's threat "
+          .. "score compare; nearest on a tie -- then the turn ends. That is a rank-weighted figure, so a boss "
+          .. "outranks a tougher-looking common. The step is the neighbouring grid that hostile has the least "
+          .. "sight of -- out of its view if there is one, else simply farther from it. Where the rotation "
+          .. "reaches this is when it fires. When no such step exists the rotation moves on as if a talent were "
+          .. "on cooldown. Both flee rows may be placed: \"from the strongest, failing that from the nearest\" "
+          .. "is a legitimate rotation." },
 }
 
 -- What the hold flag means, for the row that carries it (#15). The act loop

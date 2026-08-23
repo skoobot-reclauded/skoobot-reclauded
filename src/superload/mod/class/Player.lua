@@ -1064,16 +1064,28 @@ bot.loadout = {
 -------------------------------------------------------------------------------
 
 --- The hostile a flee entry runs from: the nearest, or for from="strongest"
---- the highest bot.power -- the figure the stop conditions compare and the
---- Ctrl-hover tooltip shows, so the choice is explainable -- with the nearer
---- one on a tie. `hostiles` is spotHostiles' list (actors only).
+--- the one with the highest COUNTED power, with the nearer one on a tie.
+--- `hostiles` is spotHostiles' list (actors only).
+---
+--- #80: this ranked by bot.power, the raw heuristic, because when #59 was
+--- written that was the figure the tooltip showed. Since #11 the tooltip
+--- shows the counted, rank-weighted figure as well; the score's retreat
+--- posture fires this very step while score.figures.strongest is ranked by
+--- the weighted figure; and every power stop quotes the weighted figure.
+--- Three places calling one enemy "the strongest" and a fourth disagreeing
+--- is a bug waiting for a rare and a boss to be in view at once, which is
+--- exactly when it matters. spotHostiles records the weighted figure on
+--- every entry as `.power` (data/score.lua enemyPower x power.rankWeight),
+--- so this is the same value score.lua reads, read the same way -- including
+--- `or 0`, and including the nearer-on-tie rule, so the two cannot pick
+--- different enemies.
 local function fleeTarget(entry, hostiles)
     local p = game.player
     local best, bestPower, bestDist
     for _, h in ipairs(hostiles) do
         if h.actor then
             local dist = core.fov.distance(p.x, p.y, h.x, h.y)
-            local pw = entry.from == "strongest" and bot.power(h.actor) or 0
+            local pw = entry.from == "strongest" and (h.power or 0) or 0
             if not best or pw > bestPower or (pw == bestPower and dist < bestDist) then
                 best, bestPower, bestDist = h, pw, dist
             end
