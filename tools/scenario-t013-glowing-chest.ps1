@@ -233,6 +233,13 @@ return "installed"
     Write-Host ''
     Write-Host '  --- a glowing chest one grid away: the walk is done, hand back (#78, #8)'
     $null = Invoke-Bridge -Lua 'return bl.unchestAway()' -TimeoutSec 30
+    # A chest-free decision first. TERRAIN_GLOWING_CHEST is a WARN: it fires
+    # once and re-arms only when a DECISION sees the condition clear, and the
+    # stop earlier in this run acknowledged it. Taking the chest off the map
+    # is not enough -- the bot has to be asked once with nothing there. That
+    # is the same reason the control case at the top of this scenario runs
+    # before the first chest.
+    $null = Invoke-Bridge -Lua 'return bl.decideExplore()' -TimeoutSec 30
     $near = Invoke-Bridge -Lua 'return bl.chestAway(1)' -TimeoutSec 30
     Write-Host "  $($near.Result)"
     $atchest = Invoke-Bridge -Lua 'return bl.decideExplore()' -TimeoutSec 30
