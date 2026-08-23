@@ -1,0 +1,140 @@
+# Advisory checks: what tools/githooks/pre-commit does, on a machine that is
+# not the maintainer's, plus a packaging check and a tag check.
+#
+# Advisory means exactly that. While the repository is private on GitHub's free
+# plan, required status checks are not available, so this cannot block a
+# merge; and after it goes public it is not to be made blocking for
+# history-protection reasons (D-9: the owner accepted the history-rewrite risk
+# and closed the question). Whether to require these checks is a separate
+# decision taken at going-public. See docs/github-workflow.md section 6.
+#
+# It cannot run the harness: there is no game on a runner. In-game behaviour
+# is verified by tools/scenario-*.ps1 on the maintainer's machine.
+#
+# The Lua tree is built with hererocks into $HOME, deliberately OUTSIDE the
+# workspace: `luacheck .` descends into dot-directories (verified on 1.2.0),
+# so a .lua/ or .luarocks/ tree in the checkout would be linted along with
+# the addon. Versions are pinned to the ones the repo is written against.
+
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: parse, lint, test, pack
+    runs-on: ubuntu-latest
+    env:
+      LUACHECK_VERSION: 1.2.0
+      BUSTED_VERSION: 2.3.0
+      SHORT_NAME: skoobot_reclauded
+
+    steps:
+      - name: Check out
+        # The default checkout is enough: spec/manifest_spec.lua compares the
+        # manifest's homepage with the origin remote, which checkout sets.
+        uses: actions/checkout@v4
+
+      - name: Install LuaJIT 2.1 and luarocks (outside the workspace)
+        # hererocks is a single dependency-free Python script; fetching it
+        # directly avoids pip's externally-managed-environment refusal on a
+        # system Python. It builds LuaJIT from the v2.1 branch and installs a
+        # luarocks configured for that tree, so C rocks (luafilesystem,
+        # luasystem, lua-term) find the right headers.
+        run: |
+          curl -fsSL -o "$HOME/hererocks.py" \
+            https://raw.githubusercontent.com/luarocks/hererocks/master/hererocks.py
+          python3 "$HOME/hererocks.py" "$HOME/lua" --luajit 2.1 --luarocks latest
+          echo "$HOME/lua/bin" >> "$GITHUB_PATH"
+
+      - name: Install luacheck and busted
+        run: |
+          luarocks install luacheck "$LUACHECK_VERSION"
+          luarocks install busted "$BUSTED_VERSION"
+          luajit -v
+          luacheck --version
+          busted --version
+
+      - name: Parse every tracked Lua file under LuaJIT
+        run: |
+          status=0
+          while IFS= read -r f; do
+            if ! luajit -bl "$f" /dev/null >/dev/null; then
+              echo "::error file=$f::does not parse under LuaJIT"
+              status=1
+            fi
+          done < <(git ls-files -- '*.lua')
+          exit "$status"
+
+      - name: Lint
+        # No flags: .luacheckrc carries everything. `luacheck src/` with a
+        # trailing slash checks nothing and exits 3; '.' is the authoritative form.
+        run: luacheck .
+
+      - name: Unit tests
+        # .busted pins the interpreter to luajit and supplies the paths.
+        run: busted
+
+      - name: Packaging check
+        # Mirrors the rules tools/pack.ps1 enforces, on an archive built here
+        # from the tracked contents of src/: init.lua at the root, no
+        # development tree, no src/ prefix, forward slashes only, no directory
+        # entries, no placeholders. A .teaa is an ordinary zip; the engine
+        # silently skips one without a root init.lua, and an entry named
+        # "hooks\load.lua" is a root-level file the mount never finds.
+        run: |
+          version=$(sed -nE 's/^addon_version[[:space:]]*=[[:space:]]*\{[[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*([0-9]+)[[:space:]]*\}.*/\1.\2.\3/p' src/init.lua)
+          if [ -z "$version" ]; then
+            echo "::error file=src/init.lua::could not read addon_version"
+            exit 1
+          fi
+          echo "addon_version $version"
+
+          archive="$PWD/dist/tome-$SHORT_NAME-$version.teaa"
+          mkdir -p dist
+          rm -f "$archive"
+          # Tracked files only, dot-files excluded at any depth, names relative
+          # to src/ so the engine sees init.lua at the archive root.
+          ( cd src && git ls-files -- . | grep -v -E '(^|/)\.' | zip -X -D -q "$archive" -@ )
+
+          unzip -Z1 "$archive" > entries.txt
+          echo "entries:"
+          sed 's/^/  /' entries.txt
+
+          fail=0
+          problem() { echo "::error::$1"; fail=1; }
+          grep -qx 'init.lua' entries.txt        || problem 'no init.lua at the archive root'
+          grep -E '^(tools|spec|docs)/' entries.txt  && problem 'development tree shipped'
+          grep -E '^src/' entries.txt            && problem 'src/ prefix not stripped'
+          grep -F '\' entries.txt                && problem 'backslash in an entry name'
+          grep -E '^\./' entries.txt             && problem 'leading ./ in an entry name'
+          grep -E '^/' entries.txt               && problem 'absolute entry name'
+          grep -E '/$' entries.txt               && problem 'directory entry'
+          grep -E '(^|/)\.gitkeep$' entries.txt  && problem 'placeholder shipped'
+          grep -E '\.(orig|rej|bak|swp|ps1|sh|bat|cmd)$' entries.txt && problem 'detritus or tooling shipped'
+          exit "$fail"
+
+      - name: Tag matches addon_version
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        run: |
+          version=$(sed -nE 's/^addon_version[[:space:]]*=[[:space:]]*\{[[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*([0-9]+)[[:space:]]*\}.*/\1.\2.\3/p' src/init.lua)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error file=src/init.lua::tag v$tag does not match addon_version $version"
+            exit 1
+          fi
+          echo "tag v$tag matches addon_version"
