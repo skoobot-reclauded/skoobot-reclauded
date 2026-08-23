@@ -98,8 +98,14 @@ function _M:use(item)
 		local talentlist = {}
 		for tid, _ in pairs(game.player.talents) do
 			local t = self.actor:getTalentFromId(tid)
-			if t.mode ~= "passive" and t.hide ~= "true" then
-				talentlist[#talentlist + 1] = {name=self.actor:getTalentFromId(tid).name:capitalize(), value=tid}
+			-- FIXED (#55). t.name is the template's name -- "Activate Object" for
+			-- every activatable item; getTalentDisplayName resolves the item's own
+			-- name, as the game's Use Talents screen does. The hide test is the
+			-- game's too: it lists hidden talents unless they are passive, and
+			-- every non-passive talent already passes, so items (hide="always")
+			-- stay listed. v1's `t.hide ~= "true"` never fired (T-001).
+			if t.mode ~= "passive" then
+				talentlist[#talentlist + 1] = {name=tostring(self.actor:getTalentDisplayName(t)):capitalize(), value=tid}
 			end
 		end
 
@@ -110,7 +116,7 @@ function _M:use(item)
 				local auto = self:autotalents()
 				auto[#auto + 1] = {tid=value, usetype='', priority=1}
 				self:generateList()
-				local name = self.actor:getTalentFromId(value).name:capitalize()
+				local name = tostring(self.actor:getTalentDisplayName(self.actor:getTalentFromId(value))):capitalize()
 				local d2 = PickOneDialog.new("Pick use type for " .. name, USE_TYPES,
 					function(value2)
 						print("[SKOOBOT] [TalentDialog] Changing use type for " .. name .. " to " .. value2)
@@ -166,11 +172,11 @@ function _M:generateList()
 	skoobot_reclauded.talents.prune()
 	for index, info in ipairs(self:autotalents()) do
 		local t = game.player:getTalentFromId(info.tid)
-		if t.mode ~= "passive" and t.hide ~= "true" then
+		if t.mode ~= "passive" then   -- FIXED (#55): see use()
 			list[#list + 1] = {
 				id=#list + 1,
 				index=index,
-				name=t.name:capitalize(),
+				name=tostring(self.actor:getTalentDisplayName(t)):capitalize(),
 				tid=info.tid,
 				usetype=info.usetype,
 				priority=info.priority,
