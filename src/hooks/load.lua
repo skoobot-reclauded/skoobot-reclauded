@@ -218,37 +218,52 @@ class:bindHook("GameOptions:generateList", function(self, data)
             }
         end
 
+        -- #54: every entry says what the number is (a fraction of maximum
+        -- life, a power level, a count, seconds) and what happens at it, in
+        -- the words the stop notices use, so the tab reads on its own. The
+        -- setting keys are the save's and the harness's and do not change.
         createNumericalOption("LOWHEALTH_RATIO", "Low Health Ratio",
-            "Bot pauses when under this life percent. Also will pause when losing half this " ..
-            "percent life in a single round.")
+            "A fraction of your maximum life (0.5 is half). While enemies are in view, the bot " ..
+            "stops when life is below it. The other life thresholds follow from it: losing half " ..
+            "of this fraction in one turn is the Big Loss stop; in a fight, losing a quarter of " ..
+            "it in one turn uses a Damage Prevention talent, and missing a quarter of it uses a " ..
+            "Recovery talent.")
         createNumericalOption("IGNORE_DAMAGE_HEALTH_RATIO", "Ignore Damage Above Life Ratio",
-            "While exploring, the bot ignores damage as long as life stays above this fraction, " ..
-            "so a single poison tick no longer halts it. Below it, taking damage hands back.")
-        createNumericalOption("MAX_INDIVIDUAL_POWER", "Max enemy power level",
-            "Pauses the bot when an enemy with a power level over this amount is spotted.")
-        createNumericalOption("MAX_DIFF_POWER", "Maximum Individual Enemy Power",
-            "Pauses the bot when an enemy with a power level this much higher than yours is spotted.")
+            "A fraction of your maximum life (0.9 is nine tenths). While exploring with nothing " ..
+            "in view, damage is ignored as long as life stays above it, so a single poison tick " ..
+            "does not stop the bot; once life is below it, any damage taken while exploring hands " ..
+            "back.")
+        createNumericalOption("MAX_INDIVIDUAL_POWER", "Maximum Enemy Power",
+            "Stop when any enemy in view has a power level above this figure, whatever yours is. " ..
+            "Power level is the addon's rough threat score for a creature -- its life, damage, " ..
+            "crits, speed, defence, stats and weapons summed -- and is shown as \"Power Level\" " ..
+            "in every creature's tooltip; hold Ctrl over a creature to see the parts.")
+        createNumericalOption("MAX_DIFF_POWER", "Maximum Enemy Power Above Yours",
+            "Stop when any enemy in view has a power level more than this much above your own. " ..
+            "Your own power level is scaled by the life you have left, so the same enemy stops " ..
+            "the bot sooner when you are hurt. Power level: see Maximum Enemy Power.")
         createNumericalOption("MAX_COMBINED_POWER", "Maximum Combined Enemy Power",
-            "Pauses the bot when the combined power level of visible enemies is more than this " ..
-            "amount above yours (your power level scaled by the life you have left).")
+            "Stop when the power levels of every enemy in view, added together, are more than " ..
+            "this much above your own (again scaled by the life you have left). A margin above " ..
+            "yours, not an absolute figure. Power level: see Maximum Enemy Power.")
         createNumericalOption("MAX_ENEMY_COUNT", "Maximum Enemy Count",
-            "Pauses the bot when this many enemies is spotted.")
+            "Stop when more than this many enemies are in view at once, whatever their power.")
         -- #62: the rank weights. One entry per band; data/power.lua says
         -- which ToME rank falls in which band.
         createNumericalOption("NORMAL_POWER_RATIO", "Normal Enemy Power Ratio",
-            "Critters and normal-rank enemies count for this fraction of their power level in " ..
-            "the power checks above, so a pack of commons does not read as a threat. 0.4 is " ..
-            "less than half; 1 is face value.")
+            "Critters and normal-rank enemies count for this multiple of their power level in " ..
+            "the three power checks above: 0.4 means a common counts for less than half, so a " ..
+            "pack of them does not read as a threat; 1 is face value.")
         createNumericalOption("ELITES_POWER_RATIO", "Elite Enemy Power Ratio",
             "Elite, rare and unique enemies count for this multiple of their power level in the " ..
-            "power checks above. 1 is face value.")
+            "three power checks above: 1 is face value; 2 would count each as double.")
         createNumericalOption("BOSS_POWER_RATIO", "Boss Enemy Power Ratio",
             "Bosses, elite bosses and anything stronger count for this multiple of their power " ..
-            "level in the power checks above. 2 is double.")
+            "level in the three power checks above: 2 counts each as double; 1 is face value.")
         createNumericalOption("ACTION_DELAY", "Action Delay",
-            "Bot will wait this many seconds between each action. THIS IS CURRENTLY A BIT BUGGY " ..
-            "AND THE BOT WILL ACT WHEN YOU PRESS BUTTONS OR MOVE YOUR MOUSE IN ADDITION TO " ..
-            "AUTOMATICALLY WITH THIS DELAY")
+            "Seconds the bot waits between its actions, so you can watch what it does. 0 acts " ..
+            "at full speed. Known to be rough: with a delay set, the bot also takes its next " ..
+            "action when you press a key or move the mouse.")
         createBooleanOption("STOP_POPUP", "Popup when the bot stops",
             "Also open a popup with the reason whenever the bot stops for something you should " ..
             "look at: low life, a debuff, being stuck. The message-log line and the banner are " ..
