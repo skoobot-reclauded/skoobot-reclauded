@@ -102,13 +102,28 @@ function sp.onChangeLevel()
   local p = game.player
   return game.level.map:checkEntity(p.x, p.y, engine.Map.TERRAIN, "change_level") ~= nil
 end
+-- Free tiles next to the character: the spawns below need three of them, so
+-- the quiet spot must have them or the run is inconclusive on its own setup.
+function sp.freeAdjacent()
+  local p = game.player
+  local n = 0
+  for _, c in pairs(util.adjacentCoords(p.x, p.y)) do
+    local x, y = c[1], c[2]
+    if game.level.map:isBound(x, y) and not game.level.map:checkAllEntities(x, y, "block_move")
+       and not game.level.map(x, y, engine.Map.ACTOR) then n = n + 1 end
+  end
+  return n
+end
+function sp.quietHere()
+  return sp.hostiles() == 0 and not sp.onChangeLevel() and sp.freeAdjacent() >= 3
+end
 function sp.findQuiet()
   local p = game.player
   for i = 1, 80 do
-    if sp.hostiles() == 0 and not sp.onChangeLevel() then return true end
+    if sp.quietHere() then return true end
     p:teleportRandom(p.x, p.y, 60, 10)
   end
-  return sp.hostiles() == 0 and not sp.onChangeLevel()
+  return sp.quietHere()
 end
 -- Remember what the probes change, once.
 function sp.save()
