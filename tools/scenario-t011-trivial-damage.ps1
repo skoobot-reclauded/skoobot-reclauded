@@ -7,16 +7,17 @@
     fallen to it.
 
     Verified by an A/B on the SAME state, changing only the threshold: a
-    small loss (10% of max) at 90% life must NOT stop the bot with the default
-    0.75 ratio, and MUST stop it once the ratio is raised above the current
+    small loss (5% of max) at 95% life must NOT stop the bot with the default
+    0.9 ratio, and MUST stop it once the ratio is raised above the current
     life. Same damage, opposite outcome, so the threshold is provably what
-    gates the stop.
+    gates the stop. (The default was 0.75 when this landed; the owner raised
+    it on #6 because DOTs ramp, and the arms moved with it.)
 
     The decision is driven through query mode, which advances no game.turn, so
     the state is exactly what the test sets -- no rest cycle, no wandering
     monster, no flake. The bot table is injected with a fresh EXPLORE
     activation whose previous-life is full, so this iteration's delta is the
-    10% loss and nothing else.
+    5% loss and nothing else.
 
     Exit codes:  0 pass   1 fail   2 tainted   3 inconclusive
 
@@ -50,7 +51,7 @@ local s = config.settings.tome.skoobot_reclauded
 return "IGNORE_DAMAGE_HEALTH_RATIO=" .. tostring(s and s.IGNORE_DAMAGE_HEALTH_RATIO)
 '@ -TimeoutSec 30
     Write-Host "  setting $($set.Result)"
-    Check ($set.Result -match 'IGNORE_DAMAGE_HEALTH_RATIO=0\.75') 'the new setting exists with its default'
+    Check ($set.Result -match 'IGNORE_DAMAGE_HEALTH_RATIO=0\.9$') 'the new setting exists with its default (0.9)'
 
     $null = Invoke-Bridge -Lua @'
 _G.bl = {}
@@ -86,8 +87,8 @@ return "installed"
         Write-Host '[t011] INCONCLUSIVE - no quiet, open spot to test from.'; Stop-Game; exit 3
     }
 
-    # Inject an EXPLORE decision that took a 10% loss this iteration (previous
-    # life full), at 90% life, on an open tile, and run one query. Returns the
+    # Inject an EXPLORE decision that took a 5% loss this iteration (previous
+    # life full), at 95% life, on an open tile, and run one query. Returns the
     # reason the bot would hand back, or nothing.
     function Decide-AtRatio($ratio) {
         $r = Invoke-Bridge -Lua @"
@@ -96,7 +97,7 @@ skoobot_reclauded.stop("reset")
 p:removeEffect(p.EFF_PINNED, true, true); p:removeEffect(p.EFF_SLEEP, true, true)
 config.settings.tome.skoobot_reclauded.IGNORE_DAMAGE_HEALTH_RATIO = $ratio
 skoobot_reclauded.data(p).autotalents = {}   -- so activateSustained is a no-op
-p.life = p.max_life * 0.90
+p.life = p.max_life * 0.95
 p:playerFOV()
 if bl.hostiles() ~= 0 then return "SETUP a hostile is in view" end
 if bl.onChangeLevel() then return "SETUP on a change-level tile" end
@@ -105,7 +106,7 @@ local unspent = (p.unused_talents or 0) + (p.unused_generics or 0)
 local b = skoobot_reclauded
 b.active = false; b.do_nothing = false; b.state = 11; b.last_reason = nil
 b.activation = { turnCount = 0, unspentTotal = unspent }
-b.loop = { life = p.max_life, thinkCount = 0, talentfailed = {} }  -- prev life full -> delta = -10%
+b.loop = { life = p.max_life, thinkCount = 0, talentfailed = {} }  -- prev life full -> delta = -5%
 b.prevloop = nil
 local before = game.turn
 b.query()
@@ -118,20 +119,20 @@ return "REASON " .. tostring(b.last_reason) .. " | dturn=" .. tostring(game.turn
     }
 
     Write-Host ''
-    Write-Host '  --- default 0.75: a 10% scratch at 90% life is ignored'
-    $a = Decide-AtRatio '0.75'
+    Write-Host '  --- default 0.9: a 5% scratch at 95% life is ignored'
+    $a = Decide-AtRatio '0.9'
     if ($a -match '^SETUP') { Write-Host "[t011] INCONCLUSIVE ($a)"; Stop-Game; exit 3 }
     Check ($a -notmatch 'took damage') 'default ratio: the bot does NOT hand back for a trivial scratch'
     Check ($a -match 'dturn=0') 'query advanced no game turn (deterministic state)'
 
     Write-Host ''
-    Write-Host '  --- 0.95: the same scratch now falls below the threshold and stops'
-    $b = Decide-AtRatio '0.95'
+    Write-Host '  --- 0.97: the same scratch now falls below the threshold and stops'
+    $b = Decide-AtRatio '0.97'
     if ($b -match '^SETUP') { Write-Host "[t011] INCONCLUSIVE ($b)"; Stop-Game; exit 3 }
     Check ($b -match 'took damage') 'raised ratio: the same damage now hands back -- the threshold is what gates it'
 
     # Restore the default so a later run on this save is not surprised.
-    $null = Invoke-Bridge -Lua 'config.settings.tome.skoobot_reclauded.IGNORE_DAMAGE_HEALTH_RATIO = 0.75 return "restored"' -TimeoutSec 30
+    $null = Invoke-Bridge -Lua 'config.settings.tome.skoobot_reclauded.IGNORE_DAMAGE_HEALTH_RATIO = 0.9 return "restored"' -TimeoutSec 30
 }
 finally {
     Stop-Game

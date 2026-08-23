@@ -74,7 +74,7 @@ never acts.
 
 ## Take
 
-**1. `IGNORE_DAMAGE_HEALTH_RATIO` (default 0.75).** Suppresses the "took damage while
+**1. `IGNORE_DAMAGE_HEALTH_RATIO` (default 0.9; mishander shipped 0.75).** Suppresses the "took damage while
 exploring" stop while life is above the threshold. Directly answers lukesilveira's complaint
 that a single poison tick halts the bot. Right diagnosis, right shape of fix. Under T-020 this
 becomes an input to the score rather than a standalone flag.
