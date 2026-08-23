@@ -414,6 +414,17 @@ Nothing in the engine, module, or DLC archives is modified. The whole footprint 
 the product. Until it existed, every harness run exercised the bridge and never once loaded
 the thing under test.
 
+**The harness save carries six addons** (#27). Its descriptor,
+`<T-Engine home>/4.0/tome/save/harness/desc.lua`, records `skoobot_reclauded` (the product
+junction), `skoobot_devbridge` (the tome-tier junction), the three DLCs installed as
+`<game dir>/dlcs/*.teaac` — `ashes-urhrok`, `orcs`, `cults` — and `items-vault`, from
+`<game dir>/addons/tome-items-vault.teaa`. The boot-tier devbridge belongs to the boot module
+and is never part of a tome save. Anything else under `<game dir>/addons/` is absent from
+that list and so dropped on load (§4) — which is fine, because the harness needs exactly two
+of the six, `skoobot_reclauded` and `skoobot_devbridge` (`$RequiredSaveAddons` in
+`harness.ps1`); the rest only have to stay the same, since a save whose addon set changes
+has to be regenerated with `tools/new-character.ps1`.
+
 None of this is done by hand any more:
 
 ```
