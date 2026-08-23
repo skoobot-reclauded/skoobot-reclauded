@@ -26,6 +26,23 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   not as "Activate Object", and its rule follows the item rather than the slot it sits in (#55).
 - **Stop popup** (off by default): the option *Popup when the bot stops* shows a popup on every
   stop, with a "Don't show this popup again" checkbox (#58).
+- **Suggest a loadout**: the talent screen's first row reads a suggested set of rules off the
+  game's own talent data -- which talents attack, heal, defend, or are kept up -- and shows it
+  with a reason per row before anything is written. *Merge* adds what is new and keeps every row
+  you placed yourself; *Replace* clears the list first and asks. Mutually exclusive sustains (the
+  chants, the hymns) are left for you to pick. The "no Combat talent is ready" stop points at
+  it (#18).
+- **Keybind collisions are reported, never fixed for you**: if another addon or the base game
+  has an action on one of SkooBot: Reclauded's keys, one `[SkooBot]` line says which two
+  actions share it and points at Escape > Key Bindings, and the menu shows *Keybinds: N
+  collisions* with the pairs. Nothing is rebound (#50).
+- **Threat checks from mishander's fork** (#62): each visible enemy's power counts at 0.4
+  for normal rank, 1.0 for elites and rares, 2.0 for bosses (three new options, *Normal /
+  Elite / Boss Power Ratio*), so a pack of commons no longer stops the bot where one rare would
+  not; your own power is scaled by remaining life when compared, so the same enemy hands back
+  sooner when you are hurt; and *Maximum Combined Enemy Power* now means *above your own
+  power* rather than an absolute figure. Toggling the bot on the stairs you arrived by explores
+  instead of handing back at once.
 
 ### Changed
 

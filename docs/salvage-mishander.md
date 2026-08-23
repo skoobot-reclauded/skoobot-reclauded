@@ -89,13 +89,22 @@ becomes an input to the score rather than a standalone flag.
 That is precisely the flat-threshold failure T-020 exists to fix, identified independently
 from play. Take the insight; the magic numbers (`rank < 3`, `rank < 4`) need named constants.
 
+> **Taken 2026-08-23** (#62, `d3becd0`): `power.rankWeight` maps the rank bands to three named
+> settings with mishander's defaults; the weights apply in `spotHostiles` before the max and the
+> sum. Regression: `tools/scenario-salvage-power.ps1`.
+
 **3. HP-weighted own power** — `evaluatePowerLevel() * (life / max_life)`. Obvious in
 hindsight and absent from the original. mishander flags that it probably shouldn't be linear,
 and they're right; a character at 51% life is worse off than half-strength because it has
 fewer turns of margin.
 
+> **Taken 2026-08-23** (#62, `035dee8`): linear, as theirs; the non-linear form is #11's.
+
 **4. Relative crowd threshold** — `sumVisibleEnemyPower > myPowerLevel + MAX_COMBINED_POWER`
 rather than an absolute cutoff. Correct: threat is relative to the character, not a constant.
+
+> **Taken 2026-08-23** (#62, `28af687`): `MAX_COMBINED_POWER` now means the margin above the
+> player's own (life-scaled) power; the default 500 is unchanged and is a play-check item.
 
 **5–6. Drowning fixes.** ~~`not game.player.can_breath` replaces the broken undead check, and
 `getPathToAir` gains `self:canMove(x, y, false)` so it stops pathing to air tiles it cannot
@@ -120,6 +129,10 @@ not "am I pinned?". Take the fix, generalise the condition — full reasoning in
 of immediately stopping. mishander wanted to rebind auto-explore to the bot entirely and hit
 this. Sound UX; the flag-based implementation is clumsy and should fall out of state handling
 naturally rather than needing a counter.
+
+> **Taken 2026-08-23** (#62, `586eb25`), as state rather than a counter: the activation records
+> the tile it started on, and the "standing on a level change" hand-back fires only for a
+> change-level tile the bot walked onto. Regression: `tools/scenario-salvage-entrance.ps1`.
 
 ## Rewrite
 
