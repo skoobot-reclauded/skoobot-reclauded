@@ -149,10 +149,10 @@ describe("data/score.lua", function()
 
     it("the details carry v1's wording with the figures compared", function()
       local r = S.evaluate(situation({ own = 50, hostiles = { hostile(300, 3), hostile(251, 3) } }), knobs())
-      assert.equals("an enemy's power level, 300, is above MAX_INDIVIDUAL_POWER", r.details.SCOUTER_BIGENEMY)
-      assert.equals("an enemy's power level, 300, is more than MAX_DIFF_POWER above yours (50.0 at current life)",
+      assert.equals("an enemy's power level, 300.0, is above MAX_INDIVIDUAL_POWER", r.details.SCOUTER_BIGENEMY)
+      assert.equals("an enemy's power level, 300.0, is more than MAX_DIFF_POWER above yours (50.0 at current life)",
         r.details.SCOUTER_STRONGERENEMY)
-      assert.equals("the combined enemy power level, 551, is more than MAX_COMBINED_POWER above yours "
+      assert.equals("the combined enemy power level, 551.0, is more than MAX_COMBINED_POWER above yours "
         .. "(50.0 at current life)", r.details.SCOUTER_CROWDPOWER)
       assert.is_nil(r.details.SCOUTER_ENEMYCOUNT)
     end)
@@ -184,8 +184,8 @@ describe("data/score.lua", function()
       assert.equals(S.HANDBACK, r.posture)
       assert.is_true(r.flags.SCOUTER_BIGENEMY)
       assert.is_true(r.flags.SCOUTER_STRONGERENEMY)
-      assert.equals("an enemy's power level, 480, is above MAX_INDIVIDUAL_POWER -- threat 16.0", r.reasons[1])
-      assert.equals("an enemy's power level, 480, is more than MAX_DIFF_POWER above yours (20.0 at current life)"
+      assert.equals("an enemy's power level, 480.0, is above MAX_INDIVIDUAL_POWER -- threat 16.0", r.reasons[1])
+      assert.equals("an enemy's power level, 480.0, is more than MAX_DIFF_POWER above yours (20.0 at current life)"
         .. " -- threat 16.0", r.reasons[2])
       assert.is_near(16, r.score, 1e-9)                 -- 480 / (20 + 10)
     end)
@@ -202,6 +202,18 @@ describe("data/score.lua", function()
         accepted = { SCOUTER_BIGENEMY = true, SCOUTER_STRONGERENEMY = true } }), knobs())
       assert.equals(S.RETREAT, r.posture)
       assert.equals("boss is 16.0x your limit at distance 3: step away first", r.reasons[1])
+    end)
+
+    it("the same boss accepted at distance 3 after RETREAT_LIMIT steps away: fight, the chase failed", function()
+      local r = S.evaluate(situation({ own = 20, hostiles = { hostile(480, 3, { name = "boss" }) },
+        retreats = S.RETREAT_LIMIT,
+        accepted = { SCOUTER_BIGENEMY = true, SCOUTER_STRONGERENEMY = true } }), knobs())
+      assert.equals(S.FIGHT, r.posture)
+      assert.equals("boss is 16.0x your limit at distance 3, and 5 steps away have not shaken it", r.reasons[1])
+      r = S.evaluate(situation({ own = 20, hostiles = { hostile(480, 3, { name = "boss" }) },
+        retreats = S.RETREAT_LIMIT - 1,
+        accepted = { SCOUTER_BIGENEMY = true, SCOUTER_STRONGERENEMY = true } }), knobs())
+      assert.equals(S.RETREAT, r.posture)
     end)
 
     it("the same boss accepted at distance 3, but pinned: fight", function()

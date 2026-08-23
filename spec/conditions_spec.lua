@@ -32,7 +32,7 @@ local function context(over)
   }
   local ctx = {
     hostiles = 0,
-    loop = { enemyCount = 0, maxVisibleEnemyPower = 0, sumVisibleEnemyPower = 0 },
+    score = { flags = {}, details = {}, suffix = " -- threat 0.0" },
     own = 50,
     cfg = function(k) return settings[k] end,
     chestInView = function() return false end,
@@ -204,47 +204,39 @@ describe("data/conditions.lua", function()
     end)
   end)
 
-  describe("the power detectors compare v1's four thresholds over the #62 figures", function()
-    local function loop(over)
-      local l = { enemyCount = 3, maxVisibleEnemyPower = 100, sumVisibleEnemyPower = 250 }
-      for k, v in pairs(over or {}) do l[k] = v end
-      return l
+  describe("the power conditions read the situation score (#11)", function()
+    local POWER = { "SCOUTER_ENEMYCOUNT", "SCOUTER_BIGENEMY", "SCOUTER_STRONGERENEMY", "SCOUTER_CROWDPOWER" }
+
+    -- A score as data/score.lua returns it: the flags and details for a
+    -- situation, and the suffix. The scorer's own spec pins how these are
+    -- computed; here only the reading matters.
+    local function scoreOf(flags, details, suffix)
+      return { flags = flags, details = details, suffix = suffix or " -- threat 1.5" }
     end
 
-    it("ENEMYCOUNT", function()
-      local d = C.find("SCOUTER_ENEMYCOUNT")
-      assert.is_true(d.detect(actor(), context({ loop = loop({ enemyCount = 13 }) })))
-      assert.is_false(d.detect(actor(), context({ loop = loop({ enemyCount = 12 }) })))
-      assert.equals("13 enemies in sight, above MAX_ENEMY_COUNT",
-        C.message(d, actor(), context({ loop = loop({ enemyCount = 13 }) })))
+    it("each reads its own flag, and nothing else", function()
+      for _, code in ipairs(POWER) do
+        local d = C.find(code)
+        assert.equals("power", d.category)
+        assert.equals(C.SITE_TURN, d.site)
+        assert.equals("STOP", d.default)
+        assert.is_true(d.detect(actor(), context({ score = scoreOf({ [code] = true }, {}) })))
+        assert.is_false(d.detect(actor(), context({ score = scoreOf({}, {}) })))
+        local others = {}
+        for _, o in ipairs(POWER) do
+          if o ~= code then others[o] = true end
+        end
+        assert.is_false(d.detect(actor(), context({ score = scoreOf(others, {}) })), code .. " reads another flag")
+      end
     end)
 
-    it("BIGENEMY is absolute", function()
-      local d = C.find("SCOUTER_BIGENEMY")
-      assert.is_true(d.detect(actor(), context({ loop = loop({ maxVisibleEnemyPower = 201 }), own = 1000 })))
-      assert.is_false(d.detect(actor(), context({ loop = loop({ maxVisibleEnemyPower = 200 }) })))
-      assert.equals("an enemy's power level, 201, is above MAX_INDIVIDUAL_POWER",
-        C.message(d, actor(), context({ loop = loop({ maxVisibleEnemyPower = 201 }) })))
-    end)
-
-    it("STRONGERENEMY is relative to the life-scaled own power", function()
+    it("the message is the score's wording of the flag with the threat appended", function()
       local d = C.find("SCOUTER_STRONGERENEMY")
-      assert.is_true(d.detect(actor(), context({ loop = loop({ maxVisibleEnemyPower = 61 }), own = 50 })))
-      assert.is_false(d.detect(actor(), context({ loop = loop({ maxVisibleEnemyPower = 60 }), own = 50 })))
-      assert.equals("an enemy's power level, 61, is more than MAX_DIFF_POWER above yours (50.0 at current life)",
-        C.message(d, actor(), context({ loop = loop({ maxVisibleEnemyPower = 61 }), own = 50 })))
-    end)
-
-    it("CROWDPOWER is the weighted sum against own power plus the margin", function()
-      local d = C.find("SCOUTER_CROWDPOWER")
-      assert.is_true(d.detect(actor(), context({ loop = loop({ sumVisibleEnemyPower = 551 }), own = 50 })))
-      assert.is_false(d.detect(actor(), context({ loop = loop({ sumVisibleEnemyPower = 550 }), own = 50 })))
-      assert.equals("the combined enemy power level, 551, is more than MAX_COMBINED_POWER above yours "
-        .. "(50.0 at current life)",
-        C.message(d, actor(), context({ loop = loop({ sumVisibleEnemyPower = 551 }), own = 50 })))
+      local wording = "an enemy's power level, 61, is more than MAX_DIFF_POWER above yours (50.0 at current life)"
+      local s = scoreOf({ SCOUTER_STRONGERENEMY = true }, { SCOUTER_STRONGERENEMY = wording }, " -- threat 1.0")
+      assert.equals(wording .. " -- threat 1.0", C.message(d, actor(), context({ score = s })))
     end)
   end)
-
   describe("the terrain and liveness detectors", function()
     it("the chest reads the scan the act loop hands it", function()
       local d = C.find("TERRAIN_GLOWING_CHEST")

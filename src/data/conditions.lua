@@ -76,9 +76,9 @@ M.HANDED_BACK = "handed_back"
 
 -- What a detector is given besides the actor, filled in by the act loop:
 --   ctx.hostiles     how many hostiles are in view
---   ctx.loop         the per-iteration scratch: enemyCount,
---                    maxVisibleEnemyPower, sumVisibleEnemyPower (weighted)
---   ctx.own          the player's own power level, scaled by life (#62)
+--   ctx.score        the situation scored (data/score.lua, #11): the four
+--                    power conditions read their flag from it and word
+--                    their message from its details and its suffix
 --   ctx.cfg          function(key) -> the setting's value
 --   ctx.chestInView  function(p) -> is an unopened glowing chest in view
 --   ctx.delta        life change this turn (SITE_LOOP only)
@@ -89,9 +89,16 @@ local function counter(p, name)
     return type(v) == "number" and v or 0
 end
 
---- A stop's own-power figure, to one decimal, as the power messages say it.
-local function fmt1(x)
-    return ("%.1f"):format(x)
+--- A power condition: a STOP policy entry whose detector and message are
+--- both read off the score. The flag is v1's comparison, made there, and
+--- the message is v1's wording of it with the threat score appended.
+local function scored(code, label)
+    return {
+        code = code, label = label, default = "STOP",
+        category = "power", site = M.SITE_TURN, blocks = {},
+        detect  = function(_, ctx) return ctx.score.flags[code] and true or false end,
+        message = function(_, ctx) return ctx.score.details[code] .. ctx.score.suffix end,
+    }
 end
 
 M.LIST = {
@@ -175,40 +182,25 @@ M.LIST = {
       detect = function(p, ctx) return ctx.chestInView(p) and true or false end,
       message = "a glowing chest is nearby -- open it yourself, they can be guarded" },
 
-    -- Power level: the four thresholds of v1 over the rank-weighted enemy
-    -- figures (#62) and the player's life-scaled own power. The messages
-    -- carry the figures the comparison used, which is what the salvage
-    -- scenario reads back.
-    { code = "SCOUTER_ENEMYCOUNT", label = "Power Level: ENEMYCOUNT", default = "STOP",
-      category = "power", site = M.SITE_TURN, blocks = {},
-      detect = function(_, ctx) return ctx.loop.enemyCount > ctx.cfg("MAX_ENEMY_COUNT") end,
-      message = function(_, ctx) return ctx.loop.enemyCount .. " enemies in sight, above MAX_ENEMY_COUNT" end },
-    { code = "SCOUTER_BIGENEMY", label = "Power Level: BIGENEMY", default = "STOP",
-      category = "power", site = M.SITE_TURN, blocks = {},
-      detect = function(_, ctx) return ctx.loop.maxVisibleEnemyPower > ctx.cfg("MAX_INDIVIDUAL_POWER") end,
-      message = function(_, ctx)
-          return "an enemy's power level, " .. ctx.loop.maxVisibleEnemyPower .. ", is above MAX_INDIVIDUAL_POWER"
-      end },
-    { code = "SCOUTER_STRONGERENEMY", label = "Power Level: STRONGERENEMY", default = "STOP",
-      category = "power", site = M.SITE_TURN, blocks = {},
-      detect = function(_, ctx) return ctx.loop.maxVisibleEnemyPower > ctx.own + ctx.cfg("MAX_DIFF_POWER") end,
-      message = function(_, ctx)
-          return "an enemy's power level, " .. ctx.loop.maxVisibleEnemyPower
-              .. ", is more than MAX_DIFF_POWER above yours (" .. fmt1(ctx.own) .. " at current life)"
-      end },
-    -- #62 (salvage-mishander.md item 4): the crowd threshold is relative to
-    -- the character, not a constant. v1 compared the sum with
-    -- MAX_COMBINED_POWER alone, so the same crowd stopped a level-30 and a
-    -- level-3 character alike; now the sum has to exceed the character's
-    -- own (life-scaled) power by that much. The default stays 500, so the
-    -- setting's meaning changed under it: it is the margin above yours.
-    { code = "SCOUTER_CROWDPOWER", label = "Power Level: CROWDPOWER", default = "STOP",
-      category = "power", site = M.SITE_TURN, blocks = {},
-      detect = function(_, ctx) return ctx.loop.sumVisibleEnemyPower > ctx.own + ctx.cfg("MAX_COMBINED_POWER") end,
-      message = function(_, ctx)
-          return "the combined enemy power level, " .. ctx.loop.sumVisibleEnemyPower
-              .. ", is more than MAX_COMBINED_POWER above yours (" .. fmt1(ctx.own) .. " at current life)"
-      end },
+    -- Power level: the four thresholds of v1, read off the situation score
+    -- (#11). The score makes v1's comparisons over the rank-weighted enemy
+    -- figures (#62) and the player's life-scaled own power, and carries
+    -- the figures in its wording -- which is what the salvage scenario
+    -- reads back -- with the threat score appended. The policy here still
+    -- decides whether a flag stops the bot; the posture the score
+    -- recommends is what the fight branch does when it does not.
+    --
+    -- SCOUTER_CROWDPOWER, #62 (salvage-mishander.md item 4): the crowd
+    -- threshold is relative to the character, not a constant. v1 compared
+    -- the sum with MAX_COMBINED_POWER alone, so the same crowd stopped a
+    -- level-30 and a level-3 character alike; now the sum has to exceed
+    -- the character's own (life-scaled) power by that much. The default
+    -- stays 500, so the setting's meaning changed under it: it is the
+    -- margin above yours.
+    scored("SCOUTER_ENEMYCOUNT",    "Power Level: ENEMYCOUNT"),
+    scored("SCOUTER_BIGENEMY",      "Power Level: BIGENEMY"),
+    scored("SCOUTER_STRONGERENEMY", "Power Level: STRONGERENEMY"),
+    scored("SCOUTER_CROWDPOWER",    "Power Level: CROWDPOWER"),
 
     -- Liveness: no default, so never in the menu or the save. `generic`
     -- marks the catch-all whose name is used only when no named condition

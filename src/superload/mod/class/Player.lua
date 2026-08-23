@@ -52,6 +52,13 @@
 --   checkPowerLevel if-chains are gone, with their `== 1` tests; the act
 --   loop consults what the detected conditions block (move / act / target)
 --   so "cannot move but can act" has a defined response in every state.
+-- * The situation is scored (data/score.lua, #11): the four power
+--   conditions read their flag off it, their messages carry the threat
+--   score, and the FIGHT branch follows its posture -- retreat a step,
+--   hold and wait, fight, or hand back with the reasons -- where v1 could
+--   only stop or charge. The player's knobs are the score's parameters.
+--   The FIGHT branch's v1 log(msg) lines went through the channel with a
+--   format each on the way (#66); the shim is gone.
 
 local Astar = require "engine.Astar"
 local KeyBind = require "engine.KeyBind"
@@ -66,6 +73,7 @@ local notice = dofile("/data-skoobot_reclauded/notice.lua")
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
 local logm = dofile("/data-skoobot_reclauded/log.lua")
 local conditions = dofile("/data-skoobot_reclauded/conditions.lua")
+local score = dofile("/data-skoobot_reclauded/score.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -130,6 +138,26 @@ local skoobot_act, checkForAdditionalAction, stop
 local function cfg(key)
     local s = config.settings.tome.skoobot_reclauded
     return s and s[key]
+end
+
+--- The rank-band weights as set (#62), in power.rankWeight's shape.
+local function rankWeights()
+    return {
+        normal = cfg("NORMAL_POWER_RATIO"),
+        elite  = cfg("ELITES_POWER_RATIO"),
+        boss   = cfg("BOSS_POWER_RATIO"),
+    }
+end
+
+--- The knobs the score is parametrised by (#11), as set.
+local function scoreKnobs()
+    return {
+        MAX_INDIVIDUAL_POWER       = cfg("MAX_INDIVIDUAL_POWER"),
+        MAX_DIFF_POWER             = cfg("MAX_DIFF_POWER"),
+        MAX_COMBINED_POWER         = cfg("MAX_COMBINED_POWER"),
+        MAX_ENEMY_COUNT            = cfg("MAX_ENEMY_COUNT"),
+        IGNORE_DAMAGE_HEALTH_RATIO = cfg("IGNORE_DAMAGE_HEALTH_RATIO"),
+    }
 end
 
 -- The channel (#46). The file sink is print, which the engine writes to
@@ -229,7 +257,7 @@ bot.conditions = {
     --- the harness: conditions.capabilities over the live player.
     capabilities = function(p)
         p = p or game.player
-        return conditions.capabilities(p, conditionContext(p, 0))
+        return conditionContext(p, {}).caps
     end,
 }
 
@@ -501,6 +529,20 @@ local function SAI_beginExplore()
     end
 end
 
+--- Spend the turn in place (#11, the hold posture): the engine's own wait,
+--- which also reloads a ranged weapon. A real action -- game.turn advances
+--- -- so the progress invariant (#13) reads it as one.
+local function SAI_wait(towards)
+    local who = tostring(towards and towards.name or "them")
+    if bot.do_nothing then
+        game.log("[SkooBot] AI would wait for " .. who .. " to come into reach")
+        return
+    end
+    chan.info("[Action] Waiting for %s to come into reach", who)
+    bot.actions = bot.actions + 1
+    game.player:waitTurn()
+end
+
 local function SAI_beginRest()
     if bot.do_nothing then
         game.log("[SkooBot] AI would begin resting.")
@@ -531,29 +573,17 @@ local function spotHostiles(self, actors_only)
             end
         end, nil)
 
-    -- v1 wrote these into the loop scratch unconditionally; the guard only
-    -- lets inspect() call this outside an activation.
-    if bot.loop then
-        bot.loop.sumVisibleEnemyPower = 0
-        bot.loop.maxVisibleEnemyPower = 0
-        bot.loop.enemyCount = #seen
-        -- #62 (salvage item 2): each enemy's power is weighted by its rank
-        -- band before the max and the sum, so a pack of commons no longer
-        -- reads as a threat and a single boss reads as more of one. The
-        -- bands and the default weights are mishander's; power.rankWeight
-        -- says which rank is which.
-        local weights = {
-            normal = cfg("NORMAL_POWER_RATIO"),
-            elite  = cfg("ELITES_POWER_RATIO"),
-            boss   = cfg("BOSS_POWER_RATIO"),
-        }
-        for _, a in ipairs(seen) do
-            local pw = power.level(a.actor, game.player.global_speed) * power.rankWeight(a.actor, weights)
-            bot.loop.sumVisibleEnemyPower = bot.loop.sumVisibleEnemyPower + pw
-            if bot.loop.maxVisibleEnemyPower < pw then
-                bot.loop.maxVisibleEnemyPower = pw
-            end
-        end
+    -- #62 (salvage item 2): each enemy's power is weighted by its rank band
+    -- -- so a pack of commons no longer reads as a threat and a single boss
+    -- reads as more of one; the bands and the default weights are
+    -- mishander's, power.rankWeight says which rank is which -- and recorded
+    -- on its entry with its distance, for the score (#11). v1 summed these
+    -- into the loop scratch here; the scorer sums them now.
+    for _, a in ipairs(seen) do
+        a.power = score.enemyPower(power.level(a.actor, game.player.global_speed),
+            power.rankWeight(a.actor, rankWeights()))
+        a.rank = a.actor.rank
+        a.distance = core.fov.distance(self.x, self.y, a.x, a.y)
     end
 
     if not actors_only then
@@ -790,6 +820,14 @@ end
 --- by default). For the harness and for bug reports.
 function bot.power(actor)
     return power.level(actor or game.player, game.player.global_speed)
+end
+
+--- The situation as the score sees it right now (#11): terms, flags,
+--- figures, posture and reasons, over what the player can see. For the
+--- harness and for bug reports.
+function bot.score(p)
+    p = p or game.player
+    return conditionContext(p, spotHostiles(p, true)).score
 end
 
 --- What a rule is worth to the act loop right now: a talent rule is its tid;
@@ -1199,31 +1237,70 @@ end
 -- Checks
 -------------------------------------------------------------------------------
 
---- The player's own power level as the stop conditions compare it (#62,
+--- The player's own power level as the score compares it (#62,
 --- salvage-mishander.md item 3): the heuristic's figure scaled by the
 --- fraction of life left, so a character at half life reads as half as
---- strong. Linear, as mishander wrote it, and probably not right: a
---- character at 51% life is worse off than half-strength because it has
---- fewer turns of margin. The curve is #11's to choose, with the score it
---- feeds; this only makes the comparison look at life at all. The figure
---- v1 compared -- and the tooltip still shows -- ignored life entirely.
+--- strong. Linear, as mishander wrote it (score.ownPower, which the
+--- tooltip shows too), and probably not right: a character at 51% life is
+--- worse off than half-strength because it has fewer turns of margin. The
+--- curve is left linear on purpose: the score's terms are ratios of this
+--- figure, and a curve here would re-tune every knob under the player.
 local function ownPowerLevel(p)
-    local fraction = (p.max_life and p.max_life > 0) and (p.life / p.max_life) or 1
-    return power.level(p, p.global_speed) * fraction
+    return score.ownPower(power.level(p, p.global_speed), p.life, p.max_life)
+end
+
+--- Which of the score's flags the player has told the bot to live with
+--- (#11): a power condition set to IGNORE, or a WARN that has fired and
+--- been restarted past. The score's posture is for these; a flag that is
+--- not accepted stops the bot at the turn site before any posture is read.
+local function acceptedFlags(p)
+    local d = data(p)
+    local out = {}
+    for _, code in ipairs(score.FLAGS) do
+        local def = conditions.find(code)
+        if def and def.default then
+            local stoptype = getStopCondition(p, code).stoptype
+            if stoptype == "IGNORE" or (stoptype == "WARN" and d.stopwarn and d.stopwarn[code] == true) then
+                out[code] = true
+            end
+        end
+    end
+    return out
+end
+
+--- The situation scored (#11): data/score.lua over the player's own
+--- power, the hostiles spotHostiles weighted, what the condition list says
+--- the player cannot do, life, air, and whether damage arrived this turn.
+local function evaluateSituation(p, hostiles, caps, damaged)
+    local blocks = {}
+    for _, what in ipairs({ "move", "act", "target" }) do
+        if caps[what] then blocks[what] = conditions.blockedText(caps[what]) end
+    end
+    return score.evaluate({
+        own      = ownPowerLevel(p),
+        life     = (p.max_life and p.max_life > 0) and (p.life / p.max_life) or 1,
+        air      = (p.max_air and p.max_air > 0) and (p.air / p.max_air) or nil,
+        hostiles = hostiles,
+        blocks   = blocks,
+        damaged  = damaged and true or false,
+        accepted = acceptedFlags(p),
+        retreats = bot.activation and bot.activation.retreats or 0,
+    }, scoreKnobs())
 end
 
 --- What the condition detectors are given besides the player (#12): the
---- hostile count, the loop scratch with the rank-weighted enemy figures
---- (#62), the life-scaled own power, the settings, and the chest scan for
---- the explore site. Built once per decision.
+--- hostile count, what the detected conditions block (#12), the situation
+--- scored (#11), the settings, and the chest scan for the explore site.
+--- Built once per decision; `hostiles` is spotHostiles' list.
 function conditionContext(p, hostiles)
-    return {
-        hostiles    = hostiles,
-        loop        = bot.loop,
-        own         = ownPowerLevel(p),
+    local ctx = {
+        hostiles    = #hostiles,
         cfg         = cfg,
         chestInView = glowingChestInView,
     }
+    ctx.caps = conditions.capabilities(p, ctx)
+    ctx.score = evaluateSituation(p, hostiles, ctx.caps, false)
+    return ctx
 end
 
 --- One loop over the condition list for a site (#12), replacing v1's
@@ -1248,13 +1325,6 @@ local function checkConditions(site, ctx)
         end
     end
     return false
-end
-
---- What the character cannot do right now, from the blocks the detected
---- conditions declare (#12, design 1.1). Liveness, not policy: consulted
---- whatever the stop conditions are set to.
-local function capabilities(ctx)
-    return conditions.capabilities(game.player, ctx)
 end
 
 -------------------------------------------------------------------------------
@@ -1288,7 +1358,14 @@ function skoobot_act(noAction)
     local hostiles = spotHostiles(game.player, true)
     -- #12: the turn-site conditions -- the debuffs, LIFE_LOWLIFE (only with
     -- something in view) and the four power checks -- in the list's order.
-    local ctx = conditionContext(game.player, #hostiles)
+    -- The power checks read the situation score (#11), built here with the
+    -- rest of the context; its verdict goes to the log at debug so a bug
+    -- report can say what the bot thought of the room.
+    local ctx = conditionContext(game.player, hostiles)
+    if #hostiles > 0 then
+        chan.debug("[Score] threat %s, posture %s: %s", ctx.score.suffix:sub(12), ctx.score.posture,
+            table.concat(ctx.score.reasons, "; "))
+    end
     if checkConditions(conditions.SITE_TURN, ctx) then return end
     if #hostiles > 0 then
         bot.state = STATE_FIGHT
@@ -1349,14 +1426,20 @@ function skoobot_act(noAction)
             if #hostiles > 0 then
                 bot.state = STATE_FIGHT
                 return skoobot_act(true)
-            elseif (game.player.life / game.player.max_life) <= cfg("IGNORE_DAMAGE_HEALTH_RATIO") then
-                -- FIXED (T-011). v1 stopped on ANY damage while exploring, so a
-                -- single poison tick halted the bot (lukesilveira). Hand back
-                -- only once life has actually fallen to the threshold; above it
-                -- a scratch is not worth a stop. mishander reached the same fix
-                -- from play (salvage item 1). Under T-020 this becomes a score
-                -- input rather than a standalone flag.
-                stop(notice.STOPPED, "took damage while exploring, and life is below IGNORE_DAMAGE_HEALTH_RATIO")
+            end
+            -- FIXED (T-011). v1 stopped on ANY damage while exploring, so a
+            -- single poison tick halted the bot (lukesilveira). Hand back
+            -- only once life has actually fallen to the threshold; above it
+            -- a scratch is not worth a stop. mishander reached the same fix
+            -- from play (salvage item 1). Since #11 the threshold is a term
+            -- of the score -- unseen damage, the one threat the explore
+            -- branch faces -- and this reads its flag, scored again here
+            -- because the delta is only known after the loop scratch was
+            -- rebuilt. The return was missing until #11: the stop used to
+            -- fall through into the chest check and auto-explore.
+            local unseen = evaluateSituation(game.player, hostiles, ctx.caps, true)
+            if unseen.flags.EXPLORE_DAMAGE then
+                return stop(notice.STOPPED, unseen.reasons[1])
             end
         end
         -- Breath below three-quarters: switch to REST, which now runs to air
@@ -1400,7 +1483,7 @@ function skoobot_act(noAction)
         -- named in the reason. Exploring means moving, so a move block is a
         -- hand-back here whatever the policies say (liveness, design 1.1);
         -- the general backstop is the progress invariant (#13).
-        local caps = capabilities(ctx)
+        local caps = ctx.caps
         if caps.move then
             stop(notice.STOPPED, "cannot move (" .. conditions.blockedText(caps.move) .. ")")
         else
@@ -1424,13 +1507,32 @@ function skoobot_act(noAction)
         -- the stop at IGNORE) means no talent can be used at all, and a
         -- target block (encased in ice) that talents only reach the ice:
         -- both hand back here rather than walk the rotation for nothing.
-        local caps = capabilities(ctx)
-        if caps.act then
-            return stop(notice.CANNOT_ACT, "cannot act (" .. conditions.blockedText(caps.act) .. ")")
+        --
+        -- #11: the score's posture says so, and says the rest. Its
+        -- handback is those two blocks, no power left, or air nearly gone
+        -- -- a flag the player has not accepted stopped the bot at the turn
+        -- site already, so none reaches here. Retreat takes one flee step
+        -- (#59's, from the strongest) before the rotation and falls through
+        -- to it when there is none; hold runs the rotation on what is in
+        -- reach and, with nothing in reach, waits a turn for the crowd
+        -- instead of walking into it.
+        local caps = ctx.caps
+        local verdict = ctx.score
+        if verdict.posture == score.HANDBACK then
+            local severity = (caps.act or caps.target) and notice.CANNOT_ACT or notice.STOPPED
+            return stop(severity, table.concat(verdict.reasons, "; "))
         end
-        if caps.target then
-            return stop(notice.CANNOT_ACT, "cannot target anything (" .. conditions.blockedText(caps.target) .. ")")
+        -- The retreat steps in a row are counted on the activation, so the
+        -- score can call the chase off (score.RETREAT_LIMIT); any other
+        -- posture, or a step that could not be taken, starts the count over.
+        local act = bot.activation
+        if verdict.posture == score.RETREAT
+           and SAI_flee({ action = "flee", from = "strongest" }, hostiles) then
+            if act then act.retreats = (act.retreats or 0) + 1 end
+            checkForAdditionalAction()
+            return
         end
+        if act then act.retreats = 0 end
 
         local targets = {}
         for _, enemy in pairs(hostiles) do
@@ -1518,10 +1620,16 @@ function skoobot_act(noAction)
 
             -- no legal target: get closer -- unless the character cannot
             -- move, in which case the step is impossible and the reason
-            -- names the block (#12).
+            -- names the block (#12); or the posture is to hold (#11), in
+            -- which case a turn is spent waiting for them to come.
             if caps.move then
                 return stop(notice.CANNOT_ACT, "cannot move (" .. conditions.blockedText(caps.move)
                     .. "), and no Combat talent reaches " .. targets[1].name)
+            end
+            if verdict.posture == score.HOLD then
+                SAI_wait(targets[1])
+                checkForAdditionalAction()
+                return
             end
             local a = Astar.new(game.level.map, game.player)
             local path = a:calc(game.player.x, game.player.y, targets[1].x, targets[1].y)

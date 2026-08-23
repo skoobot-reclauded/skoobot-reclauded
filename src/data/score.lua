@@ -55,7 +55,9 @@
 --             nothing to say: the player cannot act or target, has no
 --             power left, or is nearly out of air
 --   retreat   an accepted single-enemy flag: the enemy is not adjacent yet
---             and the player can move, so step away first
+--             and the player can move, so step away first -- up to
+--             RETREAT_LIMIT steps in a row, after which the chase is not
+--             working and the posture is fight
 --   hold      an accepted crowd or count flag and no single-enemy one:
 --             fight what comes into reach, wait for the rest rather than
 --             walk into it
@@ -77,6 +79,14 @@ M.FIGHT, M.HOLD, M.RETREAT, M.HANDBACK = "fight", "hold", "retreat", "handback"
 -- enemy: the explore branch runs for air at 0.75 and rest hands back at
 -- 0.5, so this is the last line, for a fight the other two never saw.
 M.LOW_AIR = 0.25
+
+-- How many retreat steps in a row are worth taking from one threat. A
+-- step away buys a turn only if the enemy is slower, or the step breaks
+-- its line of sight; against something as fast as the player the chase
+-- holds its distance for ever, and every step is a turn not spent
+-- fighting. Five is enough for the first case to show and cheap enough
+-- to waste in the second.
+M.RETREAT_LIMIT = 5
 
 -- The flags, in the order their reasons are given.
 M.FLAGS = { "SCOUTER_BIGENEMY", "SCOUTER_STRONGERENEMY", "SCOUTER_CROWDPOWER", "SCOUTER_ENEMYCOUNT", "EXPLORE_DAMAGE" }
@@ -123,6 +133,7 @@ end
 --   damaged    true when life fell this turn
 --   accepted   { SCOUTER_BIGENEMY = true, ... }: the flags the player has
 --              told the bot to live with (IGNORE, or an acknowledged WARN)
+--   retreats   how many retreat steps in a row the bot has already taken
 -- @param knobs the settings: MAX_INDIVIDUAL_POWER, MAX_DIFF_POWER,
 --   MAX_COMBINED_POWER, MAX_ENEMY_COUNT, IGNORE_DAMAGE_HEALTH_RATIO
 -- @return a table:
@@ -181,17 +192,18 @@ function M.evaluate(input, knobs)
         if v > score then score = v end
     end
 
-    -- v1's wording for each set flag, with the figures it compared.
+    -- v1's wording for each set flag, with the figures it compared -- to
+    -- one decimal, where v1 printed the float whole.
     local details = {}
     if flags.SCOUTER_BIGENEMY then
-        details.SCOUTER_BIGENEMY = "an enemy's power level, " .. f.max .. ", is above MAX_INDIVIDUAL_POWER"
+        details.SCOUTER_BIGENEMY = "an enemy's power level, " .. fmt1(f.max) .. ", is above MAX_INDIVIDUAL_POWER"
     end
     if flags.SCOUTER_STRONGERENEMY then
-        details.SCOUTER_STRONGERENEMY = "an enemy's power level, " .. f.max
+        details.SCOUTER_STRONGERENEMY = "an enemy's power level, " .. fmt1(f.max)
             .. ", is more than MAX_DIFF_POWER above yours (" .. fmt1(own) .. " at current life)"
     end
     if flags.SCOUTER_CROWDPOWER then
-        details.SCOUTER_CROWDPOWER = "the combined enemy power level, " .. f.sum
+        details.SCOUTER_CROWDPOWER = "the combined enemy power level, " .. fmt1(f.sum)
             .. ", is more than MAX_COMBINED_POWER above yours (" .. fmt1(own) .. " at current life)"
     end
     if flags.SCOUTER_ENEMYCOUNT then
@@ -239,6 +251,10 @@ function M.evaluate(input, knobs)
         elseif blocks.move then
             posture = M.FIGHT
             say("%s is %sx your limit, and you cannot move", who, fmt1(over))
+        elseif (input.retreats or 0) >= M.RETREAT_LIMIT then
+            posture = M.FIGHT
+            say("%s is %sx your limit at distance %d, and %d steps away have not shaken it", who, fmt1(over),
+                f.strongest.distance or 0, input.retreats)
         else
             posture = M.RETREAT
             say("%s is %sx your limit at distance %d: step away first", who, fmt1(over), f.strongest.distance or 0)
