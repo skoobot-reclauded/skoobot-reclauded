@@ -94,8 +94,12 @@ design work, not code, yet.
 
 ## Requirements
 
-- **Tales of Maj'Eyal 1.7.6.** ToME addons are version-stamped and the game refuses
-  mismatches, so this will not load on older or newer releases without a version bump.
+- **Tales of Maj'Eyal 1.7.6**, which is what it is developed and tested on. The addon declares
+  `1.7.6`, and the game's own rule for that declaration is looser than "exact match": it
+  loads on any 1.7.x and on later 1.x minor releases, and is refused only on a lower minor
+  (1.6.x and earlier) or a different major. So a future 1.7.7 or 1.8 will load it unchanged;
+  the declared version is bumped only when a change in ToME is actually verified or
+  required, not on every release.
 - **Enable it in the Addons menu before you create the character you want to use it on.** A
   savefile records the addons it was made with, and the game silently ignores any addon a save
   does not list — so this will not attach to a character that already exists. There is no
