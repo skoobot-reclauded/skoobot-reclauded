@@ -120,4 +120,51 @@ function M.level(actor, global_speed)
     return recSum(M.scores(actor, global_speed))
 end
 
+-------------------------------------------------------------------------------
+-- Rank weighting (#62, salvage-mishander.md item 2)
+-------------------------------------------------------------------------------
+--
+-- A flat threshold stops for every pack of commons and then, raised so it
+-- does not, lets a pair of rares through. mishander's fork weights each
+-- enemy's power by its rank band before it is compared, so commons count
+-- for less and bosses for more. These helpers are pure, like the rest of
+-- the file; they touch neither scores nor level, which spec/power_spec.lua
+-- pins to v1's numbers.
+--
+-- ToME 1.7.6's ranks (mod/class/Actor.lua textRank / allowedRanks):
+--
+--     1 critter · 2 normal · 3 elite · 3.2 rare · 3.5 unique ·
+--     4 boss · 5 elite boss · 10 god · 11 godslayer
+--
+-- mishander's bands, by the same `rank < 3` / `rank < 4` cuts:
+--
+--     NORMAL  rank < 3   critter, normal
+--     ELITE   rank < 4   elite, rare, unique
+--     BOSS    otherwise  boss, elite boss, god, godslayer
+--
+-- An actor without a rank is band NORMAL, which is also the engine's own
+-- default (Actor.lua:206 `t.rank = t.rank or 2`).
+
+M.RANK_NORMAL = "normal"
+M.RANK_ELITE  = "elite"
+M.RANK_BOSS   = "boss"
+
+--- The band a rank falls in: "normal", "elite" or "boss".
+function M.rankBand(rank)
+    rank = tonumber(rank) or 2
+    if rank < 3 then return M.RANK_NORMAL end
+    if rank < 4 then return M.RANK_ELITE end
+    return M.RANK_BOSS
+end
+
+--- The multiplier for an actor's power, by its rank band.
+-- @param actor anything with a `rank` field
+-- @param weights { normal = n, elite = n, boss = n }; a band with no weight
+--   (or a non-number) multiplies by 1, so an unconfigured band changes
+--   nothing
+function M.rankWeight(actor, weights)
+    local w = weights and weights[M.rankBand(actor and actor.rank)]
+    return tonumber(w) or 1
+end
+
 return M

@@ -122,4 +122,69 @@ describe("data/power.lua", function()
   it("sum recurses into nested tables", function()
     assert.are.equal(10, power.sum({ 1, { 2, { 3 } }, x = 4 }))
   end)
+
+  -- #62 (salvage-mishander.md item 2): the rank bands are mishander's
+  -- `rank < 3` / `rank < 4` cuts over ToME 1.7.6's rank table
+  -- (mod/class/Actor.lua textRank / allowedRanks).
+  describe("rankBand over ToME 1.7.6's rank table", function()
+    local TABLE = {
+      { 1,   "critter",    "normal" },
+      { 2,   "normal",     "normal" },
+      { 3,   "elite",      "elite"  },
+      { 3.2, "rare",       "elite"  },
+      { 3.5, "unique",     "elite"  },
+      { 4,   "boss",       "boss"   },
+      { 5,   "elite boss", "boss"   },
+      { 10,  "god",        "boss"   },
+      { 11,  "godslayer",  "boss"   },
+    }
+    for _, row in ipairs(TABLE) do
+      local rank, name, band = row[1], row[2], row[3]
+      it(("rank %s (%s) is band %s"):format(rank, name, band), function()
+        assert.are.equal(band, power.rankBand(rank))
+      end)
+    end
+
+    it("an actor with no rank is normal, the engine's own default", function()
+      assert.are.equal("normal", power.rankBand(nil))
+    end)
+
+    it("exposes the band names as constants", function()
+      assert.are.equal("normal", power.RANK_NORMAL)
+      assert.are.equal("elite", power.RANK_ELITE)
+      assert.are.equal("boss", power.RANK_BOSS)
+    end)
+  end)
+
+  describe("rankWeight", function()
+    local WEIGHTS = { normal = 0.4, elite = 1.0, boss = 2.0 }   -- mishander's defaults
+
+    it("returns the band's weight for every rank in the table", function()
+      assert.are.equal(0.4, power.rankWeight({ rank = 1 },   WEIGHTS))
+      assert.are.equal(0.4, power.rankWeight({ rank = 2 },   WEIGHTS))
+      assert.are.equal(1.0, power.rankWeight({ rank = 3 },   WEIGHTS))
+      assert.are.equal(1.0, power.rankWeight({ rank = 3.2 }, WEIGHTS))
+      assert.are.equal(1.0, power.rankWeight({ rank = 3.5 }, WEIGHTS))
+      assert.are.equal(2.0, power.rankWeight({ rank = 4 },   WEIGHTS))
+      assert.are.equal(2.0, power.rankWeight({ rank = 5 },   WEIGHTS))
+      assert.are.equal(2.0, power.rankWeight({ rank = 10 },  WEIGHTS))
+      assert.are.equal(2.0, power.rankWeight({ rank = 11 },  WEIGHTS))
+    end)
+
+    it("is 1 for a band with no weight, so an unconfigured band changes nothing", function()
+      assert.are.equal(1, power.rankWeight({ rank = 2 }, { elite = 1.0, boss = 2.0 }))
+      assert.are.equal(1, power.rankWeight({ rank = 4 }, {}))
+      assert.are.equal(1, power.rankWeight({ rank = 4 }, nil))
+      assert.are.equal(1, power.rankWeight({ rank = 4 }, { boss = "not a number" }))
+    end)
+
+    it("treats a rankless actor as normal", function()
+      assert.are.equal(0.4, power.rankWeight({}, WEIGHTS))
+      assert.are.equal(0.4, power.rankWeight(nil, WEIGHTS))
+    end)
+
+    it("does not change scores or level", function()
+      assert.is_near(32.46, power.level(fakeActor({ rank = 4 }), 1), 1e-9)
+    end)
+  end)
 end)

@@ -458,8 +458,18 @@ local function spotHostiles(self, actors_only)
         bot.loop.sumVisibleEnemyPower = 0
         bot.loop.maxVisibleEnemyPower = 0
         bot.loop.enemyCount = #seen
+        -- #62 (salvage item 2): each enemy's power is weighted by its rank
+        -- band before the max and the sum, so a pack of commons no longer
+        -- reads as a threat and a single boss reads as more of one. The
+        -- bands and the default weights are mishander's; power.rankWeight
+        -- says which rank is which.
+        local weights = {
+            normal = cfg("NORMAL_POWER_RATIO"),
+            elite  = cfg("ELITES_POWER_RATIO"),
+            boss   = cfg("BOSS_POWER_RATIO"),
+        }
         for _, a in ipairs(seen) do
-            local pw = power.level(a.actor, game.player.global_speed)
+            local pw = power.level(a.actor, game.player.global_speed) * power.rankWeight(a.actor, weights)
             bot.loop.sumVisibleEnemyPower = bot.loop.sumVisibleEnemyPower + pw
             if bot.loop.maxVisibleEnemyPower < pw then
                 bot.loop.maxVisibleEnemyPower = pw

@@ -34,6 +34,15 @@ if type(s.MAX_COMBINED_POWER)   == "nil" then s.MAX_COMBINED_POWER   = 500 end
 if type(s.MAX_ENEMY_COUNT)      == "nil" then s.MAX_ENEMY_COUNT      = 12  end
 if type(s.ACTION_DELAY)         == "nil" then s.ACTION_DELAY         = 0   end
 
+-- #62 (salvage-mishander.md item 2): an enemy's power is multiplied by the
+-- weight for its rank band before the power-level stop conditions compare
+-- it. mishander's defaults, kept as shipped: commons count for less than
+-- half, elites and rares at face value, bosses double. The bands are
+-- data/power.lua's rankBand (critter/normal; elite/rare/unique; boss and up).
+if type(s.NORMAL_POWER_RATIO)   == "nil" then s.NORMAL_POWER_RATIO   = 0.4 end
+if type(s.ELITES_POWER_RATIO)   == "nil" then s.ELITES_POWER_RATIO   = 1.0 end
+if type(s.BOSS_POWER_RATIO)     == "nil" then s.BOSS_POWER_RATIO     = 2.0 end
+
 -- #58: show the "why did it stop" popup (StopDialog) on a STOPPED notice.
 -- Off by default: the log line and the big-news banner carry the stop; the
 -- popup is for players who want to be made to read it. The popup's own

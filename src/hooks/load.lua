@@ -232,6 +232,18 @@ class:bindHook("GameOptions:generateList", function(self, data)
             "Pauses the bot when the combined power level of visible enemies is over this amount.")
         createNumericalOption("MAX_ENEMY_COUNT", "Maximum Enemy Count",
             "Pauses the bot when this many enemies is spotted.")
+        -- #62: the rank weights. One entry per band; data/power.lua says
+        -- which ToME rank falls in which band.
+        createNumericalOption("NORMAL_POWER_RATIO", "Normal Enemy Power Ratio",
+            "Critters and normal-rank enemies count for this fraction of their power level in " ..
+            "the power checks above, so a pack of commons does not read as a threat. 0.4 is " ..
+            "less than half; 1 is face value.")
+        createNumericalOption("ELITES_POWER_RATIO", "Elite Enemy Power Ratio",
+            "Elite, rare and unique enemies count for this multiple of their power level in the " ..
+            "power checks above. 1 is face value.")
+        createNumericalOption("BOSS_POWER_RATIO", "Boss Enemy Power Ratio",
+            "Bosses, elite bosses and anything stronger count for this multiple of their power " ..
+            "level in the power checks above. 2 is double.")
         createNumericalOption("ACTION_DELAY", "Action Delay",
             "Bot will wait this many seconds between each action. THIS IS CURRENTLY A BIT BUGGY " ..
             "AND THE BOT WILL ACT WHEN YOU PRESS BUTTONS OR MOVE YOUR MOUSE IN ADDITION TO " ..
