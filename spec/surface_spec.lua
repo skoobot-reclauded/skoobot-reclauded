@@ -1,0 +1,105 @@
+-- luacheck: std luajit+busted
+
+-- The superload surface, held to what #14 left: one file, two one-line
+-- wrappers, nothing added to either class. Monkey-patching Player and Actor
+-- is why the original broke on every ToME release, so growing this surface
+-- is a decision, and this spec makes it one -- a third wrapper, a method
+-- added to the class, or a wrapper that grows a body fails here until the
+-- spec is changed with it. The tooltip line, the third wrapper 0.1 shipped,
+-- is an engine hook now. What only a running game can show -- that the
+-- wrappers are the ones the engine calls and the hook fires -- is
+-- tools/scenario-hooks.ps1.
+--
+-- #14.
+
+local manifest = require "spec.support.manifest"
+
+local function read(rel)
+  local f = assert(io.open(manifest.path(rel), "r"), "cannot open " .. rel)
+  local s = f:read("*a")
+  f:close()
+  return s
+end
+
+local function exists(rel)
+  local f = io.open(manifest.path(rel), "r")
+  if f then f:close() return true end
+  return false
+end
+
+--- The file's lines with comment lines dropped, so that prose about the
+--- class does not count as code touching it.
+local function codeLines(src)
+  local out = {}
+  for line in src:gmatch("[^\n]*") do
+    if not line:match("^%s*%-%-") then out[#out + 1] = line end
+  end
+  return out
+end
+
+describe("the superload surface (#14)", function()
+  local src, lines
+
+  setup(function()
+    src = read("src/superload/mod/class/Player.lua")
+    lines = codeLines(src)
+  end)
+
+  it("is the Player superload alone; the Actor superload is gone", function()
+    assert.is_true(exists("src/superload/mod/class/Player.lua"))
+    assert.is_false(exists("src/superload/mod/class/Actor.lua"),
+      "src/superload/mod/class/Actor.lua is back: the tooltip line is the Actor:tooltip hook (hooks/load.lua)")
+  end)
+
+  -- game/loader/init.lua chains every addon's superload of a class through
+  -- loadPrevious: each gets the previous one's table. One call, before any
+  -- use of the class, and the class returned, is what keeps the original
+  -- SkooBot's wrappers and these chaining rather than clobbering.
+  it("chains through loadPrevious once, first, and returns the class", function()
+    local calls, at = 0, nil
+    for i, line in ipairs(lines) do
+      calls = calls + select(2, line:gsub("loadPrevious%(", ""))
+      if line:match("^local _M = loadPrevious%(%.%.%.%)%s*$") then at = i end
+    end
+    assert.are.equal(1, calls)
+    assert.is_truthy(at, "no `local _M = loadPrevious(...)` line")
+    for i = 1, at - 1 do
+      assert.is_nil(lines[i]:match("%f[%w_]_M%f[^%w_]"),
+        "the class is touched before loadPrevious, at line " .. i .. ": " .. lines[i])
+    end
+    assert.is_truthy(src:match("\nreturn _M%s*$"), "the file does not end with `return _M`")
+  end)
+
+  it("wraps exactly act and postUseTalent, each on one line", function()
+    local names, bodies = {}, {}
+    for _, line in ipairs(lines) do
+      local name = line:match("^function _M[:%.]([%w_]+)")
+      if name then
+        names[#names + 1] = name
+        bodies[name] = line
+      end
+    end
+    assert.are.same({ "act", "postUseTalent" }, names)
+    for name, line in pairs(bodies) do
+      assert.is_truthy(line:match("%send$"),
+        "the " .. name .. " wrapper is no longer one line: " .. line)
+      assert.is_truthy(line:match("old_" .. name .. "%(self, "),
+        "the " .. name .. " wrapper no longer calls the original: " .. line)
+    end
+  end)
+
+  it("adds nothing else to the class", function()
+    for i, line in ipairs(lines) do
+      assert.is_nil(line:match("^%s*_M[%.%[]"),
+        "the class is written outside the two wrappers, at line " .. i .. ": " .. line)
+    end
+  end)
+
+  it("adds the tooltip line through the Actor:tooltip hook", function()
+    local hooks = read("src/hooks/load.lua")
+    assert.is_truthy(hooks:find('class:bindHook("Actor:tooltip"', 1, true),
+      "hooks/load.lua does not bind Actor:tooltip")
+    assert.is_truthy(src:find("function bot.tooltip(", 1, true),
+      "the Player superload no longer defines bot.tooltip for the hook to call")
+  end)
+end)

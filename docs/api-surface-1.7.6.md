@@ -60,6 +60,9 @@ only to drive the bot's re-entrant loop, which Remediation 1 removes in favour o
 tick; `tooltip` is optional UI sugar. A collision sweep of every v1-defined name over both
 1.7.6 trees found **zero collisions** (see the last table).
 
+> **Outcome (#14, 2026-08-23).** The port shipped the three wrappers in 0.1; the hook audit
+> that decided each one's fate, and what is left, is [the last section](#the-surface-after-14).
+
 ---
 
 ## mod.class.Player
@@ -396,3 +399,90 @@ minimal and these isolated behind small wrappers.
 - **v1 save-file fields load fine on 1.7.6** (`skoobot*` instance fields, class.save
   mechanics unchanged) — but the port should not inherit the pattern: unversioned config in
   saves is how `skoobotstopconditions` becomes a nil-index on the first added stop code.
+
+---
+
+## The surface after #14
+
+**Issue:** #14 (T-021) · **Date:** 2026-08-23 · **Regression:** `spec/surface_spec.lua`
+(the source), `tools/scenario-hooks.ps1` (the engine)
+
+**Method.** The engine's hook system is `class:bindHook(name, fn)` / `:triggerHook{name, …}`
+(E/class.lua:406–434): a hook is a name, every bound function is called as `fn(self, data)`
+with `self` the object that fired it and `data` the table it fired, and the table's fields
+are the hook's whole information. Every `triggerHook` site in the 1.7.6 module and engine was
+listed — 90 names in the literal form, a dozen more built as named tables; the ones that fire
+around the player's turn are in the inventory below — and each of 0.1's three wrappers was asked
+one question: **is there a hook that fires at the same point with the same information?**
+Yes → re-bind through `class:bindHook` in `hooks/load.lua` and delete the superload. No →
+keep the wrapper, say why in the file, and make its superloaded body one line that delegates
+to a function of the addon's own.
+
+| 0.1 wrapper | hook at the same point? | information | outcome |
+|---|---|---|---|
+| `Actor:tooltip` | **yes** — `Actor:tooltip` (T/mod/class/Actor.lua:2133) | `{ts, x, y, seen_by}`, `self` the actor. `ts` **is** the tstring the method returns; fires for every actor including the player (`Player:tooltip` calls `Actor.tooltip` by class reference, T/Player.lua:441–442); does not fire for an unseen actor (:2009), which is exactly when the wrapper returned nil. | **Replaced.** `hooks/load.lua` binds the hook to `bot.tooltip`; `src/superload/mod/class/Actor.lua` deleted. One visible change: the line lands after the stats block (:2132, after *M. save*), where the hook fires, not at the very end. |
+| `Player:postUseTalent` | **no** — `Actor:postUseTalent` (T/Actor.lua:6520–6523) and `callbackOnTalentPost` (:6525) both fire **after** `if not ret then return end` (:6329), i.e. on success only; `Actor:preUseTalent` (:5946) is a veto point before the action runs, not an observer of its result | the wrapper watches the one path no hook sees: `postUseTalent` returning nil because the talent's action refused | **Irreducible by hook; thinned** to one line → `afterPostUseTalent`. The same fact reaches the bot as `useTalent`'s `false` return (E/interface/ActorTalents.lua:197/:236/:282 → :304–318 → :356); reading it in `SAI_useTalent` would retire the wrapper — filed as a follow-up on the rotation rewrite (#11), because it is decision-loop code, not plumbing. |
+| `Player:act` | **no** — `Player:act` (T/Player.lua:383–431) fires no hook. `callbackOnAct` (T/Actor.lua:806) runs inside `Actor:act` **before** the rest/run stepping (T/Player.lua:417–421) and the wait-for-input pause (:424), and must be registered on a talent, effect, object or a *self* definition (`registerCallbacks`, :6145; the *self* kind is written into the actor and so into the save, T/mod/resolvers.lua:864–865). `Actor:actBase:Effects` (T/Actor.lua:645) fires once per base turn for every actor, not when the player has energy to act. `game:onTickEnd` is per tick and dies on level-change capture (design-harness.md §4.1). | the driver must run after the engine has done the player's turn-start and any run or rest step, while the player still has energy — the `act` wrapper's exact position | **Irreducible; thinned** to one line → `afterAct`. Also passes the engine's argument through and returns the original's return unchanged (Remediation 1). |
+
+**Function superloads are not a smaller surface.** `hooks/load.lua` receives a `superload(bname,
+fn)` function (E/Module.lua:690–699) that registers `fn` to run over the class table after its
+chunk loads (game/loader/init.lua:140–145, :179–182). It is the same patch by another
+registration — and the loader's `apply_superloads` drops the return value, which is harmless
+only because `module()` has already stored the class in `package.loaded`. The file form is the
+loader's primary path, is ordered by `__addons_superload_order`, and is what the original uses;
+it stays.
+
+**The chain with the original SkooBot.** `te4_loader` (game/loader/init.lua:147–186) builds
+one chunk chain per class: the base file, then each addon's superload in
+`__addons_superload_order` (E/Module.lua:517), each run with `loadPrevious` bound to the
+*previous* chunk (:171–177) and returning `package.loaded[class]`. So a superload that calls
+`loadPrevious(...)` once, before touching the class, and returns the table it got, wraps
+whatever the previous addon left — the original's `act`/`postUseTalent` wrappers when it loads
+first, ours when it loads second — and neither clobbers the other. `Player.lua` does exactly
+that (`spec/surface_spec.lua` holds it to it), and `scenario-hooks.ps1` asserts at runtime
+that the engine's `Player.act` and `Player.postUseTalent` are ours and the only functions
+ours on either class. With both addons installed a creature's tooltip carries two *Power
+Level* lines (first-run.md F12): the original's wrapper appends at the end, our hook sits
+after the stats.
+
+**The leaked globals.** The same loader runs every superload chunk under
+`setmetatable({loadPrevious = …}, {__index = _G})` (:171–177), so v1's bare `reduce`,
+`recSum`, `aiStop`, `skoobot_act`, `checkForAdditionalAction` and `getUnspentTotal` were
+sandboxed into that table and never reached `_G` on 1.7.x either — the collision sweep above
+found nothing because there was nothing to find. The port makes them `local` regardless
+(luacheck W111 would flag a bare one; `spec/dialect_spec.lua` keeps the linter honest), and
+`scenario-hooks.ps1` asserts all six are absent from `_G` with the product loaded.
+
+**What the addon binds now.** `ToME:run` and `ToME:runDone` (keys, collision notice),
+`GameOptions:tabs` and `GameOptions:generateList` (the options tab), `Actor:tooltip` (the
+power line). Hooks are part of the module's published surface — `data.tab`, `data.list`,
+`data.ts` are contracts other addons rely on too — where a superload is a bet on a method's
+private shape; that is the whole difference #14 is after.
+
+### Hook inventory around the player's turn (1.7.6)
+
+For the next person who asks the question. `self` is the firing object; the data fields are
+the hook table's.
+
+| hook | fires from | when | data |
+|---|---|---|---|
+| `Actor:actBase:Effects` | T/Actor.lua:645 | once per base turn, every actor not in the wilderness and not dead, after timed effects and before cooldowns | — |
+| `Actor:getSpeed` | T/Actor.lua:459–460 | every speed lookup | `speed_type`, `speed` (writable) |
+| `Actor:move` | T/Actor.lua:1521 | after every move attempt | `moved`, `force`, `ox`, `oy` |
+| `Actor:takeHit` | T/Actor.lua:3020–3021 | on damage | `value` (writable), `src`, `death_note` |
+| `Actor:preUseTalent` | T/Actor.lua:5946 | inside `preUseTalent`, before the confusion roll; a truthy return vetoes | `t`, `silent`, `fake`, `ignore_ressources` |
+| `Actor:postUseTalent` | T/Actor.lua:6520 | inside `postUseTalent`, **success only** (:6329), after resources are paid | `t`, `ret`, `trigger` (writable) |
+| `Actor:getTalentSpeed` | T/Actor.lua:6316–6317 | every talent speed lookup | `talent`, `speed_type`, `speed` (writable) |
+| `Actor:startTalentCooldown` | T/Actor.lua:6930–6931 | when a cooldown starts | `t`, `cd` (writable) |
+| `Actor:effectSave` | T/Actor.lua:7686–7687 | on a save against an effect | `saved`, `save`, `save_type`, `eff_id`, `e`, `p` |
+| `Actor:tooltip` | T/Actor.lua:2133 | inside `tooltip`, after the stats block | `ts`, `x`, `y`, `seen_by` |
+| `Player:autoExplore:nowhere` | T/mod/class/Game.lua:2218 | auto-explore found nothing to explore | — |
+| `Game:changeLevel` | T/Game.lua:1442 | on a level change | — |
+| `ToME:run` / `ToME:runDone` | T/Game.lua:96, :98 | around `runReal` | — |
+
+Not hooks, but the per-actor callback registry (`fireTalentCheck`, T/Actor.lua:6201–6226):
+`callbackOnAct` (:806, inside `Actor:act`), `callbackOnActBase` (:646), `callbackOnActEnd`
+(T/Player.lua:437, when the player's energy drops below the threshold), `callbackOnTalentPre`
+(:5949), `callbackOnTalentPost` (:6525). Each needs a definition registered on the actor
+(talent, effect, object, or a *self* table that is saved with it), which is why none of them
+is a home for the driver.

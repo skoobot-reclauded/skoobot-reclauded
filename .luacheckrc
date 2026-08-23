@@ -306,7 +306,7 @@ files["src/overload/mod/**/*.lua"] = {
 }
 
 -- src/data/*.lua needs nothing extra: these files are loaded with dofile
--- (settings.lua from hooks/load.lua, power.lua from the Actor superload),
+-- (settings.lua from hooks/load.lua, power.lua from the Player superload),
 -- which runs the chunk in plain _G -- the same mechanism that makes
 -- engine/utils.lua's definitions global -- so a bare assignment there IS a
 -- real global and W111 must stay on. If talent, effect or entity files are

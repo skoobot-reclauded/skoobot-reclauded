@@ -154,6 +154,24 @@ class:bindHook("ToME:runDone", function()
     keyCollisionNotice()
 end)
 
+-- ---------------------------------------------------------------------------
+-- The power level in every creature's tooltip (#14)
+--
+-- 0.1 superloaded mod.class.Actor for this one line. It never needed to: the
+-- engine fires "Actor:tooltip" from inside Actor:tooltip with the very
+-- tstring it is about to return (mod/class/Actor.lua:2133) -- after the
+-- stats block, before the weapons and the effects -- for every actor,
+-- the player included (Player:tooltip reaches Actor.tooltip by explicit
+-- class reference, mod/class/Player.lua:442), and not at all for an actor
+-- the viewer cannot see, which is exactly when the wrapper returned nil.
+-- The line's wording and figure are the runtime table's (bot.tooltip, kept
+-- beside bot.power in the Player superload), so the number the tooltip
+-- shows and the one the stop conditions compare live in one file.
+-- ---------------------------------------------------------------------------
+class:bindHook("Actor:tooltip", function(self, data)
+    skoobot_reclauded.tooltip(self, data.ts)
+end)
+
 dofile("/data-skoobot_reclauded/settings.lua")
 
 -- tab=function

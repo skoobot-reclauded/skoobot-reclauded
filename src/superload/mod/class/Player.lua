@@ -30,8 +30,9 @@
 --   method on the same class means the one loaded last silently wins, so
 --   nothing here may carry a name the original uses. State lives in the
 --   `skoobot_reclauded` runtime table, config on `player.skoobot_reclauded`.
---   This is also the T-021 direction: the superload surface is now three
---   methods across two classes, all of them wrappers.
+--   Since #14 those two one-line wrappers are the whole superload surface:
+--   the tooltip line is an engine hook (hooks/load.lua) and there is no
+--   Actor superload at all.
 -- * The original leaked four functions into _G (aiStop, checkForAdditionalAction,
 --   getUnspentTotal, skoobot_act). They are locals here.
 -- * Power scoring moved to data/power.lua, a pure module busted can test.
@@ -1828,13 +1829,32 @@ local function scheduleAction()
     end
 end
 
-local old_act = _M.act
-function _M:act()
-    local ret = old_act(self)
+-------------------------------------------------------------------------------
+-- The engine seam (#14)
+--
+-- Everything above is the addon's own. What follows is the whole of what
+-- it does to the game's classes: two methods of mod.class.Player, each
+-- wrapped by a one-line superload that runs the original and hands what it
+-- returned to a function here, so that the behaviour is in one place and a
+-- changed signature in a future ToME is one line to re-read. Neither can
+-- be an engine hook, and docs/api-surface-1.7.6.md records why; the third
+-- wrapper 0.1 shipped, Actor:tooltip, is the "Actor:tooltip" hook now,
+-- bound in hooks/load.lua to bot.tooltip below.
+-------------------------------------------------------------------------------
+
+--- After the engine's Player:act (#14): the per-turn driver, once the
+--- engine has done the player's own turn-start work and any run or rest
+--- step, whenever the bot is active and the player is waiting for input.
+--- Irreducible: Player:act fires no hook, and the engine's per-turn
+--- callbacks -- callbackOnAct inside Actor:act, the "Actor:actBase:Effects"
+--- hook -- run before the rest and run stepping, on every actor, and need a
+--- talent, effect or object to hang on. The original's return travels
+--- through untouched (it returns nothing on every path in 1.7.6).
+local function afterAct(self, ...)
     if game.player == self and (not self.running) and (not self.resting) and bot.active then
         if not self:enoughEnergy() then
             chan.debug("[PlayerActions] act called with insufficient energy; waiting for the next turn")
-            return ret
+            return ...
         end
         if cfg("ACTION_DELAY") == 0 then
             playerActions()
@@ -1842,15 +1862,74 @@ function _M:act()
             scheduleAction()
         end
     end
-    return ret
+    return ...
 end
 
--- A talent that failed to fire is not retried in the same iteration.
-local old_postUseTalent = _M.postUseTalent
-function _M:postUseTalent(talent, ret, silent)
-    local result = old_postUseTalent(self, talent, ret, silent)
-    if not result and game.player == self and bot.loop then bot.loop.talentfailed[talent.id] = true end
-    return result
+--- After the engine's postUseTalent (#14): a talent that failed to fire is
+--- not retried in the same iteration. Irreducible by hook: the engine's
+--- "Actor:postUseTalent" hook fires only once `ret` has passed the
+--- function's first line (`if not ret then return end`), so the one case
+--- this watches -- the talent's action refused, postUseTalent returned nil
+--- -- is the case no hook sees. The same fact reaches the bot as
+--- useTalent's `false` return in SAI_useTalent; reading it there would
+--- retire this wrapper, and is #11's to do with the rotation it rewrites.
+local function afterPostUseTalent(self, talent, ...)
+    if not (...) and game.player == self and bot.loop then bot.loop.talentfailed[talent.id] = true end
+    return ...
 end
+
+--- What the bot COUNTS an actor for, given its raw power level, and why,
+--- in words (#11): an enemy's raw figure times its rank-band weight (#62),
+--- the player's own scaled by the life left. Both come from data/score.lua's
+--- two helpers -- the same ones spotHostiles and ownPowerLevel call -- so
+--- the tooltip and the stop reasons cannot drift.
+local function countedPower(actor, raw)
+    if actor == game.player then
+        local pct = (actor.max_life and actor.max_life > 0) and math.floor(100 * actor.life / actor.max_life) or 100
+        return score.ownPower(raw, actor.life, actor.max_life), ("at %d%% life"):format(pct)
+    end
+    local w = power.rankWeight(actor, rankWeights())
+    return score.enemyPower(raw, w), ("x%s %s"):format(tostring(w), power.rankBand(actor.rank))
+end
+
+--- The Power Level line of a creature's tooltip (#14), added by the
+--- "Actor:tooltip" hook in hooks/load.lua to the tstring the engine is
+--- building. It lands where the hook fires -- after the stats block, among
+--- the figures it is made from -- where 0.1's wrapper appended it at the
+--- very end. Two figures since #11, so the tooltip and the bot agree: the
+--- heuristic's raw power level -- scored with the PLAYER's global speed for
+--- every actor, as the original did; the number v1 showed, bot.power's, and
+--- the one the Maximum Enemy Power option is written against -- and beside
+--- it what the bot counts this actor for, with the reason, which is the
+--- figure the score's terms and the stop reasons carry. With Ctrl held,
+--- the component scores follow, as before.
+function bot.tooltip(actor, ts)
+    local scores = power.scores(actor, game.player and game.player.global_speed or 1)
+    local raw = power.sum(scores)
+    local counts, why = countedPower(actor, raw)
+    ts:add("#FFD700#Power Level#FFFFFF#: " .. string.format("%d", raw)
+        .. " -- counts as " .. string.format("%d", counts) .. " to SkooBot (" .. why .. ")", true)
+    if core.key.modState("ctrl") then
+        for k, v in pairs(scores) do
+            if type(v) ~= "table" then
+                ts:add(" #FFD700#" .. k .. "#FFFFFF#: " .. string.format("%1.2f", v), true)
+            else
+                for k2, v2 in pairs(v) do
+                    ts:add(" #FFD700#Weapon " .. k2 .. "#FFFFFF#: " .. string.format("%1.2f", v2), true)
+                end
+            end
+        end
+    end
+end
+
+-- The superload surface. `loadPrevious(...)` at the top of this file is
+-- the loader's chain (game/loader/init.lua:137-177): each addon's superload
+-- of a class gets the previous one's table, so these wrap whatever the
+-- original SkooBot wrapped when both are installed, in either order.
+local old_act = _M.act
+function _M:act(...) return afterAct(self, old_act(self, ...)) end
+
+local old_postUseTalent = _M.postUseTalent
+function _M:postUseTalent(talent, ...) return afterPostUseTalent(self, talent, old_postUseTalent(self, talent, ...)) end
 
 return _M
