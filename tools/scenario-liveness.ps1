@@ -348,7 +348,9 @@ return "installed"
     $null = Assert-Result $freeze 'the stop line names the state and asks for a report' -Match 'stopline=\[Stopped: no progress in \d+ iterations \(state: SAI_STATE_EXPLORE\) -- please report this\]'
     $null = Assert-Result $freeze 'auto-explore was attempted on every iteration (an action each time, none of them progress)' -Match "\| actions=$StallLimit \|"
 
-    $undo = Invoke-Bridge -Lua 'lv.reset() return "bypass=" .. lv.bypass(false) .. " pinned=" .. tostring(lv.unpin())' -TimeoutSec 30
+    # Unpin first: bypass(false) reports what the engine sees once the
+    # shadow is gone, and with the pin still on that is, correctly, the pin.
+    $undo = Invoke-Bridge -Lua 'lv.reset() local pinned = lv.unpin() return "bypass=" .. lv.bypass(false) .. " pinned=" .. tostring(pinned)' -TimeoutSec 30
     Write-Host "  $($undo.Result)"
     $null = Assert-Result $undo 'the pin and the bypass are undone' -Match 'bypass=off engine_sees_pin=false pinned=false'
 
