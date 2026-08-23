@@ -229,7 +229,10 @@ function sp.probe(o)
   -- the probe set, scaled by that life. Computed here, at probe time, so a
   -- heuristic that itself depends on life (the survival score does) is
   -- accounted for and the check below is exact.
-  local mine = b.power(p) * (p.life / p.max_life)
+  -- #79: asked of the addon rather than recomputed here. The shape of the
+  -- life scaling is data/score.lua's business -- a curve since #79 -- and a
+  -- probe that re-derived it would go stale the next time it moves.
+  local mine = b.ownPower(p)
   local before = game.turn
   b.query()
   return ("REASON %s | dturn=%d | mine_expected=%.1f | life=%d/%d"):format(tostring(b.last_reason),
@@ -338,7 +341,11 @@ return "installed"
     Write-Host ''
     Write-Host '  --- life: the same common is under the margin at full life and over it at 40% life'
     $Ml = $maxW - 0.7 * $own
-    Write-Host ("  maxW={0:F1} own={1:F1} -> MAX_DIFF_POWER={2:F1}: full life compares with {3:F1}, 40% with {4:F1}" -f $maxW, $own, $Ml, ($own + $Ml), (0.4 * $own + $Ml))
+    # 0.28, not 0.40: since #79 the life scaling is a curve, and f(0.4) is
+    # 0.4 * (1 - 0.5 * 0.6) = 0.28. Both checks below hold either way -- the
+    # curve only ever makes the hurt character read weaker -- but the figure
+    # printed beside them should be the one the bot actually used.
+    Write-Host ("  maxW={0:F1} own={1:F1} -> MAX_DIFF_POWER={2:F1}: full life compares with {3:F1}, 40% with {4:F1}" -f $maxW, $own, $Ml, ($own + $Ml), (0.28 * $own + $Ml))
     $l1 = Probe "return sp.probe({ MAX_DIFF_POWER = $(N $Ml), MAX_COMBINED_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000 })" 60
     Write-Host "  full life  $($l1.Result)"
     if ($l1.Result -match '^SETUP') { Inconclusive "life full: $($l1.Result)" }

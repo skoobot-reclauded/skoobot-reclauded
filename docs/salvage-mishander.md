@@ -99,6 +99,14 @@ and they're right; a character at 51% life is worse off than half-strength becau
 fewer turns of margin.
 
 > **Taken 2026-08-23** (#62, `035dee8`): linear, as theirs; the non-linear form is #11's.
+>
+> **Curve built 2026-08-23** (#79): `score.lifeFactor` is `x * (1 - LIFE_CURVE * (1 - x))`,
+> the linear form at `LIFE_CURVE = 0` and `x^2` at 1, shipping at 0.5 -- half life counts for
+> 0.375. mishander was right that linear was wrong, and the reason the port waited was the
+> fear of re-tuning every knob; it does not, because f(1) = 1 exactly and both affected knobs
+> are margins ADDED to this figure. Regression: `spec/score_spec.lua`, and the life probe of
+> `tools/scenario-salvage-power.ps1` now asks the addon for the figure instead of re-deriving
+> it.
 
 **4. Relative crowd threshold** — `sumVisibleEnemyPower > myPowerLevel + MAX_COMBINED_POWER`
 rather than an absolute cutoff. Correct: threat is relative to the character, not a constant.

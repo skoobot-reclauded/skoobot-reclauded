@@ -1388,16 +1388,25 @@ end
 -------------------------------------------------------------------------------
 
 --- The player's own power level as the score compares it (#62,
---- salvage-mishander.md item 3): the heuristic's figure scaled by the
---- fraction of life left, so a character at half life reads as half as
---- strong. Linear, as mishander wrote it (score.ownPower, which the
---- tooltip shows too), and probably not right: a character at 51% life is
---- worse off than half-strength because it has fewer turns of margin. The
---- curve is left linear on purpose: the score's terms are ratios of this
---- figure, and a curve here would re-tune every knob under the player.
+--- salvage-mishander.md item 3): the heuristic's figure scaled by the life
+--- left, on score.lifeFactor's curve (#79) rather than the straight line
+--- #62 shipped. mishander's own note said linear was probably wrong and
+--- they were right: a character at 51% life is worse off than
+--- half-strength, because it has fewer turns of margin, must spend some of
+--- them healing, and cannot take the risk that a crit ends the run.
+---
+--- The curve is 1 at full life exactly, so nothing a player has tuned
+--- changes until they are hurt -- which is why this needed no migration of
+--- MAX_DIFF_POWER or MAX_COMBINED_POWER, both of which are margins ADDED to
+--- this figure.
 local function ownPowerLevel(p)
     return score.ownPower(power.level(p, p.global_speed), p.life, p.max_life)
 end
+--- The same figure, for a scenario that needs to know what the bot compared
+--- with. Exposed rather than recomputed on the far side: the shape of the
+--- scaling is this module's business, and a probe that re-derived it would
+--- go stale the next time the curve moves (#79).
+bot.ownPower = function(p) return ownPowerLevel(p or game.player) end
 
 --- Which of the score's flags the player has told the bot to live with
 --- (#11): a power condition set to IGNORE, or a WARN that has fired and
@@ -2119,10 +2128,16 @@ end
 --- the player's own scaled by the life left. Both come from data/score.lua's
 --- two helpers -- the same ones spotHostiles and ownPowerLevel call -- so
 --- the tooltip and the stop reasons cannot drift.
+---
+--- Since #79 the life scaling is a curve, so "at 50% life" no longer means
+--- "half": the multiplier is spelled out beside it rather than left for the
+--- reader to assume, because the number they can check is the one they will
+--- trust.
 local function countedPower(actor, raw)
     if actor == game.player then
         local pct = (actor.max_life and actor.max_life > 0) and math.floor(100 * actor.life / actor.max_life) or 100
-        return score.ownPower(raw, actor.life, actor.max_life), ("at %d%% life"):format(pct)
+        local f = score.lifeFactor(actor.life, actor.max_life)
+        return score.ownPower(raw, actor.life, actor.max_life), ("at %d%% life, x%.2f"):format(pct, f)
     end
     local w = power.rankWeight(actor, rankWeights())
     return score.enemyPower(raw, w), ("x%s %s"):format(tostring(w), power.rankBand(actor.rank))

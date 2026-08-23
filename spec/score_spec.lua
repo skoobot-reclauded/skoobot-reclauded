@@ -51,10 +51,62 @@ describe("data/score.lua", function()
       assert.equals(0, S.enemyPower(nil, 2))
     end)
 
-    it("ownPower is the heuristic scaled by the life fraction", function()
-      assert.equals(40, S.ownPower(100, 40, 100))
+    -- #79: the life scaling is a curve, not a straight line. mishander's
+    -- own note and design 5.5: a character at 51% life is worse off than
+    -- half-strength, because it has fewer turns of margin, must spend some
+    -- of them healing, and cannot take the risk that a crit ends the run.
+    it("lifeFactor is 1 at full life, whatever the curve", function()
+      assert.equals(1, S.lifeFactor(100, 100))
+      assert.equals(1, S.lifeFactor(1, 1))
+      -- The property the migration question turned on: nothing a player has
+      -- tuned changes until they are hurt, so MAX_DIFF_POWER and
+      -- MAX_COMBINED_POWER keep their meaning and their defaults.
+      assert.equals(120, S.ownPower(120, 100, 100))
+    end)
+
+    it("lifeFactor is 0 at no life, and 1 when there is no maximum to divide by", function()
+      assert.equals(0, S.lifeFactor(0, 100))
+      assert.equals(1, S.lifeFactor(10, 0))
+      assert.equals(1, S.lifeFactor(10, nil))
+    end)
+
+    it("lifeFactor never rates a hurt character above its life fraction", function()
+      for i = 0, 100 do
+        local x = i / 100
+        local f = S.lifeFactor(x, 1)
+        assert.is_true(f <= x + 1e-12, ("f(%.2f) = %.4f is above the fraction"):format(x, f))
+        assert.is_true(f >= 0, ("f(%.2f) is negative"):format(x))
+      end
+    end)
+
+    it("lifeFactor is monotonic: more life is never worth less", function()
+      local prev = -1
+      for i = 0, 100 do
+        local f = S.lifeFactor(i / 100, 1)
+        assert.is_true(f >= prev, ("f is not monotonic at %.2f"):format(i / 100))
+        prev = f
+      end
+    end)
+
+    it("lifeFactor clamps a life outside 0..max", function()
+      assert.equals(1, S.lifeFactor(150, 100))     -- overhealed
+      assert.equals(0, S.lifeFactor(-20, 100))     -- dying
+    end)
+
+    it("the curve interpolates linear to quadratic, and 0.5 is what ships", function()
+      assert.equals(0.5, S.LIFE_CURVE)
+      -- f(x) = x * (1 - c(1 - x)): at c = 0.5 half life counts for 0.375,
+      -- between the linear 0.5 and the quadratic 0.25.
+      assert.is_true(math.abs(S.lifeFactor(50, 100) - 0.375) < 1e-9)
+      assert.is_true(math.abs(S.lifeFactor(40, 100) - 0.28) < 1e-9)
+      assert.is_true(math.abs(S.lifeFactor(25, 100) - 0.15625) < 1e-9)
+    end)
+
+    it("ownPower is the heuristic on that curve", function()
+      assert.is_true(math.abs(S.ownPower(100, 40, 100) - 28) < 1e-9)
       assert.equals(100, S.ownPower(100, 100, 100))
       assert.equals(100, S.ownPower(100, 10, 0))      -- no max_life: unscaled
+      assert.equals(0, S.ownPower(nil, 50, 100))
     end)
   end)
 

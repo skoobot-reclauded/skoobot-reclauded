@@ -288,10 +288,11 @@ function sc.probe(o)
   local ld = game.uiset and game.uiset.logdisplay
   local nlog = ld and ld.log and #ld.log or 0
   local v = verdict()
-  -- What #62 says the bot compares with: the heuristic at the life the
-  -- probe set, scaled by that life -- computed here because the heuristic
-  -- itself depends on life (the survival score does).
-  local mine = b.power(p) * (p.life / p.max_life)
+  -- #79: what the bot compares with, asked of the addon rather than
+  -- recomputed here. The heuristic itself depends on life (the survival
+  -- score does) AND the life scaling is a curve since #79, so re-deriving
+  -- it on this side would be two chances to drift.
+  local mine = b.ownPower(p)
   b.query()
   return ("QUERY dturn=%d hostiles=%d life=%d/%d mine=%.1f %s reason=%s log=%s"):format(game.turn - before,
     sc.hostiles(), p.life, p.max_life, mine, v, tostring(b.last_reason), newLog(nlog))
@@ -433,7 +434,7 @@ return "installed"
     if ($b.Result -match 'an enemy''s power level, ([\d.]+), is more than MAX_DIFF_POWER above yours \(([\d.]+) at current life\)') {
         $max = [double]$Matches[1]; $mine = [double]$Matches[2]
         $exp = [double]($b.Result -replace '.* mine=([\d.]+) .*', '$1')
-        Ok ([math]::Abs($mine - $exp) -lt 0.15) "own power in the reason is the heuristic at 40% life scaled by 40% ($mine ~ $exp)"
+        Ok ([math]::Abs($mine - $exp) -lt 0.15) "own power in the reason is the heuristic on the life curve at 40% life ($mine ~ $exp)"
         Ok ($max -gt 1.5 * $armor) "the boss figure carries the x2 rank weight ($max over $armor of armour alone)"
     }
 

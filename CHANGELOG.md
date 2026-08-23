@@ -149,6 +149,14 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   says *lost N turns while unable to act*, so a fight that has moved on while you looked away
   is explained rather than mysterious. Set it to IGNORE if you would rather not hear about it.
   Your existing WARN/STOP/IGNORE choices are untouched: the other thirteen keep their order.
+- **Being hurt counts for more than it did** (#79). Your own power level was scaled straight
+  down by the life you had left, so half life read as exactly half strength. It is a curve now:
+  half life counts for about a third, and a quarter life for about a sixth — a character at 51%
+  life is worse off than half-strength, because it has fewer turns of margin, must spend some of
+  them healing, and cannot take the risk that a crit ends the run. **At full life nothing
+  changes**, so your *Maximum Enemy Power Above Yours* and *Maximum Combined Enemy Power* mean
+  exactly what they did; the bot simply gets more careful sooner once you are wounded. The
+  tooltip now spells the multiplier out ("at 65% life, x0.53").
 
 ### Fixed
 

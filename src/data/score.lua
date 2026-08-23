@@ -115,11 +115,44 @@ function M.enemyPower(raw, weight)
     return (raw or 0) * (tonumber(weight) or 1)
 end
 
---- The figure the player counts for: the heuristic scaled by the life
---- left (#62; linear, as mishander wrote it). One place, as above.
+--- How much of the life scaling is quadratic (#79). 0 is the linear form
+--- #62 shipped, `raw * life/max_life`; 1 makes it `raw * (life/max_life)^2`,
+--- so half life counts for a quarter. In between it interpolates.
+---
+--- 0.5, chosen deliberately mild. mishander's own note and
+--- design-stop-conditions.md 5.5 both say the linear form is wrong -- a
+--- character at 51% life is worse off than half-strength, because it has
+--- fewer turns of margin, must spend some of them healing, and cannot take
+--- the risk that a crit ends the run. But this figure is the denominator of
+--- the `stronger` and `crowd` terms, so a steep curve would make the bot
+--- markedly more cautious at every wound, under every player, at once.
+M.LIFE_CURVE = 0.5
+
+--- The fraction of its power a character at this much life counts for.
+---
+--- f(x) = x * (1 - LIFE_CURVE * (1 - x)), which is x at LIFE_CURVE 0 and
+--- x^2 at 1. Properties that matter and are asserted in the spec:
+---
+---   * f(1) = 1 EXACTLY, whatever the curve. A character at full life
+---     counts for its whole power level, so nothing the player has tuned
+---     changes until they are hurt -- which is why #79 needed no migration
+---     of MAX_DIFF_POWER or MAX_COMBINED_POWER.
+---   * f(0) = 0, and f is monotonic in between, so more life is never worth
+---     less.
+---   * f(x) <= x for x in [0, 1]: the curve only ever makes a hurt
+---     character read as weaker, never stronger.
+function M.lifeFactor(life, max_life)
+    if not (max_life and max_life > 0) then return 1 end
+    local x = life / max_life
+    if x < 0 then x = 0 elseif x > 1 then x = 1 end
+    return x * (1 - M.LIFE_CURVE * (1 - x))
+end
+
+--- The figure the player counts for: the heuristic scaled by the life left
+--- (#62), on the curve above (#79). One place, so the tooltip and the
+--- checks agree.
 function M.ownPower(raw, life, max_life)
-    local fraction = (max_life and max_life > 0) and (life / max_life) or 1
-    return (raw or 0) * fraction
+    return (raw or 0) * M.lifeFactor(life, max_life)
 end
 
 --- Score a situation.

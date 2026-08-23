@@ -503,11 +503,13 @@ on screen. The tooltip now shows both, from the scorer's two helpers so they can
 
 ```
 Power Level: 120 -- counts as 48 to SkooBot (x0.4 normal)
-Power Level: 80 -- counts as 52 to SkooBot (at 65% life)
+Power Level: 80 -- counts as 42 to SkooBot (at 65% life, x0.53)
 ```
 
 The raw number is what v1 showed and what *Maximum Enemy Power* is written against; the
-counted one is what the terms and the stop reasons carry. Ctrl still shows the components.
+counted one is what the terms and the stop reasons carry. The multiplier is spelled out beside
+the life since #79, because the scaling is a curve and "at 65% life" no longer means "x0.65".
+Ctrl still shows the components.
 
 ### 5.5 Explicitly out of scope
 
@@ -515,9 +517,13 @@ counted one is what the terms and the stop reasons carry. Ctrl still shows the c
   not fall out of the scorer — the score evaluates threat, and a chest is an opportunity with a
   path and a guard check, which is a second kind of objective the loop has no slot for. Its
   own issue.
-- **A non-linear life curve** for own power. The terms are ratios of that figure, so a curve
-  there re-tunes every knob under the player; if it comes, it comes with a migration of the
-  defaults.
+- ~~**A non-linear life curve** for own power.~~ **Done (#79).** `score.lifeFactor` is
+  `x * (1 - LIFE_CURVE * (1 - x))`, which is the linear form at `LIFE_CURVE = 0`, `x²` at 1,
+  and ships at **0.5** — half life counts for 0.375, between the two. The worry recorded here
+  was that a curve "re-tunes every knob under the player", and it does not, because **f(1) = 1
+  exactly**: at full life the figure is the same one #62 shipped, and `MAX_DIFF_POWER` and
+  `MAX_COMBINED_POWER` are margins *added* to it. Nothing a player has tuned changes until they
+  are hurt, which is the whole point of the change, so no migration of the defaults was needed.
 - ~~**Weighing the strongest for the retreat step by the weighted figure.**~~ **Done (#80).**
   `fleeTarget` from `strongest` ranked by `bot.power`, the raw heuristic, as #59 documented,
   while `score.figures.strongest` ranked by the weighted figure and the `retreat` posture
