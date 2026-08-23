@@ -40,11 +40,11 @@ release is then cut is [releasing.md](releasing.md).
 | Trivial-damage default 0.9 (#6, owner review) | in |
 | Presets and auto-discovery (#18) — **GO for 0.1**, 2026-08-23 | in (`d9651f7`, 2026-08-23) |
 | Keybind collision detection (#50) | in (`f87b46d`) |
-| First-run UX pass (#54) — the manifest `description`, option wording, menu help, `docs/first-run.md` | pass done (`9c80862..5b13da1`); its findings are #71 #72 #73 (M4) and #74 (M5), open for the owner's triage |
+| First-run UX pass (#54) — the manifest `description`, option wording, menu help, `docs/first-run.md` | pass done (`9c80862..5b13da1`); its findings are #71 #72 #73 (M4), open for the owner's triage; #74, the option ranges, is **done** |
 | mishander's remaining takes — rank-weighted ratios, life-scaled own power, relative crowd threshold, level-entrance start (#62) | in (`d3becd0..9c2b081`) |
 | Progress invariant replacing the turn-count stop (#13) | in (`29ee928`) — built ahead of M2 because it is small and regression-netted |
 | Levelled debug channel (#46) | in (`a0b8a11`) |
-| Flee action (#59) and hold-while-impaired (#15) | **built, on `main`, still M5** — implemented on the owner's "all work available" instruction; whether 0.1 ships them is the owner's call |
+| Flee action (#59) and hold-while-impaired (#15) | **built, on `main`, still M5** — implemented on the owner's "all work available" instruction; whether 0.1 ships them is the owner's call. Their follow-ups #67 (cornered), #68 (the last turn of a stun), #69 (keep sight), #75 (the stop wording) and #80 (which enemy is "strongest") are built too, so whatever ships is the finished shape |
 
 M4 is not gates only: the open rows are work.
 
@@ -56,7 +56,7 @@ All green on the release commit, in this order; a tainted harness result is void
 |---|---|
 | Parse in the game's dialect | `luajit -bl <file> /dev/null` over every `.lua` under `src/` and `spec/` |
 | Lint clean | `luacheck .` — 0 warnings |
-| Unit tests green under LuaJIT | `busted` (`.busted` pins the interpreter; `spec/dialect_spec.lua` fails it otherwise) |
+| Unit tests green under LuaJIT | `busted` (`.busted` pins the interpreter; `spec/dialect_spec.lua` fails it otherwise, and since #63 also scans `src/` and the devbridge for calls LuaJIT 2.0.2 does not have) |
 | Harness scenarios pass, untainted | `scenario-surface.ps1` (every entry point, parity with the port) · `scenario-talent-screen.ps1` (#56, #55) · `scenario-stop-notices.ps1` (#57, #58) · `scenario-t011-trivial-damage.ps1` (#6) · `scenario-t012-freeze.ps1` (#7) · `scenario-t013-glowing-chest.ps1` (#8) · `scenario-t015-drowning.ps1` (#10) · `scenario-t016-label-accumulation.ps1` (#51) · `scenario-t019-stale-conditions.ps1` (#52). `scenario-baseline-v1.ps1` measures the *original* and is not a gate on this addon. Added 2026-08-23 and part of the gate: `scenario-t010-marked-target.ps1` (#5, real combat) · `scenario-keybinds.ps1` (#50) · `scenario-loadout.ps1` (#18) · `scenario-salvage-power.ps1` and `scenario-salvage-entrance.ps1` (#62) · `scenario-first-run.ps1` (#54) · `scenario-debug-channel.ps1` (#46) · `scenario-liveness.ps1` (#13) · `scenario-flee.ps1` (#59) · `scenario-hold.ps1` (#15) · `scenario-conditions.ps1` (#12) · `scenario-scoring.ps1` (#11) · `scenario-hooks.ps1` (#14). **Run the whole set with `tools/run-scenarios.ps1`**, which records one JSON line per scenario under `build/results/` and re-runs a tainted one once; `scenario-walking-skeleton.ps1` is excluded as superseded. |
 | The packed artifact loads standalone | `tools/pack.ps1 -Release`, then `tools/clean-build.ps1 -SkipPack` |
 | #54 first-run pass done, #50 done, #18 done | #50 and #18 closed; #54's pass is done and its must-fix findings (#71 #72 #73) are closed or explicitly deferred by the owner |
@@ -76,4 +76,8 @@ for the judgement gate, not a condition of release.
   *all code from builds A/B/C can be merged*), after #13, the progress invariant, and #46, the
   debug channel, earlier the same day. Their follow-ups are tracked as their own issues.
 - **M5 Post-0.1**: #15 tempo-aware holding and #59 flee are *built* (see §3) but stay M5 until
-  the owner rules them into 0.1; #67 #68 #69 #75 are their follow-ups.
+  the owner rules them into 0.1. Their follow-ups #67 #68 #69 #75 #80 are built as well, and so
+  are #77 (the BLACKOUT condition), #78 (walking to a glowing chest) and #79 (the non-linear
+  life curve) — all on `main`, all M5, all the owner's call the same way. Nothing labelled M5
+  is a gate; what is on `main` is what a build contains, and §1's judgement gate is where that
+  is weighed.
