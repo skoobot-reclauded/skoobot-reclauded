@@ -104,7 +104,9 @@ local bot = {
     active       = false,
     state        = STATE_REST,   -- v1 tempvals.state, kept between activations
     do_nothing   = false,        -- v1 tempvals.do_nothing: query mode
-    runonce      = false,        -- v1 tempvals.runonce
+    -- v1 tempvals.runonce: a runonce() is in progress. Not `runonce`: that
+    -- key is the entry point itself (#70), and the port once put both on it.
+    single_run   = false,
     actions      = 0,            -- not in v1: how many actions this activation took
     last_reason  = nil,          -- not in v1: why the bot last stopped
     activation   = nil,          -- v1 tempActivation: per-activation counters
@@ -404,6 +406,17 @@ local function activationInit()
         -- else, and from then on the start tile is just another tile.
         start_level = game.level, start_x = p.x, start_y = p.y, left_start = false,
     }
+end
+
+--- Drop the activation and its loop scratch, so that the next skoobot_act()
+--- builds a fresh activation from where the player stands now (#65). Every
+--- entry point begins this way: the counters, the start tile and the
+--- unspent-points baseline belong to ONE activation, and what query() or
+--- runonce() left behind must never become a real run's.
+local function clearActivation()
+    bot.activation = nil
+    bot.loop = nil
+    bot.prevloop = nil
 end
 
 --- Is the player still on the tile this activation began on, never having
@@ -1569,6 +1582,13 @@ function bot.start()
     if game.zone.wilderness then
         return stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
     end
+    -- #65: a real run begins from a fresh activation, whatever a query left
+    -- behind. v1 (and the port until now) let skoobot_act() reuse one that
+    -- was already there, so a query on the stairs followed by a toggle
+    -- elsewhere ran on the query's start tile (#62's exemption is for the
+    -- tile the bot was TOGGLED on), with its unspentTotal and its #13
+    -- liveness counters.
+    clearActivation()
     bot.active = true
     bot.actions = 0
     bot.last_reason = nil
@@ -1583,6 +1603,18 @@ function bot.stop(text, severity, opts)
     end
 end
 
+--- Say what the bot would do here, acting on nothing: the decision runs
+--- with do_nothing set, so no energy is spent and no game.turn passes.
+---
+--- The activation it builds stays on the table afterwards, for inspection
+--- -- inspect(), and the scenarios that read the start tile back -- but is
+--- marked as a query's, and the next entry point discards it (#65): start()
+--- and runonce() always begin fresh, and a later query drops it here so
+--- that its verdict is for the tile the player stands on now, as a toggle
+--- there would be, not for the tile an earlier query stood on. An
+--- activation that is NOT marked is honoured: none can be a run's, since
+--- query refuses while the bot is active, and a test may put one there by
+--- hand to ask about a start tile other than this one.
 function bot.query()
     if bot.active == true then
         return game.log("Cannot query while SkooBot: Reclauded is active!")
@@ -1590,11 +1622,22 @@ function bot.query()
     if game.zone.wilderness then
         return stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
     end
+    if bot.activation and bot.activation.from_query then clearActivation() end
     bot.do_nothing = true
     skoobot_act()
     bot.do_nothing = false
+    if bot.activation then bot.activation.from_query = true end
 end
 
+--- One decision, acted on, as the first decision of a toggle would be: a
+--- fresh activation from this tile (#65), and nothing left behind for the
+--- next entry point to inherit.
+---
+--- The in-progress flag is `single_run`, not `runonce` (#70). v1 kept the
+--- function and its flag apart (skoobot_runonce / tempvals.runonce); the
+--- port put both on this key, so the first call replaced the function with
+--- a boolean and the second RUNONCE press in a game failed with "attempt to
+--- call field 'runonce' (a boolean value)".
 function bot.runonce()
     if bot.active == true then
         return game.log("Cannot runonce while SkooBot: Reclauded is active!")
@@ -1602,9 +1645,11 @@ function bot.runonce()
     if game.zone.wilderness then
         return stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
     end
-    bot.runonce = true
+    clearActivation()
+    bot.single_run = true
     skoobot_act()
-    bot.runonce = false
+    bot.single_run = false
+    clearActivation()
 end
 
 --- One line for the harness and for bug reports.
@@ -1666,10 +1711,8 @@ local function playerActions()
         end
         skoobot_act()
     end
-    if not bot.active and not bot.runonce then
-        bot.activation = nil
-        bot.loop = nil
-        bot.prevloop = nil
+    if not bot.active and not bot.single_run then
+        clearActivation()
     end
     if game.player:enoughEnergy() and bot.active and bot.state == STATE_EXPLORE then
         skoobot_act(true)
