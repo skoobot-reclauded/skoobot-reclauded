@@ -20,6 +20,13 @@
       3. EFF_STUNNED applied, DEBUFF_STUNNED at IGNORE: the bot would use
          Attack -- the SECOND -- with the held entry logged as held, and the
          rotation the bot built holds Attack alone.
+     3b. Combat = [Rockswallow (hold)] alone, still stunned: the rotation is
+         empty, and the stop must say WHY -- "every one is held while
+         impaired (1)", not the old "none configured, or all on cooldown",
+         which was untrue on both counts and left holding mentioned only on
+         the debug channel (#75). The loadout hint is not offered: it belongs
+         to a player who has configured nothing, not to one whose talents are
+         merely held.
       4. The same stun with DEBUFF_STUNNED at STOP: the bot hands back for
          the stun before the rotation runs -- the flag is a refinement of
          the stop, not a replacement.
@@ -41,7 +48,7 @@
     Run:
         powershell -ExecutionPolicy Bypass -File .\tools\scenario-hold.ps1
 
-    #15, #27.
+    #15, #75, #27.
 #>
 [CmdletBinding()]
 param(
@@ -208,6 +215,32 @@ function ho.query()
   return ("QUERY dturn=%d impaired=%s rotation=%s reason=%s log=%s"):format(game.turn - before,
     tostring(b.impaired()), ho.rotation(), tostring(b.last_reason), ho.newLog(nlog))
 end
+-- #75: a rotation of ONE held entry, with the character impaired. The
+-- rotation is then empty for the one reason the stop never used to name --
+-- "none configured, or all on cooldown" was untrue on both counts. Puts the
+-- two-entry rotation back before it returns, so the parts after this one
+-- see what they expect.
+function ho.heldOnly()
+  local p = game.player
+  ho.reset()
+  if ho.hostiles() == 0 then return "SETUP no hostile in view" end
+  local r = b.rules.get(p)
+  for _, s in ipairs(b.rules.module.SECTIONS) do
+    local list = r[s]
+    for i = #list, 1, -1 do list[i] = nil end
+  end
+  b.rules.module.place(r, { tid = HELD, hold = true }, "Combat")
+  b.state = 13   -- STATE_FIGHT
+  local before = game.turn
+  local ld = game.uiset and game.uiset.logdisplay
+  local nlog = ld and ld.log and #ld.log or 0
+  b.query()
+  local out = ("HELDONLY dturn=%d impaired=%s rotation=[%s] reason=%s log=%s"):format(game.turn - before,
+    tostring(b.impaired()), ho.rotation(), tostring(b.last_reason), ho.newLog(nlog))
+  b.rules.module.place(r, { tid = PLAIN }, "Combat")
+  ho.reset()
+  return out
+end
 function ho.stun(on)
   local p = game.player
   if on then p:setEffect(p.EFF_STUNNED, 5, {}) else p:removeEffect(p.EFF_STUNNED, true, true) end
@@ -266,6 +299,22 @@ return "installed level=" .. tostring(ho.logLevelWas) .. "->" .. tostring(lvl)
     # The channel tags every level but info: "[SKOOBOT] [debug] [Combat] ..." (#46).
     $heldLines = @($log | Where-Object { $_ -match "\[SKOOBOT\] (\[debug\] )?\[Combat\] Holding tid:$Held while impaired" })
     Ok ($heldLines.Count -gt 0) 'the log says the held entry was held' "$($heldLines.Count) line(s)"
+
+    # ----- 3b: the whole rotation held (#75) -------------------------------
+    Write-Host ''
+    Write-Host '  --- 3b. every Combat entry held: the stop says so'
+    $ho = Probe 'return ho.heldOnly()'
+    Write-Host "  $($ho.Result)"
+    if ($ho.Result -match '^SETUP') { Inconclusive $ho.Result }
+    $null = Assert-Result $ho 'query advances no game turn' -Match 'dturn=0 '
+    $null = Assert-Result $ho 'the character reads as impaired' -Match 'impaired=true'
+    $null = Assert-Result $ho 'the rotation the bot built is empty' -Match 'rotation=\[\] '
+    $null = Assert-Result $ho 'the bot hands back' -Match 'reason=Cannot act: no Combat talent is ready'
+    $null = Assert-Result $ho 'and says holding is why, not "none configured, or all on cooldown"' -Match 'every one is held while impaired \(1\)'
+    Ok ($ho.Result -notmatch 'none configured, or all on cooldown') 'the old wording, which was untrue on both counts, is gone' $ho.Result
+    # The loadout hint belongs to an EMPTY rotation, not a held one: pointing
+    # a player with talents configured at the suggestion is noise (#18, #75).
+    Ok ($ho.Result -notmatch 'suggest a loadout') 'the "configure something" hint is not offered to a player who has' $ho.Result
 
     # ----- 4: stunned, STOP -----------------------------------------------
     Write-Host ''

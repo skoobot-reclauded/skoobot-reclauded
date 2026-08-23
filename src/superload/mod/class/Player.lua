@@ -880,12 +880,20 @@ bot.impaired = function(p) return impaired(p or game.player) end
 --- player's order. A Combat entry with hold = true is left out while the
 --- character is impaired (#15) -- skipped like a talent on cooldown, so the
 --- rotation falls through to the next entry.
+---
+--- Returns the rotation AND how many entries were held out of it (#75). An
+--- empty rotation has three causes -- nothing configured, everything on
+--- cooldown, everything held -- and the stop that reports it could only
+--- name the first two, so a player who set STUNNED to IGNORE and held every
+--- Combat row was told something untrue. Only the debug channel said
+--- "Holding <key> while impaired", and a player is not reading that.
 local function getCombatRotation()
     local p = game.player
     local held = impaired(p)
-    local out = {}
+    local out, heldCount = {}, 0
     for _, e in ipairs(getRules(p).Combat) do
         if e.hold and held then
+            heldCount = heldCount + 1
             chan.debug("[Combat] Holding %s while impaired", tostring(rules.key(e)))
         elseif rules.isAction(e) then
             out[#out + 1] = e
@@ -894,7 +902,7 @@ local function getCombatRotation()
             if tid then out[#out + 1] = tid end
         end
     end
-    return out
+    return out, heldCount
 end
 
 local function getPreventionTalents() return getAutoTalents("DamagePrevention") end
@@ -1583,7 +1591,7 @@ function skoobot_act(noAction)
         -- #67 needs the rotation as the PLAYER wrote it, not the filtered
         -- view: whether closing the distance could ever serve a talent is a
         -- question about the configuration, not about what is on cooldown.
-        local rotation = getCombatRotation()
+        local rotation, heldCount = getCombatRotation()
         local combatTalents = filterFailedTalents(rotation)
 
         if #combatTalents > 0 then
@@ -1712,14 +1720,34 @@ function skoobot_act(noAction)
                 return
             end
         else
-            -- everything is on cooldown
-            chan.debug("[Combat] All Combat talents on cooldown. Waiting.")
+            chan.debug("[Combat] Nothing in the Combat rotation is usable.")
+            -- #75: an empty rotation has three causes and this said only two
+            -- of them. A player who set STUNNED to IGNORE and held every
+            -- Combat row got "none configured, or all on cooldown" -- both
+            -- untrue -- while the only mention of holding was a debug line
+            -- they were never going to read.
+            --
             -- #57: the menu key is looked up, not quoted from the default.
-            -- #18: this is the moment a new character hits the blank list, so
-            -- the hint names the way out of it.
-            return stop(notice.CANNOT_ACT, "no Combat talent is ready -- none configured, or all on cooldown",
-                { hint = "set talent usage in the SkooBot: Reclauded menu, " .. bot.keyFor("MENU_SKOOBOT_RECLAUDED")
-                    .. ", or let the bot suggest a loadout from the talent screen" })
+            -- #18: an empty list is also the moment a new character hits the
+            -- blank rotation, so the hint names the way out of THAT -- and
+            -- only then: pointing a player with a full rotation at the
+            -- loadout suggestion because their talents are held is noise.
+            local configured = #rotation + heldCount
+            local why
+            if heldCount == 0 then
+                why = "none configured, or all on cooldown"
+            elseif heldCount == configured then
+                why = ("every one is held while impaired (%d)"):format(heldCount)
+            else
+                why = ("%d held while impaired, the rest on cooldown or unusable"):format(heldCount)
+            end
+            local extra = nil
+            if configured == 0 then
+                extra = { hint = "set talent usage in the SkooBot: Reclauded menu, "
+                    .. bot.keyFor("MENU_SKOOBOT_RECLAUDED")
+                    .. ", or let the bot suggest a loadout from the talent screen" }
+            end
+            return stop(notice.CANNOT_ACT, "no Combat talent is ready -- " .. why, extra)
         end
     end
 end

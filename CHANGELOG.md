@@ -117,6 +117,13 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   by the raw power level while every stop reason, the threat score and the tooltip's "counts
   as" figure used the rank-weighted one. With a rare and a boss in view at once the two
   disagreed, and the bot could back away from the wrong one.
+- **The "no Combat talent is ready" stop says when holding is the reason** (#75). With every
+  Combat entry set to *hold while impaired* and the character stunned, the rotation is empty —
+  but the stop said *none configured, or all on cooldown*, neither of which was true, and the
+  only mention of holding was on the debug log. It now says *every one is held while impaired
+  (N)*, or *N held while impaired, the rest on cooldown or unusable*. The "set talent usage in
+  the menu" hint is now offered only when nothing is configured at all, rather than to a player
+  whose talents are merely held.
 
 ### Fixed
 

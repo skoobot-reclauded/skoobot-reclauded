@@ -252,7 +252,10 @@ Three honest options, in increasing cost:
      character is **impaired** — `attr("stunned")`, `attr("dazed")`, `attr("confused")` or
      `attr("frozen")`, the capability counters, never `== 1` — so the rotation falls through to
      the next entry exactly as it does for a talent on cooldown. Only Combat reads it; the
-     Damage Prevention and Recovery triggers do not.
+     Damage Prevention and Recovery triggers do not. It also returns **how many** entries it
+     held, because holding is a third way for the rotation to come out empty and the stop that
+     reports an empty rotation could name only two — a player who set the debuff to IGNORE and
+     held every row was told "none configured, or all on cooldown", both untrue (#75).
    - **Not "one turn of stun left".** The paragraph above describes a tempo decision keyed on
      the *remaining* duration. The built form is the simple one: any impairment holds. It errs
      toward holding — a held hit waits for the whole stun rather than firing on its last turn
