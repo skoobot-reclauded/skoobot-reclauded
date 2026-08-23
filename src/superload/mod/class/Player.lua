@@ -152,13 +152,6 @@ local chan = logm.new{
 }
 bot.log = chan
 
--- v1's one-string log(msg), at debug. The FIGHT branch still speaks it;
--- everything else passes a format and arguments to the channel so that a
--- disabled level costs no concatenation.
-local function log(msg)
-    chan.debug("%s", msg)
-end
-
 --- Per-character configuration, persisted with the save.
 --
 -- v1 scattered this over four player fields (skoobotautotalents,
@@ -836,7 +829,7 @@ local function getCombatRotation()
     local out = {}
     for _, e in ipairs(getRules(p).Combat) do
         if e.hold and held then
-            log("[Combat] Holding " .. tostring(rules.key(e)) .. " while impaired")
+            chan.debug("[Combat] Holding %s while impaired", tostring(rules.key(e)))
         elseif rules.isAction(e) then
             out[#out + 1] = e
         else
@@ -1103,7 +1096,7 @@ end
 local function SAI_flee(entry, hostiles)
     local x, y, h = fleeStep(entry, hostiles)
     if not x then
-        log("[Combat] [Flee] Not available (" .. tostring(h) .. "): " .. tostring(rules.key(entry)))
+        chan.debug("[Combat] [Flee] Not available (%s): %s", tostring(h), tostring(rules.key(entry)))
         return false
     end
     local dir = game.level.map:compassDirection(x - game.player.x, y - game.player.y)
@@ -1115,7 +1108,7 @@ local function SAI_flee(entry, hostiles)
     bot.actions = bot.actions + 1
     local moved = game.player:move(x, y)
     if not moved then
-        log("[Combat] [Flee] The step was refused; not retrying this turn")
+        chan.debug("[Combat] [Flee] The step was refused; not retrying this turn")
         bot.loop.talentfailed[rules.key(entry)] = true
         return false
     end
@@ -1464,28 +1457,28 @@ function skoobot_act(noAction)
                and (math.abs(bot.loop.delta) / game.player.max_life >= cfg("LOWHEALTH_RATIO") / 4) then
                 talents = filterFailedTalents(getPreventionTalents())
                 if #talents > 0 then
-                    log("[Survival] [Sustain] using sustain, lost more than "
-                        .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 4) .. "% life in one turn!")
+                    chan.debug("[Survival] [Sustain] using sustain, lost more than %d%% life in one turn!",
+                        math.floor(100 * cfg("LOWHEALTH_RATIO") / 4))
                     SAI_useTalent(talents[1])
                     checkForAdditionalAction()
                     return
                 else
-                    log("[Survival] [Sustain] Lost more than "
-                        .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 4) .. "% life, but no sustain off cooldown!")
+                    chan.debug("[Survival] [Sustain] Lost more than %d%% life, but no sustain off cooldown!",
+                        math.floor(100 * cfg("LOWHEALTH_RATIO") / 4))
                 end
             end
 
             if (game.player.life / game.player.max_life <= 1 - cfg("LOWHEALTH_RATIO") / 4) then
                 talents = filterFailedTalents(getRecoveryTalents())
                 if #talents > 0 then
-                    log("[Survival] [Recovery] using recovery, missing more than "
-                        .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 4) .. "% life...")
+                    chan.debug("[Survival] [Recovery] using recovery, missing more than %d%% life...",
+                        math.floor(100 * cfg("LOWHEALTH_RATIO") / 4))
                     SAI_useTalent(talents[1])
                     checkForAdditionalAction()
                     return
                 else
-                    log("[Survival] [Recovery] Missing more than "
-                        .. math.floor(100 * cfg("LOWHEALTH_RATIO") / 4) .. "% life, but no recovery off cooldown!")
+                    chan.debug("[Survival] [Recovery] Missing more than %d%% life, but no recovery off cooldown!",
+                        math.floor(100 * cfg("LOWHEALTH_RATIO") / 4))
                 end
             end
 
@@ -1500,11 +1493,11 @@ function skoobot_act(noAction)
             local function fireTier()
                 if #tier == 0 then return false end
                 for _, enemy in pairs(picks) do
-                    log("[Combat] Target selected: " .. enemy.name)
+                    chan.debug("[Combat] Target selected: %s", tostring(enemy.name))
                     talents = filterFailedTalents(getAvailableTalents(enemy, tier))
                     local tid = talents[1]
                     if tid ~= nil then
-                        log("[Combat] Using talent: " .. tid .. " on target " .. enemy.name)
+                        chan.debug("[Combat] Using talent: %s on target %s", tid, tostring(enemy.name))
                         game.player:setTarget(enemy.actor)
                         SAI_useTalent(tid, nil, nil, nil, enemy.actor)
                         return true
@@ -1532,7 +1525,7 @@ function skoobot_act(noAction)
             end
             local a = Astar.new(game.level.map, game.player)
             local path = a:calc(game.player.x, game.player.y, targets[1].x, targets[1].y)
-            log("[Combat] [Movement] Pathing towards " .. targets[1].name)
+            chan.debug("[Combat] [Movement] Pathing towards %s", tostring(targets[1].name))
             getDirNum(game.player, targets[1])  -- v1 computed this and never used it
 
             if not path then
@@ -1547,7 +1540,7 @@ function skoobot_act(noAction)
             end
         else
             -- everything is on cooldown
-            log("[Combat] All Combat talents on cooldown. Waiting.")
+            chan.debug("[Combat] All Combat talents on cooldown. Waiting.")
             -- #57: the menu key is looked up, not quoted from the default.
             -- #18: this is the moment a new character hits the blank list, so
             -- the hint names the way out of it.
