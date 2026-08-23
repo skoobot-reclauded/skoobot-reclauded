@@ -43,6 +43,18 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   sooner when you are hurt; and *Maximum Combined Enemy Power* now means *above your own
   power* rather than an absolute figure. Toggling the bot on the stairs you arrived by explores
   instead of handing back at once.
+- **Flee** (#59): two built-in rows in the talent screen's Available list -- *Flee from the
+  nearest hostile* and *Flee from the strongest hostile* -- can be placed in Combat like a
+  talent. Where the rotation reaches one and a hostile is in view, the bot takes one step that
+  increases its distance (preferring a tile the hostile cannot see); with no such step it is
+  skipped like a talent on cooldown. Ask (Shift+F6) reports "would flee from <name> to the
+  <direction>".
+- **Hold while impaired** (#15): Space on a Combat row marks it *held*; while you are stunned,
+  dazed, confused or frozen a held talent is skipped and the rotation falls through. Only
+  meaningful when the matching stop condition is set to WARN or IGNORE.
+- **Log level** (#46): a *Log level* entry on the options tab (off / error / warn / info / debug
+  / trace; default info). Everything the bot does goes to `te4_log.txt` under `[SKOOBOT]`; only
+  warnings and errors reach the message log.
 
 ### Changed
 
@@ -60,6 +72,14 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   Shift+F7 menu. The original's Alt+F1 / Shift+F1 stay with the original.
 - **Talent picker fits the screen.** Long lists scroll instead of running off the top and
   bottom edges at 1366×768 (#9).
+- **The bot stops when it makes no progress, not after a turn count** (#13). 0.0.12 stopped
+  after 1000 actions whether or not they were doing anything; now an activation that makes no
+  progress for 8 decisions in a row stops with the bot's state in the message ("please report
+  this"), and a productive long run is never interrupted for its length.
+- **First-run wording** (#54): the addon's description leads with what it does and the one
+  thing to know (enable it before creating the character); the options are named in the words
+  the stops use (*Maximum Enemy Power*, *Maximum Enemy Power Above Yours*, the ratios explained);
+  the menu says how to start and what IGNORE / WARN / STOP mean when a stop condition is set.
 
 ### Fixed
 
@@ -79,6 +99,4 @@ Defects inherited from 0.0.12, all reported by its users:
 
 ### Not in this version
 
-- Preset talent loadouts and auto-discovery are planned for 0.1.0 and not yet in (#18).
-- The scored situation evaluation that replaces the stop-condition list, tempo-aware talent
-  holding and fleeing are after 0.1 (#11, #15, #59).
+- The scored situation evaluation that replaces the stop-condition list is after 0.1 (#11).
