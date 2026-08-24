@@ -102,8 +102,13 @@ end
 --- A ratio, to one decimal: "1.5x your limit", the threat score. The tenth
 --- carries meaning here -- 1.0 IS the limit, and 1.4 against 0.9 is the
 --- difference between over and under.
+--- Rounds before formatting: `%.1f` resolves an exact .x5 tie in the C
+--- library, and glibc gives "0.2" for 0.25 where the MSVC runtime gives
+--- "0.3" -- so the same fight read differently on Linux and Windows. See #30.
 local function fmt1(x)
-    return ("%.1f"):format(x)
+    if x ~= x or x == math.huge or x == -math.huge then return ("%.1f"):format(x) end
+    local tenths = x >= 0 and math.floor(x * 10 + 0.5) or -math.floor(-x * 10 + 0.5)
+    return ("%.1f"):format(tenths / 10)
 end
 
 --- A POWER LEVEL, whole (#84). These are three- and four-figure numbers
@@ -366,7 +371,7 @@ end
 --- limit" when a knob of zero made it infinite.
 function M.suffix(score)
     if score == math.huge then return " -- threat over any limit" end
-    return (" -- threat %.1f"):format(score)
+    return (" -- threat %s"):format(fmt1(score))
 end
 
 return M
