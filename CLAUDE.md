@@ -55,6 +55,14 @@ in this repo's GitHub Issues.**
 - Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer outside this
   repository — not in this repo, not in issues, for now — and are cited by ID; every
   citation here should carry its one-line substance.
+- **Comments state the rule and the trap; they do not argue the case.** No multi-paragraph
+  block in `src/` justifying a design decision, and never one that restates reasoning already
+  written in an issue, a commit message, or `docs/`. One sentence ending in `see #1337` is
+  enough — the citation is what a maintainer follows to the full story. Keep the comments that
+  stop an hour being lost: why a mechanism does *not* work, engine citations with file and
+  line, and the "why not the obvious fix" notes. Long-form findings go to `docs/`. Owner's
+  rule, 2026-08-24; **#105** is the remediation pass over the code written before it, and
+  applying it as you touch a file is cheaper than that pass.
 - Push with `--follow-tags` and don't force-push `main` — ordinary hygiene, not a security
   control. **D-9: the owner has accepted the history-rewrite risk and closed the question.**
   Do not add branch protection or rulesets for it, and do not re-raise it as a finding.
