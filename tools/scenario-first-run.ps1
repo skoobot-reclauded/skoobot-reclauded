@@ -535,7 +535,7 @@ return ("tab=[%s] entries=%d empty=%d shouting=%d clipped=%d [%s] ;; %s"):format
     Check ($op -match 'Power level is the addon.s rough threat score') 'power level is explained in one clause'
     Check ($op -match 'Maximum Combined Enemy Power = \d+ :: Stop when the power levels of every enemy in view, added together, are more than this much above your own') 'MAX_COMBINED_POWER says it is a margin above yours'
     Check ($op -match 'Normal Enemy Power Ratio = [\d.]+ :: .*multiple of their power level' -and $op -match 'Elite Enemy Power Ratio = [\d.]+ :: .*multiple' -and $op -match 'Boss Enemy Power Ratio = [\d.]+ :: .*multiple') 'each rank ratio says it is a multiple of the power level'
-    Check ($op -match 'Low Health Ratio = [\d.]+ :: A fraction of your maximum life') 'the life ratios say they are fractions of maximum life'
+    Check ($op -match 'Low Health Ratio = [\d.]+ :: A fraction of your life pool') 'the life ratios say they are fractions of the life pool (#91)'
     # #82: since #11 these five are terms of one threat score, not
     # independent switches, and every power stop already ends " -- threat N".
     # The tab has to say what N is measured against.

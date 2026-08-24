@@ -269,13 +269,16 @@ class:bindHook("GameOptions:generateList", function(self, data)
         -- the words the stop notices use, so the tab reads on its own. The
         -- setting keys are the save's and the harness's and do not change.
         createNumericalOption("LOWHEALTH_RATIO",
-            "A fraction of your maximum life (0.5 is half). While enemies are in view, the bot " ..
+            "A fraction of your life pool (0.5 is half) -- your maximum life, plus whatever " ..
+            "keeps you alive below zero, which is what the game itself measures. While " ..
+            "enemies are in view, the bot " ..
             "stops when life is below it. The other life thresholds follow from it: losing half " ..
             "of this fraction in one turn is the Big Loss stop; in a fight, losing a quarter of " ..
             "it in one turn uses a Damage Prevention talent, and missing a quarter of it uses a " ..
             "Recovery talent.", 0, 1)
         createNumericalOption("IGNORE_DAMAGE_HEALTH_RATIO",
-            "A fraction of your maximum life (0.9 is nine tenths). While exploring with nothing " ..
+            "A fraction of your life pool (0.9 is nine tenths); see Low Health Ratio for what " ..
+            "the pool is. While exploring with nothing " ..
             "in view, damage is ignored as long as life stays above it, so a single poison tick " ..
             "does not stop the bot; once life is below it, any damage taken while exploring hands " ..
             "back. It is also the scale that stop is measured on: life exactly at this ratio is " ..
