@@ -80,16 +80,24 @@ fixes sitting unmerged while the maintainer was unavailable, and was carried on 
 most users never found. This project was started knowing that, so here is where things stand —
 the current state, not a promise.
 
-- **What exists today:** the organisation is owned by one person, and the procedures for a
-  second administrator and for the project's machine account to keep the tracker moving are
-  written down in [docs/github-workflow.md](docs/github-workflow.md) §9, including the two
-  facts that are still blank.
-- **The intent:** a second human admin who can merge, and a machine account that can triage
-  issues and label what is ready, so that a good PR does not sit for a year because one
-  calendar went dark. Until the second admin is named, that intent is not yet a mechanism.
-- **Anything beyond that is tracked, not assumed:** #17 (the contribution path) and #41 (the
-  review rule and what happens in the maintainer's absence) are the issues; read them for the
-  current state rather than this page, which will lag.
+- **The organisation has one human, and there will not be a second.** That is a decision, not
+  a gap waiting to be filled. So the honest answer is the plain one: if that person stops
+  answering, nobody can merge your pull request, change a repository setting, or issue a
+  token. Please read that before you spend an evening on a patch — it is exactly what you are
+  entitled to know, and exactly what nobody told the last set of contributors.
+- **What is different this time is what a fork inherits.** The original left two working
+  fixes stranded because the code was the only thing anyone could take. Here the unit suite,
+  the harness that drives a real game, the design documents and the reasoning behind every
+  change all travel with the repository. A fork does not restart from a pile of Lua and a
+  guess.
+- **The machine account keeps the tracker honest while the maintainer is around** — filing,
+  labelling, commenting and closing all happen as `skoobot-reclauded-bot`. It is not a
+  continuity mechanism, because minting its token needs the owner; it is why an issue gets a
+  reply promptly rather than eventually.
+- **The rest is tracked, not assumed:** #17 (the contribution path) and #41 (the review rule
+  and what happens in the maintainer's absence) are the issues; read them for the current
+  state rather than this page, which will lag. The full version is
+  [docs/github-workflow.md](docs/github-workflow.md) §9.
 - **The licence needs nobody's permission.** This is GPL-3.0-or-later. If the repository is
   public and unanswered, fork it, keep the headers and the `NOTICE` chain, and carry on — that
   is exactly how this project relates to its own predecessor, and it is the one mechanism that
