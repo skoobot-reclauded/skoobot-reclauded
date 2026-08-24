@@ -61,6 +61,13 @@ is. What a PR needs, and the template will ask for:
 - **Commit messages that say why.** Imperative subject with the issue number in parentheses
   — `Stop for glowing chests instead of walking past them (#8)` — and a body that explains
   the reasoning, not the diff.
+- **Comments that a maintainer would be wrong without.** The reasoning behind a change belongs
+  in the issue and the commit message; the code needs the rule and the trap it avoids. One
+  sentence and a pointer — `-- Poll rather than hook: the engine clears this first (see
+  #1337)` — instead of a paragraph re-arguing a decision that is already written down
+  somewhere. Always worth the space: why an approach that looks right does *not* work, an
+  engine citation with its file and line, and the reason not to retry the obvious fix.
+  Long-form findings go in `docs/`, not in `src/`.
 
 Nothing under `tools/` or `spec/` may be referenced from `src/`: `tools/` executes arbitrary
 Lua from disk by design and is never packaged, and `tools/pack.ps1` refuses an archive that
