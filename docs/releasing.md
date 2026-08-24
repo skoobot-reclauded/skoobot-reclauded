@@ -138,7 +138,84 @@ from a `.teaa` file name on the way down, so `tome-skoobot_reclauded-0.1.0.teaa`
 appears in the menu, and the tester reports "it does nothing". A zip survives the trip. Tell
 the recipient to extract the `.teaa` into `game/addons/` unchanged.
 
-## 5. Hotfixes
+## 5. The rolling development build
+
+Between releases the newest build worth testing lives in **one** GitHub Release, tagged
+`latest-dev` and titled `latest-dev-g<sha7>`. It is deleted and recreated whenever there is
+something worth handing to a tester, so there is never more than one and no development build
+is kept for its own sake.
+
+| | `latest-dev` | `v0.x.y` |
+|---|---|---|
+| Tag | `latest-dev`, moved to each new build | `v0.x.y`, never moved once pushed |
+| Title | `latest-dev-g<sha7>` | `SkooBot: Reclauded 0.x.y` |
+| Asset | `tome-skoobot_reclauded-0.x.y-g<sha7>.zip` | `tome-skoobot_reclauded-0.x.y.zip` |
+| Lifetime | until the next build replaces it | permanent |
+| Prerelease | always | every `0.x` (D-14); dropped at 1.0.0 |
+| CHANGELOG | not touched; `## [Unreleased]` stands | moved to `## [0.x.y]` |
+| Gate | section 5.1 | section 4 and [release-0.1.md](release-0.1.md) section 4 |
+| Play tested | no, and the notes say so | yes -- the judgement gate at 1.0.0 |
+
+**The tag is stable and moves; it is deliberately not `latest-dev-<sha>`.** The release page URL
+then never changes, so the README, an issue or a message to a tester can point at "the current
+development build" once and stay correct, and the repository does not accumulate a dead tag per
+test build. Nothing about the commit is lost: it is in the title, in the asset filename, and in
+the release's own target. The cost is that anyone who has fetched `latest-dev` sees it jump on
+the next fetch, which is what a development channel is for.
+
+### 5.1 What a development build must still pass
+
+Not the release gate -- being cheap is the point -- but never less than this, because it is a
+public download a stranger can find:
+
+1. **Clean tree, and the commit pushed.** A build from a commit nobody can check out cannot be
+   reproduced from the report it generates.
+2. **`luacheck .`, `busted`, and the parse check** -- the three the pre-commit hook already
+   runs, so this costs nothing on a commit that went through it.
+3. **`tools/pack.ps1`** with no `-Release`, which writes
+   `dist/tome-skoobot_reclauded-0.x.y-g<sha7>.teaa` (#53).
+4. **`tools/clean-build.ps1 -SkipPack`** -- the artifact loads standalone, proven from the
+   engine's own `Binding addon` line. **This is the one gate a development build must not
+   skip.** A mis-packed archive is ignored *silently* (section 4), so the only report you would
+   ever get back is "it does nothing", from someone who cannot tell that from a bug.
+5. **Zipped**, for the reason in section 4. That applies to a development build more than a
+   release, because it is handed to people directly.
+
+Play testing is explicitly **not** a gate here. A development build is untested by definition
+and its notes have to say so; a tester who thinks they were given a release will report the
+wrong things.
+
+### 5.2 Replacing it
+
+From a clean checkout of `main` whose HEAD is pushed, with `<sha7>` the short hash and `<sha>`
+the full one:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/pack.ps1
+powershell -ExecutionPolicy Bypass -File tools/clean-build.ps1 -SkipPack
+Compress-Archive dist/tome-skoobot_reclauded-0.1.0-g<sha7>.teaa `
+                 dist/tome-skoobot_reclauded-0.1.0-g<sha7>.zip
+```
+
+Then replace the release. `--cleanup-tag` is what lets the tag move: it removes the tag with the
+release, so the next `create` re-points it at the new commit.
+
+```
+gh release delete latest-dev --yes --cleanup-tag
+gh release create latest-dev dist/tome-skoobot_reclauded-0.1.0-g<sha7>.zip \
+  --target <sha> --title 'latest-dev-g<sha7>' --notes-file notes.md --prerelease
+```
+
+`--target` takes a **full** 40-character SHA or a branch name; an abbreviated hash is rejected
+with `HTTP 422: Release.target_commitish is invalid`. The machine account creates it, under
+[github-workflow.md](github-workflow.md) section 2.2, exactly as at step 9.
+
+The notes are written fresh each time and say what the build is for. They must state that it is
+a development snapshot, name the commit, carry the install steps, and say that it has had no
+play testing.
+
+## 6. Hotfixes
+
 
 Same procedure with `y` bumped: the fix lands on `main` with its test, then steps 2–10. There
 are no release branches; `main` is always the next release. Until 1.0 there is no promise to

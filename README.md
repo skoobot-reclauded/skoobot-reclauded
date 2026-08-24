@@ -9,8 +9,14 @@ rests, explores and fights, and hands control back when it judges the situation 
 > the game's Addons browser, and it will not be until **1.0.0** — the first version meant to
 > be met by someone who did not come looking for it.
 >
-> **[Download the latest release](https://github.com/skoobot-reclauded/skoobot-reclauded/releases)**,
+> **[Download from the releases page](https://github.com/skoobot-reclauded/skoobot-reclauded/releases)**,
 > and see [Installing](#installing) — the `.teaa` ships inside a zip, and the file name matters.
+>
+> **No numbered release has been cut yet.** What is there today is **`latest-dev`**: a
+> development snapshot of `main`, rebuilt whenever there is something worth testing and deleted
+> without notice. Every build is checked to load and run in a clean game before it is posted,
+> and none of them has been play tested. Numbered `0.x` betas will appear beside it, and those
+> are the ones that keep their download link.
 >
 > If you want a finished, published addon today, you want
 > **[the original SkooBot](https://github.com/SkoobyDoo/tome4-SkooBot)**, which remains
@@ -19,7 +25,8 @@ rests, explores and fights, and hands control back when it judges the situation 
 ## Installing
 
 1. **Download the `.zip`** from the [releases page](https://github.com/skoobot-reclauded/skoobot-reclauded/releases)
-   and extract the `tome-skoobot_reclauded-<version>.teaa` inside it.
+   and extract the `.teaa` inside it — `tome-skoobot_reclauded-<version>.teaa` from a numbered
+   release, or `tome-skoobot_reclauded-<version>-g<commit>.teaa` from `latest-dev`.
 2. **Do not rename the `.teaa`.** The game only considers archives whose name begins `tome-`,
    and it skips anything else **silently** — no error, the addon simply never appears. Some
    download paths strip the hyphens from a bare `.teaa`, which is why releases ship zipped.
