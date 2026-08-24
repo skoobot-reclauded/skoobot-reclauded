@@ -35,7 +35,15 @@ describe("the test interpreter", function()
 
   -- The complementary direction: 5.4-only syntax must not compile here, or it
   -- could reach the game, where it is a hard error.
+  -- Only 2.0 can answer this. LuaJIT 2.1 rolling builds parse more than the
+  -- game does -- 2.1.1787165859 compiles `1 & 3`, which 2.0.2 rejects -- so on
+  -- 2.1 this failed while the shipped code was fine. That gap is why the 2.0
+  -- job exists; see #63 and #30.
   it("rejects syntax the game's Lua cannot parse", function()
+    local jit = rawget(_G, "jit")
+    if not (jit and jit.version:match("^LuaJIT 2%.0")) then
+      return pending("only the game's LuaJIT 2.0 parser is strict enough; the 2.0 job holds this guard")
+    end
     assert.is_nil(loadstring("return 7 // 2"), "integer division compiled; this is not 5.1")
     assert.is_nil(loadstring("return 1 & 3"), "bitwise and compiled; this is not 5.1")
   end)
