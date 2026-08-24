@@ -61,7 +61,8 @@ allowed to be rough in ways a listing is not.
 | Life measured over the pool the game kills at (#91) | in — `die_at`, which every life judgement ignored. A pool held up by something about to lapse is not counted, and the reason says which effect it did not count |
 | Progress invariant replacing the turn-count stop (#13) | in (`29ee928`) — built ahead of M2 because it is small and regression-netted |
 | Levelled debug channel (#46) | in (`a0b8a11`) |
-| Flee action (#59) and hold-while-impaired (#15) | **built, on `main`, still M5** — implemented on the owner's "all work available" instruction; whether 0.1 ships them is the owner's call. Their follow-ups #67 (cornered), #68 (the last turn of a stun), #69 (keep sight), #75 (the stop wording) and #80 (which enemy is "strongest") are built too, so whatever ships is the finished shape |
+| Flee action (#59) and hold-while-impaired (#15) | **in** — owner's ruling, 2026-08-24. Their follow-ups #67 (cornered), #68 (the last turn of a stun), #69 (keep sight), #75 (the stop wording) and #80 (which enemy is "strongest") ship with them, so what goes out is the finished shape rather than a first cut |
+| #74 option ranges · #77 BLACKOUT condition · #78 walking to a glowing chest · #79 non-linear life curve · #81 the FIGHT target filter | **in** — all built, closed and on `main`. They were labelled M5 while the label was about intent; a release is cut from `main`, so they were always going to be in the build. Moved to M4 on 2026-08-24 so the milestone says what the build contains |
 
 M4 is not gates only: the open rows are work.
 
@@ -93,9 +94,13 @@ for the judgement gate, not a condition of release.
   framework and #14 superload minimisation were folded into `main` on 2026-08-23 (owner:
   *all code from builds A/B/C can be merged*), after #13, the progress invariant, and #46, the
   debug channel, earlier the same day. Their follow-ups are tracked as their own issues.
-- **M5 Post-0.1**: #15 tempo-aware holding and #59 flee are *built* (see §3) but stay M5 until
-  the owner rules them into 0.1. Their follow-ups #67 #68 #69 #75 #80 are built as well, and so
-  are #77 (the BLACKOUT condition), #78 (walking to a glowing chest) and #79 (the non-linear
-  life curve) — all on `main`, all M5, all the owner's call the same way. Nothing labelled M5
-  is a gate; what is on `main` is what a build contains, and §1's judgement gate is where that
-  is weighed.
+- **M5 Post-0.1**: nothing built is deferred any more. The owner ruled #59 flee and #15
+  tempo-aware holding into 0.1.0 on 2026-08-24, and on the same day the other ten closed M5
+  issues moved to M4 — #67 #68 #69 #75 #80 (the flee and hold follow-ups), #74, #77, #78, #79
+  and #81. **The move was bookkeeping catching up with reality:** every one of them was
+  already on `main`, a release is cut from `main`, so the label was describing an intention
+  the build had already overtaken. M5 now holds nine open issues and nothing closed, which
+  makes it mean what it says — work that has not been done.
+
+  The rule that made this confusing is worth keeping in view: **what is on `main` is what a
+  build contains.** A milestone cannot keep code out of a release; only not merging it can.

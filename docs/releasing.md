@@ -82,6 +82,13 @@ are already on `main`; if one is not, it is not in this release.
    The tag is the cheapest recovery point there is: `git checkout v0.x.y` followed by step 6
    rebuilds the artifact's contents from nothing but the repository, which is why the build
    refuses to run without it.
+
+   **Annotated, not signed** — owner's call, 2026-08-24. A signed tag would let a stranger
+   verify that the maintainer, and not the machine account, blessed a particular build; that
+   is worth having eventually and is not worth the key management during a beta nobody has
+   downloaded yet. The one signature this repository does carry is on `HUMAN.md`, where the
+   point is authorship rather than release provenance. Revisit at 1.0.0, when a build starts
+   reaching people who have no reason to trust it.
 6. **Build the release artifact:**
 
    ```

@@ -1,0 +1,29 @@
+# Routing for the "New issue" page.
+#
+# Blank issues stay ENABLED on purpose. The maintainer files most issues, and an
+# addon developer with a real compatibility finding should not be forced through
+# a bug template written for players. The links below are a signpost, not a gate:
+# they exist so that questions, playtest notes and half-formed ideas have an
+# obvious home that is not the work tracker.
+#
+# An issue is work. A discussion is everything on the way to work.
+# See CONTRIBUTING.md, "Where things go".
+blank_issues_enabled: true
+contact_links:
+  - name: Question about using it
+    url: https://github.com/skoobot-reclauded/skoobot-reclauded/discussions/categories/q-a
+    about: >-
+      How do I make it…, is it meant to do that, which setting controls this. The bug
+      template asks for eight facts a question does not need, and an answer here stays
+      searchable for the next person who wonders.
+  - name: Playtest report — how a run actually went
+    url: https://github.com/skoobot-reclauded/skoobot-reclauded/discussions/categories/playtest-reports
+    about: >-
+      You ran it for a while and want to say what happened. Not a bug and not a request.
+      This is the evidence that decides what 1.0 needs, and it is genuinely wanted — say
+      the class, roughly how far you got, and where it annoyed you.
+  - name: Idea or feature request
+    url: https://github.com/skoobot-reclauded/skoobot-reclauded/discussions/categories/ideas
+    about: >-
+      Something you wish it did. Ideas become issues once they become work, so starting
+      here costs you nothing and commits the tracker to nothing.

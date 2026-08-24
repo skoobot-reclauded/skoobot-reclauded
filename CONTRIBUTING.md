@@ -3,9 +3,32 @@
 Thank you for considering it. This page says how to report a bug, what a pull request needs,
 and — honestly — what happens to your contribution if the maintainer goes quiet.
 
+## Where things go
+
+**An issue is work. A discussion is everything on the way to work.** That is the whole rule,
+and it exists so the tracker stays a list of things somebody intends to do rather than a
+mixture of questions, wishes and reports.
+
+| You have | Where |
+|---|---|
+| A bug — it did something wrong, or failed to stop when it should have | **Issue**, bug-report template |
+| A question — how do I, is it meant to, which setting | **Discussions → Q&A** |
+| A run to describe — what happened over an hour of play | **Discussions → Playtest reports** |
+| A wish — something you would like it to do | **Discussions → Ideas** |
+| A pull request | **Issue first**, then the PR closing it |
+
+Nothing is lost by guessing wrong; things get moved. **Playtest reports are the one worth
+singling out** — during the `0.x` betas they are the most useful thing anyone can send, more
+than a bug report, because what decides when 1.0 is ready is whether the thing is pleasant to
+play and no test can answer that.
+
+New releases are announced in **Discussions → Announcements**. Watch the repository with
+*Custom → Releases* (or *Discussions*) if you want to hear about builds; there is no listing
+page and no mailing list.
+
 ## Bug reports
 
-**Issues are the tracker.** File bugs and ideas as GitHub issues in this repository; there is
+**Issues are the tracker.** File bugs as GitHub issues in this repository; there is
 no other list anywhere, on purpose. Use the bug-report template — it asks for the few facts
 (game version, addon version, other addons, class, what the bot was doing, the stop message)
 that decide whether a report can be reproduced at all.
