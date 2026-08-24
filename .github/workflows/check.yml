@@ -138,3 +138,52 @@ jobs:
             exit 1
           fi
           echo "tag v$tag matches addon_version"
+
+  # #63: the same unit tests under the LuaJIT the GAME ships.
+  #
+  # Local development and the job above run LuaJIT 2.1; ToME 1.7.6 runs 2.0.2.
+  # The difference that matters is the library: table.new, table.clear and the
+  # string buffer exist in 2.1 and not in 2.0, so a spec that passes here would
+  # fail for every player. spec/dialect_spec.lua scans the source for those
+  # calls -- the local half of #63, which needs no second interpreter -- but a
+  # scan only knows the names it was told about. Running the suite on 2.0 knows
+  # all of them.
+  #
+  # Parse and test only: luacheck's findings do not depend on the interpreter,
+  # and the packaging check is about a zip.
+  dialect:
+    name: unit tests under LuaJIT 2.0 (the game's)
+    runs-on: ubuntu-latest
+    env:
+      BUSTED_VERSION: 2.3.0
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install LuaJIT 2.0 and luarocks (outside the workspace)
+        run: |
+          curl -fsSL -o "$HOME/hererocks.py" \
+            https://raw.githubusercontent.com/luarocks/hererocks/master/hererocks.py
+          python3 "$HOME/hererocks.py" "$HOME/lua20" --luajit 2.0 --luarocks latest
+          echo "$HOME/lua20/bin" >> "$GITHUB_PATH"
+
+      - name: Install busted
+        run: |
+          luarocks install busted "$BUSTED_VERSION"
+          luajit -v
+          busted --version
+
+      - name: Parse every tracked Lua file under LuaJIT 2.0
+        run: |
+          status=0
+          while IFS= read -r f; do
+            if ! luajit -bl "$f" /dev/null >/dev/null; then
+              echo "::error file=$f::does not parse under LuaJIT 2.0"
+              status=1
+            fi
+          done < <(git ls-files -- '*.lua')
+          exit "$status"
+
+      - name: Unit tests
+        run: busted
