@@ -227,8 +227,22 @@ Defects inherited from 0.0.12, all reported by its users:
   fight": pinned next to an enemy, the bot attacks; pinned with nothing in reach it hands back
   saying so, instead of trying a step the game refuses (#12).
 
-And one nobody reported, found here:
+And three that are not in the complaint record, because they were found here rather than by
+0.0.12's users -- one inherited and invisible, two in this project's own new code:
 
+- **The bot no longer paces between two squares against something that cannot chase it** (#97).
+  A ranged character with *Flee but keep sight* under a shooting talent, and an immobile enemy
+  — a mold, a poison bush — further away than the talent reaches, would step back until the
+  enemy was at the edge of sight, then walk forward to get in range, then step back again,
+  forever. It never stopped and never got anywhere: measured at two squares over 3,600 game
+  turns. A flee row is now skipped when the thing it would run from cannot move and is not
+  already next to you — because something that cannot follow is not worth stepping away from.
+  Standing next to one, it still backs off, which is what the row is for.
+- **"Cannot act: auto-explore refused to start" is gone** (#103). A level with nothing left to
+  explore made the bot claim it was unable to act, on every single toggle, forever. It was not
+  unable to do anything — it was finished. It now hands back with *this level is explored —
+  nothing reachable left to see*, and says how many level changes you have found, since that is
+  where you go next. Walking there and asking is still to come (#86).
 - **Your settings are kept** (#90). Everything on the *[SkooBot: Reclauded]* options tab — the
   thresholds, the ratios, the stop popup, the log level — lasted exactly one session. The file
   on disk was correct and the tab showed the right value all session, so the loss was invisible

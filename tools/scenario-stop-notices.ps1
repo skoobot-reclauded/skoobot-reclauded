@@ -210,6 +210,45 @@ function sn.pinnedSite()
       .. " | dturn=" .. tostring(game.turn - before) .. " | log=" .. sn.lastlog(2)
 end
 
+-- #103: the explore branch when the level is finished. autoExplore is
+-- stubbed to refuse, which is what the engine does when it can reach no
+-- unseen tile and no unvisited item -- the only way it returns false
+-- (engine/interface/PlayerExplore.lua:204, :292). Stubbed rather than
+-- staged, because staging it means an explored level, and what changed is
+-- OUR branch: the severity and the words, not the engine's decision.
+function sn.exploredLevel()
+  sn.reset()
+  local p = game.player
+  if sn.hostiles() ~= 0 then return "SETUP a hostile is in view" end
+  -- A REAL decision, not b.query(): query mode returns from the explore
+  -- branch before autoExplore is ever called ("AI would begin exploring"),
+  -- so the stub would never be consulted and the check would pass on a
+  -- reason it never produced. With the refusal in place the bot rests,
+  -- tries to explore, and stops -- one decision, exactly as reported.
+  local real = p.autoExplore
+  p.autoExplore = function() return false end
+  local before = game.turn
+  local banner = sn.capture(function()
+    local ok, err = pcall(function() b.start() end)
+    if not ok then b.last_reason = "PROBE ERROR " .. tostring(err) end
+  end)
+  p.autoExplore = real
+  if b.active then b.stop("probe done") end
+  -- Whether the map has any level change the player has seen, so the
+  -- check below knows which half of the reason to expect.
+  local seen = 0
+  local map = game.level.map
+  for x = 0, map.w - 1 do
+    for y = 0, map.h - 1 do
+      if map.has_seens(x, y) and map:checkEntity(x, y, engine.Map.TERRAIN, "change_level") then
+        seen = seen + 1
+      end
+    end
+  end
+  return ("reason=%s | banner=%s | dturn=%d | exits_seen=%d | log=%s"):format(
+    tostring(b.last_reason), tostring(banner), game.turn - before, seen, sn.lastlog(2))
+end
+
 function sn.keys(remap)
   local before = KeyBind.binds_remap.MENU_SKOOBOT_RECLAUDED
   if remap == "set" then KeyBind.binds_remap.MENU_SKOOBOT_RECLAUDED = { "sym:_F9:true:false:false:false" } end
@@ -311,6 +350,29 @@ return "installed"
         Check ($s7.Result -match 'reason=Stopped: cannot move \(pinned, held, or overloaded\)') 'the pinned stop is a STOPPED notice (t012 still reads "cannot move")'
         Check ($s7.Result -match ('\(restart with ' + [regex]::Escape($toggleKey) + '\)')) 'the log line ends with the restart key'
         Check ($s7.Result -match 'dturn=0') 'query advanced no game turn'
+    }
+
+    # ----- 8: a finished level is a hand-back, not an inability (#103) -------
+    Write-Host ''
+    Write-Host '  --- the explore branch when there is nothing left to explore'
+    $s8 = Probe 'return sn.exploredLevel()' 60
+    Write-Host "  $($s8.Result)"
+    if ($s8.Result -match '^SETUP') {
+        Write-Host "  INFO  inconclusive here ($($s8.Result))"
+    } else {
+        # The defect: "Cannot act: auto-explore refused to start", repeated
+        # identically on every toggle, on a level that was simply finished.
+        Check ($s8.Result -notmatch 'auto-explore refused to start') 'the internal call name is gone from what the player sees'
+        Check ($s8.Result -notmatch 'reason=Cannot act:') 'a finished level is not reported as an inability'
+        Check ($s8.Result -match 'reason=Handed back: this level is explored') 'it hands back, and says the level is explored'
+        Check ($s8.Result -notmatch 'PROBE ERROR') 'the decision did not raise'
+        if ($s8.Result -match 'exits_seen=(\d+)') {
+            if ([int]$Matches[1] -gt 0) {
+                Check ($s8.Result -match 'level change(s)? you have found (is|are) the way on') "with $($Matches[1]) known level change(s), the reason names them as the way on"
+            } else {
+                Check ($s8.Result -notmatch 'the way on') 'with no level change seen yet, it does not claim one'
+            }
+        }
     }
 }
 finally {

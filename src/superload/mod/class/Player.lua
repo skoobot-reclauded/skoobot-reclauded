@@ -566,6 +566,29 @@ local function SAI_movePlayer(x, y)
     return game.player:move(x, y)
 end
 
+--- #103: how many level changes the player has actually seen.
+---
+--- Walked once, at the moment the level turns out to be finished, not per
+--- turn -- the map is a few thousand grids and this is the one place that
+--- wants the answer. `has_seens` is the engine's own memory of what the
+--- character has looked at, which is the same test autoExplore uses to
+--- decide a tile is worth walking to, so this counts only stairs the
+--- PLAYER knows about.
+local function knownLevelChanges()
+    local map = game.level and game.level.map
+    if not map then return 0 end
+    local n = 0
+    for x = 0, map.w - 1 do
+        for y = 0, map.h - 1 do
+            if map.has_seens(x, y)
+               and map:checkEntity(x, y, engine.Map.TERRAIN, "change_level") then
+                n = n + 1
+            end
+        end
+    end
+    return n
+end
+
 local function SAI_beginExplore()
     if bot.do_nothing then
         game.log("[SkooBot] AI would begin exploring.")
@@ -576,7 +599,29 @@ local function SAI_beginExplore()
     if game.player:autoExplore() then
         return game.player:act()
     else
-        return stop(notice.CANNOT_ACT, "auto-explore refused to start")
+        -- #103: this is not an inability, and calling it one made the bot
+        -- repeat "Cannot act: auto-explore refused to start" every time the
+        -- player toggled it, on a level that was simply finished.
+        --
+        -- The engine's autoExplore (engine/interface/PlayerExplore.lua:204)
+        -- flood-fills for unseen tiles and unvisited items and returns false
+        -- when it can reach NEITHER. Exits are collected (`:210`) and never
+        -- targeted -- `:292` chooses among unseen_items and unseen_tiles
+        -- only -- so a refusal means exactly one thing: there is nothing
+        -- reachable left to explore. That is a hand-back, not a cannot-act:
+        -- the bot has finished what it knows how to do and the next move is
+        -- the player's.
+        --
+        -- The stairs are named when the player has found any, because
+        -- "explored" and "so take the stairs" are one sentence to them.
+        -- Walking there and asking is #86; this is the honest stop until it.
+        local exits = knownLevelChanges()
+        local reason = "this level is explored -- nothing reachable left to see"
+        if exits > 0 then
+            reason = reason .. ("; %d level change%s you have found %s the way on"):format(
+                exits, exits == 1 and "" or "s", exits == 1 and "is" or "are")
+        end
+        return stop(notice.HANDED_BACK, reason)
     end
 end
 
