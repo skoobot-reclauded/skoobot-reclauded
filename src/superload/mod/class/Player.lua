@@ -1407,7 +1407,7 @@ local function proposeLoadout(p)
     -- them and never writes them. Kept with the character (data/rules), so
     -- a re-run does not re-recommend what the player already said no to.
     local proposal = loadout.discover(list, { self = p, mainhand = mainhandFacts(p),
-        declined = data(p).declined })
+        declined = data(p).declined, rm = rules })
     chan.info("[Loadout] Proposed %d entries, %d unassigned, %d skipped, %d choices",
         proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices)
     return proposal

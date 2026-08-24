@@ -801,4 +801,41 @@ describe("data/loadout.lua", function()
       assert.equals(0, #L.unplaced(p, rules, R))
     end)
   end)
+
+  -- Owner: "seems like I can toggle the acceptance of flee, but it doesn't
+  -- get gray or change to (declined)". The declined set was keyed by tid,
+  -- and an action row has none, so the toggle wrote a key the proposal
+  -- never looked up.
+  describe("declining an action row (#98)", function()
+    local SHOOT = { mode = "activated", tactical = { ATTACK = 2 }, range = 6 }
+    local FLEEKEY = "action:flee:nearest:los"
+
+    it("marks the paired flee declined when the set is keyed by rules.key", function()
+      local p = L.discover({ talent("T_SHOOT", SHOOT) },
+        { rm = R, declined = { [FLEEKEY] = true } })
+      local flee
+      for _, e in ipairs(p.entries) do if e.action then flee = e end end
+      assert.is_not_nil(flee, "the flee row must still be listed")
+      assert.is_true(flee.declined, "and marked declined")
+    end)
+
+    it("does not write a declined action row", function()
+      local rules = R.new()
+      local p = L.discover({ talent("T_SHOOT", SHOOT) },
+        { rm = R, declined = { [FLEEKEY] = true } })
+      L.apply(p, rules, R, "merge")
+      assert.equals(0, #R.where(rules, { action = "flee", from = "nearest", keep_los = true }))
+      assert.equals(1, #R.where(rules, { tid = "T_SHOOT" }))
+    end)
+
+    -- A set written before the key changed used bare tids. Honouring both
+    -- costs one comparison and avoids silently un-declining someone's
+    -- choices on upgrade.
+    it("still honours a talent declined by bare tid", function()
+      local p = L.discover({ talent("T_SHOOT", SHOOT) }, { rm = R, declined = { T_SHOOT = true } })
+      local shoot
+      for _, e in ipairs(p.entries) do if e.tid == "T_SHOOT" then shoot = e end end
+      assert.is_true(shoot.declined)
+    end)
+  end)
 end)

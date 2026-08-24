@@ -409,7 +409,15 @@ function M.discover(talents, opts)
             -- it would mean a declined talent silently disappearing from a
             -- screen whose whole job is to say what the bot would do -- and
             -- would leave no way to change one's mind.
-            if r and declined[r.tid] then r.declined = true end
+            -- #98: keyed by the rules key when the caller supplies the
+            -- module, because an ACTION row has no tid and `declined[nil]`
+            -- can never be true -- which is why the paired flee could be
+            -- toggled and never went grey. The bare tid is still honoured so
+            -- a set written before this keeps working.
+            if r then
+                local dk = opts.rm and opts.rm.key(M.entryOf(r)) or nil
+                if (dk and declined[dk]) or (r.tid and declined[r.tid]) then r.declined = true end
+            end
             if kind == "entry" then entries[#entries + 1] = r
             elseif kind == "unassigned" then unassigned[#unassigned + 1] = r
             elseif kind == "skipped" then skipped[#skipped + 1] = r end
@@ -432,9 +440,14 @@ function M.discover(talents, opts)
         if s == COMBAT and not opts.no_flee_row then
             local wants, why = wantsFleeRow(list)
             if wants then
+                -- The decline pass above runs over the INPUT talents, and this
+                -- row is built after it, so it has to ask for itself -- which
+                -- is why declining the flee appeared to do nothing.
+                local fleeKey = opts.rm and opts.rm.key(FLEE_KEEP_LOS) or nil
                 list[#list + 1] = {
                     action = FLEE_KEEP_LOS.action, from = FLEE_KEEP_LOS.from,
                     keep_los = FLEE_KEEP_LOS.keep_los, section = COMBAT,
+                    declined = (fleeKey and declined[fleeKey]) and true or nil,
                     name = "Flee but keep sight",
                     reason = ("you fight at range (%s reaches %d), so this backs off without breaking sight"):format(
                         tostring(why.name or why.tid), tonumber(why.range) or 0),

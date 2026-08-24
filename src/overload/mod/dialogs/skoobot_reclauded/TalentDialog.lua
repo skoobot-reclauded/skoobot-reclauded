@@ -403,28 +403,41 @@ function _M:proposalRow(e, placed, rules)
 	--                and quietly drops a talent off a screen whose job is
 	--                to say what the bot would do.
 	--   placed    -- already somewhere the player put it; Merge leaves it.
-	-- `inS` is keyed by SECTION NAME, so #inS is always 0 -- which made
-	-- every row that the player had not hand-placed read as new, including
-	-- the ones a previous suggestion had already written. The owner's build
-	-- matched the recommendation exactly and every row said (new).
-	-- `e.section` is nil for the Not-placed group -- the talents the
-	-- suggestion leaves OUT. Merge would not add those, so calling them new
-	-- was the same lie in the other direction.
-	local isNew = e.section ~= nil and not placed and next(inS) == nil and not e.declined
-	if e.declined then
+	-- EVERY row carries a mark, and that is the point (owner, 2026-08-24):
+	-- "the recommendation screen makes it kinda look like they're all new
+	-- ... I think there should always be a parenthetical". An unmarked row
+	-- is ambiguous -- the reader cannot tell "already yours" from "not
+	-- computed yet" -- and a screen with no marks at all reads as a screen
+	-- that has not noticed anything.
+	--
+	-- `inS` is keyed by SECTION NAME, so #inS is always 0; `next()` is the
+	-- emptiness test. `e.section` is nil for the Not-placed group, the
+	-- talents the suggestion leaves out.
+	local state
+	if e.declined then state = "declined"
+	elseif next(inS) ~= nil then state = "existing"
+	elseif e.section ~= nil then state = "new"
+	else state = "not placed" end
+
+	if state == "declined" then
 		desc = desc .. "\n\n#GREY#Declined on this character: the suggestion will not place it. "
 			.. "Select it again to undo that.#WHITE#"
-	elseif isNew then
+	elseif state == "existing" then
+		desc = desc .. "\n\n#TAN#Already in a section, so nothing changes for it.#WHITE# "
+			.. "Merge leaves a row you placed where it is."
+	elseif state == "new" then
 		desc = desc .. "\n\n#LIGHT_GREEN#New: Merge would add this row.#WHITE# "
 			.. "Select it to decline it instead -- nothing is written either way until you apply."
+	else
+		desc = desc .. "\n\n#GREY#Not placed: the suggestion leaves this one out, and you do not "
+			.. "have it in a section.#WHITE#"
 	end
 	desc = desc .. "\n\n" .. tostring(info.desc)
 
-	-- Plain text, never colour codes: the row's COLOUR is what marks its
-	-- state (below), and a code in the label would have to be parsed.
-	local suffix = ""
-	if e.declined then suffix = "  (declined)"
-	elseif isNew then suffix = "  (new)" end
+	-- Plain text, never colour codes: the row's COLOUR carries it too, and a
+	-- code in the label would have to be parsed by something.
+	local suffix = "  (" .. state .. ")"
+	local isNew = state == "new"
 
 	return {
 		char="", cname=plain, kind=kind, used=used, inSections=inS,
@@ -434,13 +447,16 @@ function _M:proposalRow(e, placed, rules)
 		-- #18, and the (new) and (declined) marks only made it obvious.
 		name=((e.priority and (tostring(e.priority) .. "  ") or "") .. tostring(info.name) ..
 			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or "") .. suffix):toTString(),
-		tree=tostring(e.reason), desc=desc, ptid=e.tid or self.rm.key(entry), psection=e.section, placed=placed,
+		-- The decline key: rules.key for every shape, so an action row can
+		-- be declined and come back marked like any talent.
+		tree=tostring(e.reason), desc=desc, ptid=self.rm.key(entry), psection=e.section, placed=placed,
 		declined=e.declined and true or false, isnew=isNew,
+		-- One colour per state, the same four the mark names.
 		color=function()
-			if e.declined then return {0x50, 0x50, 0x50} end
-			if placed then return {0x80, 0x80, 0x80} end
-			if isNew then return {0x90, 0xFF, 0x90} end
-			return {0xFF, 0xFF, 0xFF}
+			if state == "declined" then return {0x50, 0x50, 0x50} end
+			if state == "existing" then return {0xFF, 0xFF, 0xFF} end
+			if state == "new" then return {0x90, 0xFF, 0x90} end
+			return {0x90, 0x90, 0x90}
 		end,
 	}
 end
