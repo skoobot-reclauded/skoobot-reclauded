@@ -37,6 +37,11 @@ in this repo's GitHub Issues.**
    `tools/` or `spec/`.
 5. **GPL-3.0, four-deep attribution.** Casalini → Charidan → SkoobyDoo → mishander. Keep
    per-file GPL headers on adapted code; do not strip them.
+6. **Never touch `HUMAN.md`.** It is the maintainer's own note, written in their hand,
+   committed under their own identity and signed with a key no assistant holds — the one file
+   here that is provably not an assistant's work (#104). Do not edit it, reformat it, reflow
+   it, fix its spelling, or move it. If it seems to need changing, say so and stop. An
+   assistant's commit touching that file destroys the only thing it is for.
 
 ## Conventions
 

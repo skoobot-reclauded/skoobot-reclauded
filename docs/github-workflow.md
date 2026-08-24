@@ -339,14 +339,23 @@ The repository is private until the addon is releasable. Flipping it public is a
 action in the repository settings — the machine account's token has no admin permission — and
 is separate from *publishing* the addon on te4.org and Steam, which has its own issue (#34).
 Everything below is checked before the flip, in this order, and the flip is done by the owner
-with the list in hand.
+with the list in hand. Worked through on **2026-08-24**; `[x]` rows were verified that day.
 
-- [ ] **The 0.1 gate (#32) is met.** Every item on that issue's list is closed, and
-      `tools/clean-build.ps1` is green on the commit being tagged. The long-term per-class soak
-      (#61) is not a gate; a full level 1→15 run is not a gate (owner, 2026-08-23).
-- [ ] **`src/init.lua` `homepage` is correct.** `spec/manifest_spec.lua` checks it against the
-      `origin` remote, so this is already enforced; confirm it reads
+- [x] **The mechanical gates are green** — parse, `luacheck .`, `busted`, the harness
+      scenarios untainted, and the packed artifact loading standalone
+      ([release-0.1.md](release-0.1.md) §4). **The judgement gate is not a condition of the
+      flip** (**D-14**, 2026-08-24): it binds 1.0.0, the first build to reach the te4.org and
+      Steam listings. The flip makes a beta downloadable, not a listing. The long-term
+      per-class soak (#61) is not a gate; a full level 1→15 run is not a gate (owner,
+      2026-08-23).
+- [x] **`src/init.lua` `homepage` is correct.** `spec/manifest_spec.lua` checks it against the
+      `origin` remote, so this is already enforced; it reads
       `https://github.com/skoobot-reclauded/skoobot-reclauded`.
+- [ ] **Delete the `overnight/` throwaway refs from `origin`.** They exist to be deleted
+      (§2.3 of the archive's `OPERATIONS.md`) and would otherwise become public branches on
+      the first day, advertising WIP that `main` already carries:
+      `tools/push-branch.ps1 -Prefix overnight/<date> -List` then `-Delete`. Do this only once
+      the work they insure is on `origin/main`.
 - [ ] **The repository's website URL in its settings is correct.** Owner action — the bot
       token lacks admin. As of 2026-08-23 it points at `…/tree/master/docs`, and the branch is
       `main`, so the link is dead from the first visitor: set it to `…/tree/main/docs` or to
@@ -355,13 +364,17 @@ with the list in hand.
       `.github/PULL_REQUEST_TEMPLATE.md` are present and still true.** They were written while
       the repo was private and describe the public state in the future tense in places; read
       them once as a stranger would.
-- [ ] **The addon's documents point at nothing local-only (#43).** No path into the
-      maintainer's private archive, no machine path, no credential mechanics:
-      `grep -rn -E '\.\./|research archive' CLAUDE.md README.md docs` returns only relative
-      paths that stay inside the working tree (worktree examples) and deliberate "held outside
-      this repository" sentences, and every `D-n` citation carries its substance.
-- [ ] **The README banner is replaced.** The "Not released. Not installable." block goes;
-      installation, the release status and the safety section take its place.
+- [x] **The addon's documents point at nothing local-only (#43).** Re-run 2026-08-24: the
+      `grep -rn -E '\.\./|research archive' CLAUDE.md README.md docs` hits are worktree
+      examples that stay inside the working tree and the deliberate "never the research
+      archive's clone" sentence in `first-run.md` §8. Two further sweeps were clean —
+      `git grep` for `C:\…` style absolute paths over every tracked file returned nothing, and
+      so did one for `localuser`, the maintainer's personal address, and the vault mechanics
+      (`.kdbx`, `.dpapi`, `ClaudeSecrets`) outside `.gitignore`'s own comment about excluding
+      them.
+- [x] **The README banner is replaced.** The "Unreleased. No public build." block is gone;
+      a beta banner, an **Installing** section and a pointer to Safety took its place
+      (2026-08-24).
 - [ ] **Immediately after the flip, re-check the token's effective permissions.** A
       fine-grained token gets implicit read on anything public, which is harmless; confirm
       that nothing newly public became *writable* by it that should not be, and that the
@@ -371,11 +384,11 @@ with the list in hand.
       owner accepted the history-rewrite risk and closed the question. Whether to require the
       CI status checks from §6 (#30) — a different purpose — becomes technically possible at
       the flip and is a separate decision to take then, not a default to drift into.
-- [ ] **Decide whether the decision record is published.** **D-7** deferred the decisions'
-      visibility to this point, and **D-8** (durability is the owner's external backups, not
-      this project's machinery) put one option on the table: a *private* repo in the org for
-      the maintainer's research archive. Either way, every `D-n` cited in this repo keeps its
-      one-line substance, so the public documents stand alone.
+- [x] **Decided: the decision record is not published.** **D-15** (2026-08-24) answers what
+      D-7 deferred and takes D-8's option — the maintainer's archive goes to a *private* repo
+      in the org, **unsanitised**, and losing it is explicitly accepted. Nothing in this
+      repository depends on it: every `D-n` cited here carries its own one-line substance, so
+      the public documents stand alone. Creating that repo is unscheduled and gates nothing.
 - [ ] **Revisit the review flow (§5).** A PR-based flow for outside contributors is worth
       having when there are outside contributors. The fast-forward rule for the maintainer's
       own work stays unless decided otherwise.

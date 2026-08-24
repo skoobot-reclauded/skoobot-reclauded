@@ -3,17 +3,44 @@
 An autoplay addon for [Tales of Maj'Eyal](https://te4.org) — hand your character to a bot that
 rests, explores and fights, and hands control back when it judges the situation needs a human.
 
-> ## ⚠ Unreleased. No public build.
+> ## ⚠ Beta. GitHub only — not on te4.org or the Steam Workshop.
 >
-> This repository is a **pre-release work in progress.** The addon works — `src/` is a port of
-> the original SkooBot 0.0.12 to ToME 1.7.6 with the defects users reported against it fixed —
-> but nothing has been published: no listing, no download, no `.teaa` to install. Testers can
-> build one themselves with `tools/pack.ps1` (see [Development](#development)); the release
-> gate is `tools/clean-build.ps1`. If you want a finished, published addon today, you want
+> Every `0.x` release is a **beta prerelease**, published here and nowhere else. It is not in
+> the game's Addons browser, and it will not be until **1.0.0** — the first version meant to
+> be met by someone who did not come looking for it.
+>
+> **[Download the latest release](https://github.com/skoobot-reclauded/skoobot-reclauded/releases)**,
+> and see [Installing](#installing) — the `.teaa` ships inside a zip, and the file name matters.
+>
+> If you want a finished, published addon today, you want
 > **[the original SkooBot](https://github.com/SkoobyDoo/tome4-SkooBot)**, which remains
-> published and unaffected by anything here.
->
-> If this repository became visible before it was meant to, that is all that happened.
+> published and is unaffected by anything here.
+
+## Installing
+
+1. **Download the `.zip`** from the [releases page](https://github.com/skoobot-reclauded/skoobot-reclauded/releases)
+   and extract the `tome-skoobot_reclauded-<version>.teaa` inside it.
+2. **Do not rename the `.teaa`.** The game only considers archives whose name begins `tome-`,
+   and it skips anything else **silently** — no error, the addon simply never appears. Some
+   download paths strip the hyphens from a bare `.teaa`, which is why releases ship zipped.
+3. **Drop the `.teaa` into `game/addons/`** inside your ToME installation, beside the addons
+   that shipped with the game. On Steam that is the game's folder under
+   `steamapps/common/`; on a standalone install it is wherever you unpacked ToME.
+4. **Start the game and enable it** in Addons — but read the next point before you do.
+5. **Enable it before you create the character you want to use it on.** A savefile records
+   the addons it was made with, and the game silently ignores any addon a save does not list.
+   It cannot attach to a character that already exists. This is the single most common reason
+   an autoplay addon appears to do nothing.
+6. Confirm it loaded: the Addons list shows *SkooBot: Reclauded* with its version, and
+   `te4_log.txt` in the game directory carries a `Binding addon` line naming
+   `skoobot_reclauded`.
+
+Then press `Shift+F7` in game to open the menu. New characters get a one-time introduction;
+[docs/first-run.md](docs/first-run.md) is the longer version.
+
+**Beta means beta.** Report anything that surprises you — that is what this release is for,
+and [Contributing and bug reports](#contributing-and-bug-reports) says how. Read
+[Safety](#safety) first; it is short and it matters.
 
 ## What it does
 
