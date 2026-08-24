@@ -147,11 +147,15 @@ end)
 
 -- After every addon's ToME:run hook and after uiset:activate(): the bind
 -- tables are complete and the message log is live (see the note above).
+
 class:bindHook("ToME:runDone", function()
     local list = keyCollisions()
     print(("[SKOOBOT] [Keybinds] checked %d actions: %s"):format(#ACTIONS,
         #list == 0 and "no collisions" or (#list .. " collision(s)")))
     keyCollisionNotice()
+    -- #72. After the collision notice: a collision is a problem and goes
+    -- first; this is an introduction and can follow it.
+    skoobot_reclauded.greet()
 end)
 
 -- ---------------------------------------------------------------------------

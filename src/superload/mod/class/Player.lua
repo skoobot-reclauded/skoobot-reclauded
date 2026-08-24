@@ -1124,6 +1124,44 @@ bot.rules = {
     resolve  = function(p, e) return resolveRule(p or game.player, e) end,
 }
 
+--- "Here is how to start", once per character (#72).
+---
+--- At load the addon printed its keys to te4_log.txt and nothing else: the
+--- message log got a line only if a keybind collision was found (#50).
+--- docs/first-run.md section 2 measured it -- message-log lines mentioning
+--- SkooBot: 0. A player who installed this from the description knows the
+--- keys; one who installed it from the Workshop list, where the description
+--- is behind a click, or who inherited a friend's addon set, sees nothing at
+--- all until they happen to press one. The bot never makes itself known.
+---
+--- One line, and only to somebody who has nothing configured -- a player who
+--- has set up their talent rules does not need telling how to start -- and
+--- only once per character, so it is never the addon nagging. The flag lives
+--- on the character (bot.data), the same store the auto-talent scratch and
+--- the WARN acknowledgements use, so the engine saves it with them and the
+--- next load is silent.
+---
+--- A character that already HAS rules is marked as greeted without being
+--- greeted: otherwise clearing every rule later would make the addon treat
+--- them as new and start explaining itself again.
+---
+--- Called from the ToME:runDone hook, which is the first moment the message
+--- log is live (game.log is a no-op until uiset:activate, engine/Game.lua:56).
+--- @return true when it said something
+function bot.greet()
+    local p = game.player
+    if not p then return false end
+    local d = data(p)
+    if d.greeted then return false end
+    d.greeted = true
+    if rules.count(getRules(p)) > 0 then return false end
+    game.log("%s", "#GOLD##{bold}#" .. notice.PREFIX .. "#{normal}# Ready. "
+        .. bot.keyFor("MENU_SKOOBOT_RECLAUDED") .. " opens the menu: set the talents it may use "
+        .. "(or let it suggest a loadout), then " .. bot.keyFor("TOGGLE_SKOOBOT_RECLAUDED")
+        .. " starts it.")
+    return true
+end
+
 -------------------------------------------------------------------------------
 -- Loadout discovery (#18)
 -------------------------------------------------------------------------------
