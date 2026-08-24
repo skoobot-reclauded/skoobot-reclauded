@@ -1,4 +1,5 @@
--- SkooBot: Reclauded -- the settings file format (#90).
+-- SkooBot: Reclauded -- the settings: how they are stored, and what they
+-- are called where the player meets them (#90, #71).
 --
 -- Copyright (C) 2026 SkoobyDoo
 --
@@ -95,4 +96,35 @@ function M.parse(text, name)
     return tonumber(raw)
 end
 
+
+--- What each setting is CALLED where the player meets it (#71).
+---
+--- The options tab titles them; the stop reasons used to name the setting
+--- key instead -- "life is below LOWHEALTH_RATIO" -- and nothing on screen
+--- mapped one to the other. A player reading a stop had no way to find the
+--- knob it was talking about.
+---
+--- One table, read by the tab that draws the titles and by the reasons that
+--- quote them, so the two cannot drift into naming the same knob differently.
+M.TITLE = {
+    LOWHEALTH_RATIO            = "Low Health Ratio",
+    IGNORE_DAMAGE_HEALTH_RATIO = "Ignore Damage Above Life Ratio",
+    MAX_INDIVIDUAL_POWER       = "Maximum Enemy Power",
+    MAX_DIFF_POWER             = "Maximum Enemy Power Above Yours",
+    MAX_COMBINED_POWER         = "Maximum Combined Enemy Power",
+    MAX_ENEMY_COUNT            = "Maximum Enemy Count",
+    NORMAL_POWER_RATIO         = "Normal Enemy Power Ratio",
+    ELITES_POWER_RATIO         = "Elite Enemy Power Ratio",
+    BOSS_POWER_RATIO           = "Boss Enemy Power Ratio",
+    ACTION_DELAY               = "Action Delay",
+    STOP_POPUP                 = "Popup when the bot stops",
+    LOG_LEVEL                  = "Log level",
+}
+
+--- The title, or the key itself when something asks for a name this does not
+--- have. A reason that says "MAX_ENEMY_COUNT" is poor; one that errors is
+--- worse.
+function M.title(name)
+    return M.TITLE[name] or tostring(name)
+end
 return M

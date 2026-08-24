@@ -160,6 +160,10 @@ local function scoreKnobs()
         MAX_COMBINED_POWER         = cfg("MAX_COMBINED_POWER"),
         MAX_ENEMY_COUNT            = cfg("MAX_ENEMY_COUNT"),
         IGNORE_DAMAGE_HEALTH_RATIO = cfg("IGNORE_DAMAGE_HEALTH_RATIO"),
+        -- #71: what the player calls each of these on the options tab, so a
+        -- stop reason can name the knob rather than the setting key. From
+        -- data/cfg.lua, the table the tab titles itself from.
+        titles                     = cfgfmt.TITLE,
     }
 end
 

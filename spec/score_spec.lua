@@ -14,9 +14,15 @@ local function load()
   return chunk()
 end
 
+-- #71: the titles the reasons quote come in with the knobs, from
+-- data/cfg.lua in the game. Loaded here rather than copied, so a title
+-- renamed there is a title renamed in these expectations.
+local TITLES = assert(loadfile(manifest.path("src/data/cfg.lua")))().TITLE
+
 local KNOBS = {
   MAX_INDIVIDUAL_POWER = 200, MAX_DIFF_POWER = 10, MAX_COMBINED_POWER = 500,
   MAX_ENEMY_COUNT = 12, IGNORE_DAMAGE_HEALTH_RATIO = 0.9,
+  titles = TITLES,
 }
 
 local function knobs(over)
@@ -201,12 +207,24 @@ describe("data/score.lua", function()
 
     it("the details carry v1's wording with the figures compared", function()
       local r = S.evaluate(situation({ own = 50, hostiles = { hostile(300, 3), hostile(251, 3) } }), knobs())
-      assert.equals("an enemy's power level, 300, is above MAX_INDIVIDUAL_POWER", r.details.SCOUTER_BIGENEMY)
-      assert.equals("an enemy's power level, 300, is more than MAX_DIFF_POWER above yours (50 at current life)",
+      assert.equals("an enemy's power level, 300, is above 200 (Maximum Enemy Power)", r.details.SCOUTER_BIGENEMY)
+      assert.equals("an enemy's power level, 300, is more than 10 above yours, "
+        .. "50 at current life (Maximum Enemy Power Above Yours)",
         r.details.SCOUTER_STRONGERENEMY)
-      assert.equals("the combined enemy power level, 551, is more than MAX_COMBINED_POWER above yours "
-        .. "(50 at current life)", r.details.SCOUTER_CROWDPOWER)
+      assert.equals("the enemies in view add up to 551, more than 500 above yours, "
+        .. "50 at current life (Maximum Combined Enemy Power)", r.details.SCOUTER_CROWDPOWER)
       assert.is_nil(r.details.SCOUTER_ENEMYCOUNT)
+    end)
+
+    -- The titles come from the game (data/cfg.lua). Anything calling
+    -- evaluate() without them -- a scenario probe, a unit test, a future
+    -- caller -- must still get a reason, not an error and not a blank.
+    it("names the key itself when the caller passes no titles (#71)", function()
+      local bare = knobs()
+      bare.titles = nil
+      local r = S.evaluate(situation({ own = 50, hostiles = { hostile(300, 3) } }), bare)
+      assert.equals("an enemy's power level, 300, is above 200 (MAX_INDIVIDUAL_POWER)",
+        r.details.SCOUTER_BIGENEMY)
     end)
 
     -- #84: the owner's playtest read "an enemy's power level, 1080.1, is
@@ -216,12 +234,13 @@ describe("data/score.lua", function()
     -- does not have.
     it("prints power levels whole, rounded to nearest (#84)", function()
       local r = S.evaluate(situation({ own = 50.4, hostiles = { hostile(1080.1, 3) } }), knobs())
-      assert.equals("an enemy's power level, 1080, is above MAX_INDIVIDUAL_POWER", r.details.SCOUTER_BIGENEMY)
-      assert.is_truthy(r.details.SCOUTER_STRONGERENEMY:find("(50 at current life)", 1, true))
+      assert.equals("an enemy's power level, 1080, is above 200 (Maximum Enemy Power)", r.details.SCOUTER_BIGENEMY)
+      assert.is_truthy(r.details.SCOUTER_STRONGERENEMY
+        :find("50 at current life (Maximum Enemy Power Above Yours)", 1, true))
 
       -- Nearest, not truncated: .6 goes up.
       local up = S.evaluate(situation({ own = 50, hostiles = { hostile(300.6, 3) } }), knobs())
-      assert.equals("an enemy's power level, 301, is above MAX_INDIVIDUAL_POWER", up.details.SCOUTER_BIGENEMY)
+      assert.equals("an enemy's power level, 301, is above 200 (Maximum Enemy Power)", up.details.SCOUTER_BIGENEMY)
     end)
 
     -- The RATIOS keep their decimal, and must: 1.0 is the limit, so the
@@ -259,9 +278,9 @@ describe("data/score.lua", function()
       assert.equals(S.HANDBACK, r.posture)
       assert.is_true(r.flags.SCOUTER_BIGENEMY)
       assert.is_true(r.flags.SCOUTER_STRONGERENEMY)
-      assert.equals("an enemy's power level, 480, is above MAX_INDIVIDUAL_POWER -- threat 16.0", r.reasons[1])
-      assert.equals("an enemy's power level, 480, is more than MAX_DIFF_POWER above yours (20 at current life)"
-        .. " -- threat 16.0", r.reasons[2])
+      assert.equals("an enemy's power level, 480, is above 200 (Maximum Enemy Power) -- threat 16.0", r.reasons[1])
+      assert.equals("an enemy's power level, 480, is more than 10 above yours, 20 at current life"
+        .. " (Maximum Enemy Power Above Yours) -- threat 16.0", r.reasons[2])
       assert.is_near(16, r.score, 1e-9)                 -- 480 / (20 + 10)
     end)
 
@@ -304,7 +323,7 @@ describe("data/score.lua", function()
         accepted = { SCOUTER_BIGENEMY = true } }), knobs())
       assert.equals(S.HANDBACK, r.posture)
       assert.equals(1, #r.reasons)
-      assert.truthy(r.reasons[1]:find("MAX_DIFF_POWER", 1, true))
+      assert.truthy(r.reasons[1]:find("Maximum Enemy Power Above Yours", 1, true))
     end)
 
     it("a crowd over its limit, accepted, nothing adjacent: hold", function()
@@ -321,14 +340,15 @@ describe("data/score.lua", function()
       for i = 1, 13 do many[i] = hostile(1, 3) end
       local r = S.evaluate(situation({ hostiles = many, accepted = { SCOUTER_ENEMYCOUNT = true } }), knobs())
       assert.equals(S.HOLD, r.posture)
-      assert.equals("13 in view, over MAX_ENEMY_COUNT: fight what comes into reach, do not walk into it", r.reasons[1])
+      assert.equals("13 in view, over your limit of 12 (Maximum Enemy Count): "
+        .. "fight what comes into reach, do not walk into it", r.reasons[1])
     end)
 
     it("a crowd over its limit, not accepted: handback", function()
       local r = S.evaluate(situation({ own = 50, hostiles = { hostile(300, 4), hostile(300, 5) } }),
         knobs({ MAX_INDIVIDUAL_POWER = 1000, MAX_DIFF_POWER = 1000 }))
       assert.equals(S.HANDBACK, r.posture)
-      assert.truthy(r.reasons[1]:find("MAX_COMBINED_POWER above yours", 1, true))
+      assert.truthy(r.reasons[1]:find("Maximum Combined Enemy Power", 1, true))
       assert.truthy(r.reasons[1]:find(" -- threat 1.1", 1, true))
     end)
 
@@ -366,8 +386,8 @@ describe("data/score.lua", function()
       local r = S.evaluate(situation({ life = 0.5, damaged = true }), knobs())
       assert.equals(S.HANDBACK, r.posture)
       assert.is_true(r.flags.EXPLORE_DAMAGE)
-      assert.equals("took damage while exploring, and life is below IGNORE_DAMAGE_HEALTH_RATIO -- threat 5.0",
-        r.reasons[1])
+      assert.equals("took damage while exploring with life below 0.9 of maximum "
+        .. "(Ignore Damage Above Life Ratio) -- threat 5.0", r.reasons[1])
     end)
 
     it("a scratch with nothing in view above the ratio: fight, and the term says how close", function()

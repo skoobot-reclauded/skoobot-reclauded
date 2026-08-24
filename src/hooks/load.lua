@@ -46,6 +46,7 @@ local GetQuantity = require "engine.dialogs.GetQuantity"
 -- ---------------------------------------------------------------------------
 
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
+local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 
 -- This addon's actions, in the keybind file's order: the order collisions
 -- are reported in.
@@ -210,7 +211,11 @@ class:bindHook("GameOptions:generateList", function(self, data)
         -- right: this changes what can be entered, never what is stored.
         -- Decimals are accepted (Numberbox takes '.'), so a fraction can be
         -- typed into a 0-to-1 range.
-        local function createNumericalOption(option, tabTitle, desc, minVal, maxVal, prompt)
+        -- #71: the title comes from data/cfg.lua, the same table the stop
+        -- reasons quote, so the tab and the reasons cannot name one knob two
+        -- ways. It used to be a literal here.
+        local function createNumericalOption(option, desc, minVal, maxVal, prompt)
+            local tabTitle = cfgfmt.title(option)
             minVal = minVal or 0
             maxVal = maxVal or 1000000
             local fct = function(item)
@@ -241,7 +246,8 @@ class:bindHook("GameOptions:generateList", function(self, data)
         -- "quest popup" option works (mod/dialogs/GameOptions.lua). Persisted
         -- through the runtime table so the stop popup's checkbox writes the
         -- same value the same way (#58).
-        local function createBooleanOption(option, tabTitle, desc)
+        local function createBooleanOption(option, desc)
+            local tabTitle = cfgfmt.title(option)
             local fct = function(item)
                 skoobot_reclauded.setSetting(option, not settings[option])
                 self.c_list:drawItem(item)
@@ -262,13 +268,13 @@ class:bindHook("GameOptions:generateList", function(self, data)
         -- life, a power level, a count, seconds) and what happens at it, in
         -- the words the stop notices use, so the tab reads on its own. The
         -- setting keys are the save's and the harness's and do not change.
-        createNumericalOption("LOWHEALTH_RATIO", "Low Health Ratio",
+        createNumericalOption("LOWHEALTH_RATIO",
             "A fraction of your maximum life (0.5 is half). While enemies are in view, the bot " ..
             "stops when life is below it. The other life thresholds follow from it: losing half " ..
             "of this fraction in one turn is the Big Loss stop; in a fight, losing a quarter of " ..
             "it in one turn uses a Damage Prevention talent, and missing a quarter of it uses a " ..
             "Recovery talent.", 0, 1)
-        createNumericalOption("IGNORE_DAMAGE_HEALTH_RATIO", "Ignore Damage Above Life Ratio",
+        createNumericalOption("IGNORE_DAMAGE_HEALTH_RATIO",
             "A fraction of your maximum life (0.9 is nine tenths). While exploring with nothing " ..
             "in view, damage is ignored as long as life stays above it, so a single poison tick " ..
             "does not stop the bot; once life is below it, any damage taken while exploring hands " ..
@@ -281,7 +287,7 @@ class:bindHook("GameOptions:generateList", function(self, data)
         -- the number is noise. Explained once here, referred to from the
         -- other four, the way "Power level: see Maximum Enemy Power" already
         -- works.
-        createNumericalOption("MAX_INDIVIDUAL_POWER", "Maximum Enemy Power",
+        createNumericalOption("MAX_INDIVIDUAL_POWER",
             "Stop when any enemy in view has a power level above this figure, whatever yours is. " ..
             "Power level is the addon's rough threat score for a creature -- its life, damage, " ..
             "crits, speed, defence, stats and weapons summed -- and is shown as \"Power Level\" " ..
@@ -289,37 +295,37 @@ class:bindHook("GameOptions:generateList", function(self, data)
             "These five limits are also a scale: every stop for one of them ends \"-- threat N\", " ..
             "where the limit you set counts as 1, so threat 3 is three times past it. The stop " ..
             "says how far over the room is, not only that it is.")
-        createNumericalOption("MAX_DIFF_POWER", "Maximum Enemy Power Above Yours",
+        createNumericalOption("MAX_DIFF_POWER",
             "Stop when any enemy in view has a power level more than this much above your own. " ..
             "Your own power level is scaled by the life you have left, so the same enemy stops " ..
             "the bot sooner when you are hurt. On the threat scale, 1 is an enemy exactly this " ..
             "far above you. Power level and the threat figure: see Maximum Enemy Power.")
-        createNumericalOption("MAX_COMBINED_POWER", "Maximum Combined Enemy Power",
+        createNumericalOption("MAX_COMBINED_POWER",
             "Stop when the power levels of every enemy in view, added together, are more than " ..
             "this much above your own (again scaled by the life you have left). A margin above " ..
             "yours, not an absolute figure. On the threat scale, 1 is a room exactly this far " ..
             "above you. Power level and the threat figure: see Maximum Enemy Power.")
-        createNumericalOption("MAX_ENEMY_COUNT", "Maximum Enemy Count",
+        createNumericalOption("MAX_ENEMY_COUNT",
             "Stop when more than this many enemies are in view at once, whatever their power. On " ..
             "the threat scale, 1 is exactly this many in view -- twelve of them against a limit " ..
             "of twelve. The threat figure: see Maximum Enemy Power.")
         -- #62: the rank weights. One entry per band; data/power.lua says
         -- which ToME rank falls in which band.
-        createNumericalOption("NORMAL_POWER_RATIO", "Normal Enemy Power Ratio",
+        createNumericalOption("NORMAL_POWER_RATIO",
             "Critters and normal-rank enemies count for this multiple of their power level in " ..
             "the three power checks above: 0.4 means a common counts for less than half, so a " ..
             "pack of them does not read as a threat; 1 is face value.", 0, 10)
-        createNumericalOption("ELITES_POWER_RATIO", "Elite Enemy Power Ratio",
+        createNumericalOption("ELITES_POWER_RATIO",
             "Elite, rare and unique enemies count for this multiple of their power level in the " ..
             "three power checks above: 1 is face value; 2 would count each as double.", 0, 10)
-        createNumericalOption("BOSS_POWER_RATIO", "Boss Enemy Power Ratio",
+        createNumericalOption("BOSS_POWER_RATIO",
             "Bosses, elite bosses and anything stronger count for this multiple of their power " ..
             "level in the three power checks above: 2 counts each as double; 1 is face value.", 0, 10)
-        createNumericalOption("ACTION_DELAY", "Action Delay",
+        createNumericalOption("ACTION_DELAY",
             "Seconds the bot waits between its actions, so you can watch what it does. 0 acts " ..
             "at full speed. Known to be rough: with a delay set, the bot also takes its next " ..
             "action when you press a key or move the mouse.")
-        createBooleanOption("STOP_POPUP", "Popup when the bot stops",
+        createBooleanOption("STOP_POPUP",
             "Also open a popup with the reason whenever the bot stops for something you should " ..
             "look at: low life, a debuff, being stuck. The message-log line and the banner are " ..
             "always shown. The popup's own checkbox turns this off again.")
@@ -350,7 +356,8 @@ class:bindHook("GameOptions:generateList", function(self, data)
                         "what a bug report wants. 'debug' adds its reasoning on every decision and " ..
                         "'trace' the talent-by-talent checks; both grow the file quickly. Warnings " ..
                         "and errors are also shown in the message log.#WHITE#")},
-                name = string.toTString(("#GOLD##{bold}#[%s] Log level#WHITE##{normal}#"):format(addonShort)),
+                name = string.toTString(("#GOLD##{bold}#[%s] %s#WHITE##{normal}#")
+                    :format(addonShort, cfgfmt.title("LOG_LEVEL"))),
                 status = levelName, fct = fct,
             }
         end

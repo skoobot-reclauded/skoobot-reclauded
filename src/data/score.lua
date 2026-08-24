@@ -245,28 +245,44 @@ function M.evaluate(input, knobs)
         if v > score then score = v end
     end
 
-    -- v1's wording for each set flag, with the figures it compared. The
-    -- POWER LEVELS are whole (#84): they are three- and four-figure
-    -- heuristic sums and the tenth of one is noise. The ratios below --
-    -- "1.5x your limit", the threat score -- keep their decimal, where 1.0
-    -- is the limit and the tenth is the whole point.
+    -- What the player sees when the bot hands back. The figures it compared,
+    -- and the KNOB it compared them against -- named as the options tab
+    -- names it, with the limit itself, so a reason can be acted on without
+    -- reading the docs first (#71). It used to say "is above
+    -- MAX_INDIVIDUAL_POWER": a setting key, which nothing on screen mapped
+    -- to a title, and no number at all.
+    --
+    -- POWER LEVELS are whole (#84): three- and four-figure heuristic sums
+    -- whose tenth is noise. The ratios below -- "1.5x your limit", the
+    -- threat score -- keep their decimal, where 1.0 is the limit and the
+    -- tenth is the whole point.
+    local function knob(name)
+        local t = knobs.titles
+        return (t and t[name]) or name
+    end
     local details = {}
     if flags.SCOUTER_BIGENEMY then
-        details.SCOUTER_BIGENEMY = "an enemy's power level, " .. fmt0(f.max) .. ", is above MAX_INDIVIDUAL_POWER"
+        details.SCOUTER_BIGENEMY = "an enemy's power level, " .. fmt0(f.max) .. ", is above "
+            .. fmt0(knobs.MAX_INDIVIDUAL_POWER) .. " (" .. knob("MAX_INDIVIDUAL_POWER") .. ")"
     end
     if flags.SCOUTER_STRONGERENEMY then
         details.SCOUTER_STRONGERENEMY = "an enemy's power level, " .. fmt0(f.max)
-            .. ", is more than MAX_DIFF_POWER above yours (" .. fmt0(own) .. " at current life)"
+            .. ", is more than " .. fmt0(knobs.MAX_DIFF_POWER) .. " above yours, " .. fmt0(own)
+            .. " at current life (" .. knob("MAX_DIFF_POWER") .. ")"
     end
     if flags.SCOUTER_CROWDPOWER then
-        details.SCOUTER_CROWDPOWER = "the combined enemy power level, " .. fmt0(f.sum)
-            .. ", is more than MAX_COMBINED_POWER above yours (" .. fmt0(own) .. " at current life)"
+        details.SCOUTER_CROWDPOWER = "the enemies in view add up to " .. fmt0(f.sum)
+            .. ", more than " .. fmt0(knobs.MAX_COMBINED_POWER) .. " above yours, " .. fmt0(own)
+            .. " at current life (" .. knob("MAX_COMBINED_POWER") .. ")"
     end
     if flags.SCOUTER_ENEMYCOUNT then
-        details.SCOUTER_ENEMYCOUNT = f.count .. " enemies in sight, above MAX_ENEMY_COUNT"
+        details.SCOUTER_ENEMYCOUNT = f.count .. " enemies in sight, more than "
+            .. fmt0(knobs.MAX_ENEMY_COUNT) .. " (" .. knob("MAX_ENEMY_COUNT") .. ")"
     end
     if flags.EXPLORE_DAMAGE then
-        details.EXPLORE_DAMAGE = "took damage while exploring, and life is below IGNORE_DAMAGE_HEALTH_RATIO"
+        details.EXPLORE_DAMAGE = "took damage while exploring with life below "
+            .. tostring(knobs.IGNORE_DAMAGE_HEALTH_RATIO) .. " of maximum ("
+            .. knob("IGNORE_DAMAGE_HEALTH_RATIO") .. ")"
     end
 
     -- The posture, and why.
@@ -321,7 +337,8 @@ function M.evaluate(input, knobs)
             say("the crowd is %sx your combined limit: fight what comes into reach, do not walk into it",
                 fmt1(terms.crowd))
         else
-            say("%d in view, over MAX_ENEMY_COUNT: fight what comes into reach, do not walk into it", f.count)
+            say("%d in view, over your limit of %s (%s): fight what comes into reach, do not walk into it",
+                f.count, fmt0(knobs.MAX_ENEMY_COUNT), knob("MAX_ENEMY_COUNT"))
         end
     else
         posture = M.FIGHT
