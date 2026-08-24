@@ -52,9 +52,11 @@ in this repo's GitHub Issues.**
   `T-nnn` IDs in older titles, commits and docs are retired but valid references (D-13,
   2026-08-22) — never allocate a new one, never edit the old ones away. **The one commit that
   *finishes* an issue adds a `Closes #5` trailer at the foot, beside `Co-Authored-By`** (D-17,
-  2026-08-24), so the close happens on push rather than from memory — but only once you have
-  judged the issue finished rather than merely symptom-free (D-16), and the closing comment
-  still gets written. `tools/githooks/commit-msg` warns when a subject cites nothing at all.
+  2026-08-24) — but only once you have judged the issue finished rather than merely
+  symptom-free (D-16). **Then close the issue yourself:** the trailer does not fire when
+  `push-addon.ps1` pushes with the bot's token, which is measured and is #113, so treat it as a
+  record of intent rather than as automation. The closing comment still gets written.
+  `tools/githooks/commit-msg` warns when a subject cites nothing at all.
   Procedure, and why it is a trailer rather than a subject:
   [docs/github-workflow.md](docs/github-workflow.md) §4.
 - Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer outside this

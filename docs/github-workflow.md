@@ -195,9 +195,20 @@ finds them.
 - **The commit that finishes an issue says so, in a `Closes #n` trailer** (**D-17**,
   2026-08-24). At the foot of the message, beside `Co-Authored-By`, and **only on the commit
   that finishes it** — the plain `(#n)` citation above stays on every commit that touches the
-  issue, finishing or not. GitHub closes the issue when the commit reaches `main`, and
-  attributes the close to whoever pushed, which under §5 is always the maintainer; pushes to
-  the `overnight/*` refs do not fire it, because only the default branch does.
+  issue, finishing or not.
+
+  **Close the issue yourself. The trailer will probably not do it for you**, and that is
+  measured rather than assumed (2026-08-24, #113): same repository, same default branch, same
+  keyword in the same position, one variable. `510235f`'s `Closes #104` closed #104 when the
+  maintainer pushed from their own clone; `9500c1e`'s `Closes #112` closed nothing when
+  `tools/push-addon.ps1` pushed it with the machine account's fine-grained PAT. The scripted
+  path (§2.2) is the one where it does not fire, so it is the case to plan for. Fixing that is
+  #113 — the script knows which commits it pushed and holds a token that can close an issue.
+
+  **The trailer is worth writing anyway**, which is why the rule stands: it puts the claim
+  *this finishes #n* in the history, where `git log --grep='Closes #'` finds it and a rebase
+  cannot strip it, and it makes the author state that judgement at the moment they are best
+  placed to make it. Automation was the convenience; the record is the point.
 
   **Not in the subject, and not on the second line.** The keyword is parsed anywhere in the
   message, so it gains nothing by being near the top, and the second line is the blank one
@@ -216,8 +227,9 @@ finds them.
   a maintainer's ruling — cannot be closed by any commit, and those are the ones that go stale:
   of the four found open-but-finished on 2026-08-24, two could not have been caught this way.
   The backstop is a periodic sweep of the open board against `main`, run before a release is
-  cut (#111). `tools/githooks/commit-msg` warns — it never refuses — when a subject cites
-  neither an issue nor a decision, which is the shape the other two had.
+  cut (#111) — and, until #113, that sweep is also what catches an issue whose trailer was
+  written and never acted on. `tools/githooks/commit-msg` warns — it never refuses — when a
+  subject cites neither an issue nor a decision, which is the shape the other two had.
 - **Every issue gets a milestone** (M1 Baseline and tooling · M2 Core model · M3 Inherited
   defects · M4 Release readiness · M5 Post-0.1) and labels from the existing set.
 - **Dependencies and "subsumed by" relations go in the issue body**, not in a document and
