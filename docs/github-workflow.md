@@ -192,6 +192,32 @@ finds them.
 - **Commit messages cite the issue number**: `Fix talent fallthrough (#5)`. GitHub links it,
   and `git log --grep='(#5)'` is the audit trail. If the tracker is ever migrated, the
   numbers are mapped then.
+- **The commit that finishes an issue says so, in a `Closes #n` trailer** (**D-17**,
+  2026-08-24). At the foot of the message, beside `Co-Authored-By`, and **only on the commit
+  that finishes it** — the plain `(#n)` citation above stays on every commit that touches the
+  issue, finishing or not. GitHub closes the issue when the commit reaches `main`, and
+  attributes the close to whoever pushed, which under §5 is always the maintainer; pushes to
+  the `overnight/*` refs do not fire it, because only the default branch does.
+
+  **Not in the subject, and not on the second line.** The keyword is parsed anywhere in the
+  message, so it gains nothing by being near the top, and the second line is the blank one
+  after the subject. A trailer also survives the `--ff-only` rebase flow, where a SHA written
+  into an issue comment does not — comments on this board cite `7622e0e` and `fd6e72f`, and
+  neither is on `main` any more.
+
+  **The trailer is written after the judgement, never instead of it.** *An issue is not done
+  because its reported symptom stopped* (**D-16**) is a call no keyword can make, and an
+  auto-close is silent where issues here close with a comment saying what landed and what is
+  left. If the issue's own argument still stands, the commit does not carry the trailer, and
+  the remaining scope is filed as its own issue first.
+
+  **It catches less than it looks like it should, and that is not an argument against it.** An
+  issue whose close condition is an *event* rather than a change — a green CI run, a play pass,
+  a maintainer's ruling — cannot be closed by any commit, and those are the ones that go stale:
+  of the four found open-but-finished on 2026-08-24, two could not have been caught this way.
+  The backstop is a periodic sweep of the open board against `main`, run before a release is
+  cut (#111). `tools/githooks/commit-msg` warns — it never refuses — when a subject cites
+  neither an issue nor a decision, which is the shape the other two had.
 - **Every issue gets a milestone** (M1 Baseline and tooling · M2 Core model · M3 Inherited
   defects · M4 Release readiness · M5 Post-0.1) and labels from the existing set.
 - **Dependencies and "subsumed by" relations go in the issue body**, not in a document and

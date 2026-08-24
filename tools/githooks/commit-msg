@@ -1,0 +1,79 @@
+#!/bin/sh
+#
+# Warn when a commit message says nothing about what it belongs to.
+#
+# D-17 (2026-08-24): the commit that finishes an issue carries a `Closes #n`
+# trailer, so the issue closes when the commit reaches `main` rather than from
+# somebody's memory. A sweep of the open board on the day that was decided
+# found four issues finished and still open -- #17, #30, #32, #63 -- and the
+# commits that had finished two of them (6785f3c, 3cc5f61, fcf0b4b) cited no
+# issue at all. That is the shape this warns about.
+#
+# THIS IS A commit-msg HOOK, NOT pre-commit, and the difference is not a
+# preference. `pre-commit` is handed no arguments and never sees the message;
+# `commit-msg` receives the path to it as $1. A subject check in pre-commit
+# cannot work.
+#
+# WARNS, NEVER REFUSES. Genuinely uncitable commits exist -- a typo fix, a
+# merge, a revert -- and a hook that blocked those would be routed around with
+# `git commit --no-verify`, which also skips the pre-commit checks that do
+# matter. A warning costs a line of output and still lands the commit; 145 of
+# the 155 commits since D-13 already cite something, so it is quiet in
+# practice.
+#
+# Installed per clone with the rest of them, and inherited by worktrees:
+#
+#     git config core.hooksPath tools/githooks
+#
+# See docs/github-workflow.md section 4.
+
+MSG_FILE=$1
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
+
+warn() { printf '[commit-msg] %s\n' "$1" >&2; }
+
+# The subject is the first line that is neither blank nor one of git's own
+# `#` comment lines -- which is not always line 1, since a template or a
+# `--verbose` diff puts commentary above it.
+SUBJECT=$(sed -e '/^#/d' -e '/^[[:space:]]*$/d' "$MSG_FILE" | head -n 1)
+
+[ -n "$SUBJECT" ] || exit 0
+
+# Nothing to say about a merge or a rebase instruction: neither is work, and
+# fixup!/squash! inherit their citation from the commit they fold into.
+case $SUBJECT in
+    Merge\ *|Revert\ *|fixup!\ *|squash!\ *|amend!\ *) exit 0 ;;
+esac
+
+# 1. Does the subject name what this belongs to?
+#
+# `#12` is an issue; `D-9` a decision; `T-047` one of the task IDs retired by
+# D-13 on 2026-08-22 and still valid as a reference, so a commit touching that
+# older material is not nagged for using the identifier its issue carries.
+if ! printf '%s' "$SUBJECT" | grep -qE '#[0-9]+|\b[DT]-[0-9]+\b'; then
+    warn "the subject names no issue, decision or task:
+             \"$SUBJECT\"
+             Cite the issue as \"Fix talent fallthrough (#5)\", or a decision
+             as (D-9). If this is the commit that FINISHES the issue, add a
+             trailer at the foot as well:  Closes #5
+             Committing anyway -- this is a warning. See
+             docs/github-workflow.md section 4 (D-17)."
+fi
+
+# 2. Is a close keyword in the subject, where GitHub will act on it but a
+#    reader scanning `git log --oneline` reads it as a description?
+#
+# D-17 puts it in a trailer at the foot, beside Co-Authored-By: the subject
+# stays a sentence about the change, and the trailer is the machine-readable
+# half. This catches the placement the decision considered and rejected.
+if printf '%s' "$SUBJECT" | grep -qiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+'; then
+    warn "a close keyword is in the SUBJECT:
+             \"$SUBJECT\"
+             D-17 puts it in a trailer at the foot of the message, beside
+             Co-Authored-By, and keeps the subject's citation in the plain
+             \"(#5)\" form. GitHub reads the keyword either way; a reader
+             scanning one-line log output does not.
+             Committing anyway -- this is a warning."
+fi
+
+exit 0

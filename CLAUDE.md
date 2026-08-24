@@ -50,7 +50,12 @@ in this repo's GitHub Issues.**
   tracked — file it, as the machine account. **An issue is identified by its number only.**
   Cite it in commit messages (`Fix talent fallthrough (#5)`); titles carry no prefix. The
   `T-nnn` IDs in older titles, commits and docs are retired but valid references (D-13,
-  2026-08-22) — never allocate a new one, never edit the old ones away. Procedure:
+  2026-08-22) — never allocate a new one, never edit the old ones away. **The one commit that
+  *finishes* an issue adds a `Closes #5` trailer at the foot, beside `Co-Authored-By`** (D-17,
+  2026-08-24), so the close happens on push rather than from memory — but only once you have
+  judged the issue finished rather than merely symptom-free (D-16), and the closing comment
+  still gets written. `tools/githooks/commit-msg` warns when a subject cites nothing at all.
+  Procedure, and why it is a trailer rather than a subject:
   [docs/github-workflow.md](docs/github-workflow.md) §4.
 - Decisions (`D-n`) are reasoning, not work items. They are held by the maintainer outside this
   repository — not in this repo, not in issues, for now — and are cited by ID; every
@@ -74,8 +79,11 @@ in this repo's GitHub Issues.**
   `table.move` resolve under test and fail in-game. Lint cannot see it (luacheck's `luajit` std
   is one set for both patch levels) and neither can a runtime probe, so `dialect_spec` **scans
   the source** of everything the game loads — `src/` and the devbridge — and fails on the line
-  that names one (#63). Only the harness, or CI under a real 2.0 build (#63, waiting on #30),
-  proves the code actually runs there.
+  that names one (#63). Only the harness, or CI under a real 2.0 build, proves the code
+  actually runs there — and CI does: `.github/workflows/check.yml` builds LuaJIT 2.0 and
+  repeats the parse check and the unit suite on it, green since 2026-08-24 (#63, #30). Its 2.1
+  job is an unpinned rolling build, which is #107 and is why the two jobs disagree about what
+  compiles.
 - Parse-check with `luajit -bl <file> /dev/null`; lint with `luacheck .` — the tracked
   `.luacheckrc` carries the std and every per-path environment, so `--std` on the command line
   is redundant at best. The trailing-slash form `luacheck src/` checks **no files** and exits 3.
