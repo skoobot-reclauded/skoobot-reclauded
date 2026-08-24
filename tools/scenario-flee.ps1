@@ -208,6 +208,48 @@ function fl.spawn(d, label, armor)
   end
   return "SETUP the spawned actor is not a visible hostile"
 end
+-- #97: an immobile hostile `dist` grids away, and one decision against it.
+-- never_move is what makes the two-grid oscillation permanent -- the
+-- geometry resets exactly every turn -- so it is what the skip is keyed on.
+function fl.immobile(dist)
+  fl.reset()
+  fl.unspawn()
+  local p = game.player
+  local sx, sy
+  for _, d in ipairs({ {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {-1,-1}, {1,-1}, {-1,1} }) do
+    local ok = true
+    for k = 1, dist do
+      if not fl.free(p.x + d[1] * k, p.y + d[2] * k) then ok = false break end
+    end
+    if ok then sx, sy = p.x + d[1] * dist, p.y + d[2] * dist break end
+  end
+  if not sx then return "SETUP no free line at distance " .. dist end
+  local m
+  for _ = 1, 8 do
+    m = game.zone:makeEntity(game.level, "actor",
+      { special = function(e) return not e.unique and (e.rank or 1) <= 2 end }, nil, true)
+    if not m then return "SETUP no actor to spawn" end
+    m.rank = 2
+    m.name = "rooted " .. tostring(m.name)
+    m.energy.mod = 0
+    m.energy.value = 0
+    local before = fl.hostiles()
+    game.zone:addEntity(game.level, m, "actor", sx, sy)
+    if fl.hostiles() == before + 1 then break end
+    game.level:removeEntity(m, true)
+    m = nil
+  end
+  if not m then return "SETUP the spawned actor is not a visible hostile" end
+  m:addTemporaryValue("never_move", 1)
+  fl.spawned[#fl.spawned + 1] = m
+  fl.rules("nearest")
+  local t0 = game.turn
+  b.state = 13
+  b.query()
+  return ("IMMOBILE d=%d nm=%s dturn=%d reason=%s"):format(
+    core.fov.distance(p.x, p.y, m.x, m.y), tostring(m:attr("never_move") and true or false),
+    game.turn - t0, tostring(b.last_reason))
+end
 function fl.unspawn()
   for _, m in ipairs(fl.spawned) do if m.x and not m.dead then game.level:removeEntity(m, true) end end
   fl.spawned = {}
@@ -523,6 +565,29 @@ return "installed"
     $null = Assert-Result $f2 'the rotation was the flee and a talent' -Match ' rot=2 talent=T_ATTACK '
     Ok ($f2.Result -notmatch 'reason=Cannot act: cornered') 'it did not hand back as cornered' $f2.Result
     $null = Assert-Result $f2 'canMove was put back here too' -Match ' restored=true '
+
+    # ----- G: a target that cannot follow (#97) ------------------------------
+    Write-Host ''
+    Write-Host '  --- G. an immobile target at range is not worth fleeing from'
+    # The reported loop: the flee steps away, the step runs out at the sight
+    # radius, the rotation falls through, and the act loop paths back toward
+    # the target to get in range. Two grids, forever. What makes it permanent
+    # is that the target never moves.
+    $g1 = Probe 'return fl.immobile(3)' 60
+    Write-Host "  at range   $($g1.Result)"
+    if ($g1.Result -match '^SETUP') { Inconclusive $g1.Result }
+    $null = Assert-Result $g1 'the target really is immobile and at range' -Match ' d=3 nm=true '
+    $null = Assert-Result $g1 'query advances no game turn' -Match ' dturn=0 '
+    $null = Assert-Result $g1 'the flee is skipped, and says why' -Match 'nothing to flee from: .*cannot follow, and is not next to you'
+    Ok ($g1.Result -notmatch 'cornered') 'it is NOT reported as cornered: there is somewhere to go, just no reason to go' $g1.Result
+
+    # Adjacent is the exception and is the point of the row: a mold you are
+    # standing next to is exactly where it can reach you.
+    $g2 = Probe 'return fl.immobile(1)' 60
+    Write-Host "  adjacent   $($g2.Result)"
+    if ($g2.Result -match '^SETUP') { Inconclusive $g2.Result }
+    $null = Assert-Result $g2 'the adjacent case is set up as intended' -Match ' d=1 nm=true '
+    Ok ($g2.Result -notmatch 'nothing to flee from') 'standing next to it, the flee is NOT skipped' $g2.Result
     # ----- E: the talent screen ---------------------------------------------
     Write-Host ''
     Write-Host '  --- E. the talent screen lists the flee rows, Combat only'
