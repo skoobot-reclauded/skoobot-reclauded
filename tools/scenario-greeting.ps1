@@ -97,7 +97,7 @@ try {
     # The fixture may carry rules from an earlier scenario's save; clear them
     # and the flag, then run the greeting as a fresh load would.
     $state = Probe @'
-
+local p, b = game.player, skoobot_reclauded
 local r = b.rules.get(p)
 for _, s in ipairs(b.rules.module.SECTIONS) do
   local l = r[s]
