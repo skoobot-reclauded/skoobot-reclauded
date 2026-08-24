@@ -9,16 +9,9 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- Until #58 a stop reached the player as whatever string its call site chose:
--- some twenty-five sites and at least eight spellings of the same event
--- ("AI Stopped:", " Ai Stopped:", "AI stopped:", "AI Stopping!", "AI
--- cancelled", "AI Disabled."), in red or gold -- colours the game's own log
--- uses for hits and effects -- so a stop had no visual identity of its own
--- and scrolled off with the next few combat lines. The player noticed the
--- character standing still, not why.
---
--- Call sites now pass plain text and a severity, and this module is the one
--- place that turns those into what the player sees:
+-- The one place a stop becomes what the player sees. Call sites pass plain
+-- text and a severity; before #58 each of the ~25 sites chose its own wording
+-- and colour, and a stop had no visual identity of its own.
 --
 --   STOPPED      the player must look: low life, a debuff, stuck.
 --   HANDED_BACK  the bot finished or yielded on purpose: level change,
@@ -27,10 +20,10 @@
 --
 -- One fixed prefix and one colour per severity; the prefix is the identity.
 -- The text is prose with no colour codes and no trailing period, so it reads
--- the same in the log, in the big-news banner, in the popup and in
--- `skoobot_reclauded.last_reason`, which the harness asserts on. Nothing here
--- formats: a `%` in the text is a `%`, and the caller passes the result to
--- game.log as an argument, not as the format string.
+-- the same in the log, the banner, the popup and in `last_reason`, which the
+-- harness asserts on. Nothing here formats -- a `%` in the text is a `%` --
+-- so the caller passes the result to game.log as an argument, never as the
+-- format string.
 --
 -- Pure: spec/notice_spec.lua covers it without a running game.
 

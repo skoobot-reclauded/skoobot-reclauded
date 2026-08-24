@@ -10,28 +10,24 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- PORTED FROM SkooBot 0.0.12 (D-12): the threat heuristic the stop conditions
--- and the tooltip both read. The original defined it as two methods on
--- mod.class.Actor, evaluatePowerScores and evaluatePowerLevel. The original
--- is still installed by real people, and two addons defining the same method
--- on the same class means the one loaded last silently wins -- so this is a
--- plain module instead, loaded with dofile from the addon's own data mount,
--- and it takes the actor as an argument.
+-- PORTED FROM SkooBot 0.0.12 (D-12): the threat heuristic that the stop
+-- conditions and the tooltip both read. A plain module taking the actor as an
+-- argument, not v1's two methods on mod.class.Actor -- the original is still
+-- installed by real people, and two addons defining the same method on one
+-- class means the one loaded last silently wins.
 --
--- It is a PURE FUNCTION of the actor it is given: no globals, no ToME API
--- beyond the methods it calls on the actor. That is what lets
--- spec/power_spec.lua check the formulas against the original without a
--- running game. Keep it that way when T-020 changes the formulas.
+-- PURE function of the actor it is given: no globals, and no ToME API beyond
+-- the methods it calls on the actor. That is what lets spec/power_spec.lua
+-- check the formulas against the original with no running game; keep it that
+-- way when T-020 changes them.
 --
--- The formulas are the original's, unchanged, including two oddities that
--- are reproduced on purpose and belong to T-020, not to the port:
+-- The formulas are the original's, unchanged, including two oddities kept on
+-- purpose so the numbers still match. Both belong to T-020, not to the port:
 --
--- * The original read game.player.global_speed for EVERY actor scored, the
---   player's and the enemies' alike. That is taken as a parameter here so
---   the caller can keep doing exactly that.
--- * In weaponPowerLevels, `type` is the Lua builtin function compared with
---   a string, so both `(type ~= "offhand" or ...)` terms are always true.
---   Harmless, and kept so the numbers match the original's.
+-- * global_speed is a parameter because the original read
+--   game.player.global_speed for EVERY actor scored, enemies included.
+-- * In weaponPowerLevels, `type` is the Lua builtin compared with a string,
+--   so both `(type ~= "offhand" or ...)` terms are always true. Harmless.
 
 local M = {}
 
@@ -69,9 +65,8 @@ local function weaponPowerLevels(actor)
     local attackScores = {}
     local temp = {}
     temp.o = actor:getInven(actor.INVEN_MAINHAND)
-    -- v1 wrote table.get(quiver, 1); that is ToME's own helper and this is the
-    -- same nil-safe index without it, so the module stays testable outside
-    -- the game.
+    -- Not v1's table.get(quiver, 1): that is ToME's own helper, and the same
+    -- nil-safe index without it keeps the module testable outside the game.
     local quiver = actor:getInven("QUIVER")
     temp.ammo = quiver and quiver[1]
     temp.archery = temp.o
@@ -124,26 +119,21 @@ end
 -- Rank weighting (#62, salvage-mishander.md item 2)
 -------------------------------------------------------------------------------
 --
--- A flat threshold stops for every pack of commons and then, raised so it
--- does not, lets a pair of rares through. mishander's fork weights each
--- enemy's power by its rank band before it is compared, so commons count
--- for less and bosses for more. These helpers are pure, like the rest of
--- the file; they touch neither scores nor level, which spec/power_spec.lua
--- pins to v1's numbers.
+-- A flat threshold stops for every pack of commons and then, raised so it does
+-- not, lets a pair of rares through -- so each enemy's power is weighted by
+-- its rank band before it is compared. Pure like the rest of the file, and it
+-- touches neither scores nor level, which spec/power_spec.lua pins to v1's
+-- numbers.
 --
--- ToME 1.7.6's ranks (mod/class/Actor.lua textRank / allowedRanks):
+-- ToME 1.7.6's ranks (mod/class/Actor.lua textRank / allowedRanks), and
+-- mishander's bands over them by the same `rank < 3` / `rank < 4` cuts:
 --
---     1 critter · 2 normal · 3 elite · 3.2 rare · 3.5 unique ·
---     4 boss · 5 elite boss · 10 god · 11 godslayer
+--     NORMAL  rank < 3   1 critter, 2 normal
+--     ELITE   rank < 4   3 elite, 3.2 rare, 3.5 unique
+--     BOSS    otherwise  4 boss, 5 elite boss, 10 god, 11 godslayer
 --
--- mishander's bands, by the same `rank < 3` / `rank < 4` cuts:
---
---     NORMAL  rank < 3   critter, normal
---     ELITE   rank < 4   elite, rare, unique
---     BOSS    otherwise  boss, elite boss, god, godslayer
---
--- An actor without a rank is band NORMAL, which is also the engine's own
--- default (Actor.lua:206 `t.rank = t.rank or 2`).
+-- An actor without a rank is NORMAL, which is the engine's own default
+-- (Actor.lua:206 `t.rank = t.rank or 2`).
 
 M.RANK_NORMAL = "normal"
 M.RANK_ELITE  = "elite"

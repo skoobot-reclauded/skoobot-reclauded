@@ -9,67 +9,35 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- Every life judgement this addon made was `life / max_life`, and the game
--- does not work that way. A character dies at `die_at`, not at zero
--- (`engine/interface/ActorLife.lua:51`, `if self.life <= self.die_at`), and
--- the game's own interface measures the bar over `max_life - die_at`
--- (`mod/class/Player.lua:390`, `:465`; `uiset/Minimalist.lua:785`). So a
--- Lich at die_at -500 read as 0% life with five hundred points still to
--- spend, and a character carrying `magical.lua:3740` (die_at +50) read as
--- comfortable with a margin it did not have.
+-- `life / max_life` is not a life fraction in this game. A character dies at
+-- `die_at` (engine/interface/ActorLife.lua:51), which moves both ways, and the
+-- game's own bar measures over `max_life - die_at` (mod/class/Player.lua:390,
+-- :465; uiset/Minimalist.lua:785) -- so a Lich at -500 read as 0% with five
+-- hundred points still to spend. Every source of die_at and how far each can
+-- be trusted is docs/api-surface-1.7.6.md, "die_at: zero is not where a
+-- character dies"; the decision is #91.
 --
--- THE CARE THIS NEEDS, and why one number is not enough. Some of `die_at`
--- is a property of the character and some of it runs out:
---
---   permanent      gear (`cloak.lua:147`, world artifacts at -100, randarts)
---                  and passives (`undeads/lich.lua:30`). True while worn or
---                  known, which for a decision this turn is simply true.
---   sustained      a sustain that is up: Last Stand
---                  (`techniques/weaponshield.lua:339`), the necrosis line
---                  (`spells/necrosis.lua:51,130`). True while it is up, and
---                  it is up now; dropping it sets life to 1 rather than
---                  killing, so its loss is survivable.
---   temporary      a timed effect: Heroism (`physical.lua:980`), Rogue's
---                  Brew (`physical.lua:3528`), Frenzy (`mental.lua:1765`),
---                  `mental.lua:2711`, `:2838`. True for `dur` more turns,
---                  and NOT after that. Heroism's own description says it:
---                  "if your life is below 0 when this effect wears off it
---                  will be set to 1" -- survivable, and the next hit is not.
---   adverse        the same mechanism upward (`magical.lua:3740`, +50):
---                  death arrives EARLY. Never discountable.
---
--- Adverse is decided by the SIGN, not by the effect's `status` field. The
--- one adverse source in 1.7.6, UNRAVEL, is declared `status = "beneficial"`
--- and is: it grants invulnerability, and moving die_at up is how the summon
--- it is meant for gets unravelled. A reading that trusted `status` would
--- discount it.
---
--- Hence two figures. `fraction` is the game's own arithmetic -- what the
+-- Two figures come out. `fraction` is the game's own arithmetic -- what the
 -- life bar shows. `safe_fraction` is what the bot decides on: the permanent
 -- and sustained parts in full, every adverse part in full, and a temporary
--- part only while it lasts longer than the look-ahead. A character held
--- above death by an infusion about to lapse reads as empty, which is the
--- point: the bot hands back BEFORE the effect ends, not after.
+-- part only while it lasts longer than the look-ahead. A character held above
+-- death by an infusion about to lapse reads as empty, which is the point: the
+-- bot hands back BEFORE the effect ends, not after.
 --
--- ATTRIBUTION is by the engine's own bookkeeping, not by guessing from the
--- total. `effectTemporaryValue` and `talentTemporaryValue` record `{prop,
--- id}` in the effect's or the sustain's `__tmpvals`
--- (`ActorTemporaryEffects.lua:297`, `ActorTalents.lua:1156`), and
--- `addTemporaryValue` stores the amount at `compute_vals[id]`
--- (`Entity.lua:859`). Reading those gives the exact contribution. Three
--- sources in 1.7.6 call `addTemporaryValue` directly and keep the id in a
--- field of their own instead, so `__tmpvals` is empty for them; they are
--- named below, with the line that does it.
+-- Adverse is decided by the SIGN, never by the effect's `status` field. The
+-- one adverse source in 1.7.6, UNRAVEL, is declared `status = "beneficial"`
+-- and is -- it grants invulnerability -- so a reading that trusted `status`
+-- would discount it.
 --
 -- What cannot be attributed lands in `permanent` and is trusted. That is
 -- deliberate: the ordinary case -- a cloak, an artifact, a Lich -- is
 -- unattributable and permanent, and treating it as untrustworthy would make
 -- every such character read as nearly dead. The cost is that a future
--- temporary source using a mechanism not listed here would be over-trusted;
--- `permanent` is returned so a probe can say what was assumed.
+-- temporary source using a mechanism not listed here would be over-trusted, so
+-- `permanent` is returned for a probe to say what was assumed.
 --
--- Pure: plain field reads over the actor, no engine calls and no globals,
--- so busted can hold it to its shape over a fake.
+-- Pure: plain field reads over the actor, no engine calls and no globals, so
+-- busted can hold it to its shape over a fake.
 
 local M = {}
 
@@ -219,10 +187,9 @@ function M.percent(f)
     return math.floor(100 * (tonumber(f) or 0) + 0.5)
 end
 
---- What the two figures say, in the player's words. One phrase when they
---- agree, and when they do not, both with the reason the bot did not count
---- the difference -- which is the thing a player would otherwise call a
---- wrong reading.
+--- What the two figures say, in the player's words: one phrase when they
+--- agree, and when they do not, both, with the reason the difference was not
+--- counted -- which is the thing a player would otherwise call a wrong reading.
 function M.describe(el)
     if not el then return "" end
     local safe = M.percent(el.safe_fraction) .. "% of your life pool"

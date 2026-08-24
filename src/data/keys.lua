@@ -9,24 +9,16 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- The engine stores a binding as a string, "sym:_F7:false:true:false:false"
--- (engine/KeyBind.lua:146; the order is sym:ctrl:shift:alt:meta). Its own
--- formatter, KeyBind:formatKeyString (:158), renders that as "SF7" -- one
--- letter per modifier and no separator -- which is what the Key Bindings
--- screen shows. A message to the player reads better as "Shift+F7", which is
--- also what this addon's messages said by hand until #57 made them look the
--- binding up instead of repeating the default. This module does the
--- expansion.
+-- The engine stores a binding as "sym:_F7:false:true:false:false"
+-- (engine/KeyBind.lua:146; the order is sym:ctrl:shift:alt:meta), and its own
+-- formatter, KeyBind:formatKeyString (:158), renders that as "SF7". A message
+-- to the player reads better as "Shift+F7", so since #57 they look the binding
+-- up through describe() instead of repeating the default by hand.
 --
--- It is pure: the symbol's display name comes from the caller (core.key.symName
--- over engine.KeyBind's constants in the game, a table under busted), so
--- spec/keys_spec.lua covers it without a running game. Mouse and gesture
--- bindings are not expanded; describe() returns nil for them and the caller
--- falls back to the engine's formatter.
---
--- The second half, collisions() and its two formatters, answers #50: which of
--- this addon's actions share a key with something else. Same discipline --
--- the engine's bind tables come in as plain data and nothing is rebound.
+-- Pure: the symbol's display name comes from the caller (core.key.symName in
+-- the game, a table under busted), so spec/keys_spec.lua covers it without a
+-- running game. Mouse and gesture bindings are not expanded -- describe()
+-- returns nil for them and the caller falls back to the engine's formatter.
 
 local M = {}
 
@@ -78,15 +70,13 @@ end
 -- Collisions (#50)
 --
 -- Every addon's defineAction lands in the one class-level table,
--- KeyBind.binds_def, and the player's remaps in KeyBind.binds_remap; a key
--- handler's own `binds` is rebuilt from those two by KeyBind:bindKeys
--- (engine/KeyBind.lua:127-136): each action is bound to its remap if there
--- is one, else to its default. When two actions land on one key string,
--- KeyBind:receiveKey (:228-233) fires the first one pairs() happens to yield
--- that has a handler, and returns -- the other never sees the key, and
--- nothing says so. These functions find that state from the two tables,
--- passed in as plain data, so the check runs under busted as well as in the
--- game. They only read: the addon never rebinds anything (advisory only).
+-- KeyBind.binds_def, with the player's remaps in KeyBind.binds_remap;
+-- KeyBind:bindKeys rebuilds a handler's `binds` from both, remap over default
+-- (engine/KeyBind.lua:127-136). When two actions share a key string,
+-- KeyBind:receiveKey (:228-233) fires whichever one pairs() happens to yield
+-- first and returns -- the other never sees the key, and nothing says so.
+-- Read-only and advisory: the addon never rebinds anything, and both tables
+-- come in as plain data so the check runs under busted too.
 -- ---------------------------------------------------------------------------
 
 -- What an action is bound to, the way bindKeys() decides it.
