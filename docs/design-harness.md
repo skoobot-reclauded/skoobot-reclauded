@@ -495,6 +495,7 @@ and `-Remove` is exactly the inverse T-035 needs.
 | `tools/run-scenarios.ps1` | runs the library in sequence, one child process per scenario, one JSON line per run under `build/results/`, re-runs a tainted one once, prints the table (§7) |
 | `tools/soak.ps1` | the unattended long run (#61): the bot on the fixture with a counted resume policy, a stop histogram and a JSON summary (§7) |
 | save `fixture-berserker` | the fixture: a Cornac Berserker made by `new-character.ps1 -Class Berserker`, on disk as `save/fixture_berserker/` (§7) |
+| saves `skirmishy`, `shooty` (+ `-bridge` copies) | the hand-made fixtures: `skirmishy` reproduces #97, `shooty` is a played ranged character (§7) |
 
 Character creation drives the Birther's own `randomBirth()` by default, so no descriptor
 knowledge is hardcoded here and nothing breaks when ToME adds a class. A fixture is made the
@@ -526,6 +527,47 @@ explicitly (`p:learnTalent(tid, true, 1)`) and knows it is the only one — that
 too — `fixture-berserker` loads by that name and lives in `save/fixture_berserker/`.
 A fixture is regenerated with the same command when the addon set changes (§4), and is never
 written by a scenario: nothing a scenario learns, equips or configures is saved.
+
+
+**Some fixtures are hand-made, and those cannot be regenerated.** A fixture built by
+`new-character.ps1` is one command away from being rebuilt; a character the owner played to a
+particular place, carrying particular gear, standing at a particular distance from a
+particular creature, is not. Two exist:
+
+| save | what it is | why it is kept |
+|---|---|---|
+| `skirmishy` | level 5 Halfling Skirmisher, Norgos Lair 1, sling, rotation *Halfling Luck · Shoot · Flee but keep sight*, standing 10 grids from an immobile brown mold with `T_SHOOT` at range 6 | **reproduces #97** — the two-grid flee/approach oscillation. The geometry *is* the bug; a generated fixture cannot stand in the right place |
+| `shooty` | level 11 Cornac Archer, Rhaloren Camp 3, `T_HEADSHOT` and `T_SHOOT` configured | a real played ranged character, which no generated fixture is. Does **not** reproduce #97: no flee row, and it is saved on stairs |
+
+Such a save:
+
+- lives under `save/` like any other, **exactly as the owner made it**, and is never written
+  back to by a scenario;
+- has a pristine copy outside every repository, at `Documents\backups\saves\<name>-pristine.zip`
+  — outside, because four megabytes of save is not repository material and because the addon
+  repo is meant to go public one day;
+- is **not** regenerated when the addon set changes. If it stops loading, add the addon to its
+  list, because rebuilding it is not an option.
+
+**Their addon lists are a player's, not the harness's.** Both record `skoobot_reclauded`,
+`ashes-urhrok`, `items-vault`, `possessors`, `orcs`, `cults` — and **no `skoobot_devbridge`**,
+because they were made by playing rather than by the tooling. The engine removes any addon a
+savefile does not list (§4), so the bridge cannot attach and `Assert-SaveAddons` refuses them
+before a launch is spent. `save/<name>_bridge/` is a copy with `skoobot_devbridge` added to
+`desc.lua`'s `addons`, and its `name` and `short_name` set to `<name>-bridge` so that the
+engine's own directory derivation still matches (`skirmishy-bridge` → `skirmishy_bridge`, by
+the rule above) and a save from it cannot land on top of the original. Editing `desc.lua` is
+enough — verified by loading one: `Module:instanciate` takes the list from `save_desc.addons`
+(`:1041`), so nothing inside `game.teag` has to be rewritten.
+
+Two saves rather than one, on purpose: the harness drives the `-bridge` copy, and the original
+stays untouched as the thing a player would load, with no development addon attached.
+
+**A save on a level change will not start.** Loading `shooty` and activating the bot hands
+back immediately with *standing on a level change* — that character was saved on stairs. The
+entrance exemption (#62) is granted to the tile a character **arrives** on, and a load is not
+an arrival, so a save made on stairs has no exemption to inherit. Worth knowing before
+concluding that a fixture reproduces nothing: step off first.
 
 **One JSON line per run, under `build/results/`.** `run-scenarios.ps1` runs every
 `tools/scenario-*.ps1` as its own `powershell -ExecutionPolicy Bypass -File` child, under one
