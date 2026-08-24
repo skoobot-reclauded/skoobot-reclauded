@@ -288,7 +288,7 @@ function M.evaluate(input, knobs)
     end
     if flags.EXPLORE_DAMAGE then
         details.EXPLORE_DAMAGE = "took damage while exploring with life below "
-            .. tostring(knobs.IGNORE_DAMAGE_HEALTH_RATIO) .. " of maximum ("
+            .. tostring(knobs.IGNORE_DAMAGE_HEALTH_RATIO) .. " of your life pool ("
             .. knob("IGNORE_DAMAGE_HEALTH_RATIO") .. ")"
     end
 

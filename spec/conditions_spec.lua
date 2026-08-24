@@ -218,7 +218,7 @@ describe("data/conditions.lua", function()
       assert.is_true(d.detect(actor(), context({ delta = -25 })))
       assert.is_false(d.detect(actor(), context({ delta = -24 })))
       assert.is_false(d.detect(actor(), context({ delta = 25 })))
-      assert.equals("lost more than 25% of maximum life in one turn (half of Low Health Ratio)",
+      assert.equals("lost more than 25% of your life pool in one turn (half of Low Health Ratio)",
         C.message(d, actor(), context({ delta = -25 })))
     end)
 

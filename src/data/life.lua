@@ -38,6 +38,12 @@
 --   adverse        the same mechanism upward (`magical.lua:3740`, +50):
 --                  death arrives EARLY. Never discountable.
 --
+-- Adverse is decided by the SIGN, not by the effect's `status` field. The
+-- one adverse source in 1.7.6, UNRAVEL, is declared `status = "beneficial"`
+-- and is: it grants invulnerability, and moving die_at up is how the summon
+-- it is meant for gets unravelled. A reading that trusted `status` would
+-- discount it.
+--
 -- Hence two figures. `fraction` is the game's own arithmetic -- what the
 -- life bar shows. `safe_fraction` is what the bot decides on: the permanent
 -- and sustained parts in full, every adverse part in full, and a temporary

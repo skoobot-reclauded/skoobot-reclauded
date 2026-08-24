@@ -228,7 +228,7 @@ M.LIST = {
               and math.abs(ctx.delta) / el.safe_max >= ctx.cfg("LOWHEALTH_RATIO") / 2
       end,
       message = function(_, ctx)
-          return ("lost more than %d%% of maximum life in one turn (half of %s)")
+          return ("lost more than %d%% of your life pool in one turn (half of %s)")
               :format(math.floor(100 * ctx.cfg("LOWHEALTH_RATIO") / 2), title(ctx, "LOWHEALTH_RATIO"))
       end },
     { code = "LIFE_LOWLIFE", label = "Low life with enemies in view", default = "STOP",

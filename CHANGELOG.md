@@ -102,7 +102,7 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   read *an enemy's power level, 52, is above MAX_INDIVIDUAL_POWER* named something you could
   not find anywhere on screen. It now names the option as the tab titles it, and the figure it
   compared against: *an enemy's power level, 52, is above 200 (Maximum Enemy Power)*. Likewise
-  *life is below 0.5 of maximum (Low Health Ratio)*, and the crowd and count stops. The stop
+  *41% of your life pool -- below 0.5 (Low Health Ratio)*, and the crowd and count stops. The stop
   conditions themselves are worded too -- *Big life loss in one turn* rather than *Life:
   BIGLOSS*, *An enemy too far above your power* rather than *Power Level: STRONGERENEMY* -- and
   your WARN / STOP / IGNORE choices carry over untouched, because the list is matched by code.

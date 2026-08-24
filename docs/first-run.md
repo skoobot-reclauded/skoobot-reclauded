@@ -427,18 +427,20 @@ Stopped: 13 enemies in sight, above MAX_ENEMY_COUNT (restart with Shift+F3)
 Stopped: lost more than 25% of max life in one turn (half of LOWHEALTH_RATIO) (restart with Shift+F3)
 ```
 
-**Changed since (#71).** They name the option's title as the tab shows it, and the number
-compared against. The life stops print the ratio itself rather than *half of maximum*, so the
-wording holds at any setting; the power levels are whole since #84:
+**Changed since (#71, #91).** They name the option's title as the tab shows it, and the
+number compared against. The life stops print the ratio itself rather than *half of maximum*,
+so the wording holds at any setting; the power levels are whole since #84; and since #91 the
+life figures are shares of the POOL the game kills at, not of maximum life, which for anything
+carrying `die_at` is a different number:
 
 ```
-Stopped: life is below 0.5 of maximum (Low Health Ratio)
-Stopped: took damage while exploring with life below 0.9 of maximum (Ignore Damage Above Life Ratio)
+Stopped: 41% of your life pool -- below 0.5 (Low Health Ratio)
+Stopped: took damage while exploring with life below 0.9 of your life pool (Ignore Damage Above Life Ratio)
 Stopped: an enemy's power level, 52, is above 200 (Maximum Enemy Power)
 Stopped: an enemy's power level, 52, is more than 10 above yours, 31 at current life (Maximum Enemy Power Above Yours)
 Stopped: the enemies in view add up to 140, more than 500 above yours, 31 at current life (Maximum Combined Enemy Power)
 Stopped: 13 enemies in sight, more than 12 (Maximum Enemy Count)
-Stopped: lost more than 25% of maximum life in one turn (half of Low Health Ratio)
+Stopped: lost more than 25% of your life pool in one turn (half of Low Health Ratio)
 ```
 
 The rest of the stop family reads well as it is: *cannot move (pinned, held, or overloaded)*,

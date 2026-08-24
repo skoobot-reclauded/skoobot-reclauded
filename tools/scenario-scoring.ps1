@@ -519,7 +519,7 @@ return "installed"
     $f = Probe 'return sc.scratch(0.5)'
     Write-Host "  $($f.Result)"
     if ($f.Result -match '^SETUP') { Inconclusive $f.Result }
-    $null = Assert-Result $f 'the stop fires with the T-011 wording and the threat' -Match 'reason=Stopped: took damage while exploring with life below [\d.]+ of maximum \(Ignore Damage Above Life Ratio\) -- threat [\d.]+$'
+    $null = Assert-Result $f 'the stop fires with the T-011 wording and the threat' -Match 'reason=Stopped: took damage while exploring with life below [\d.]+ of your life pool \(Ignore Damage Above Life Ratio\) -- threat [\d.]+$'
     if ($f.Result -match '-- threat ([\d.]+)') { Ok ([math]::Abs([double]$Matches[1] - 5) -lt 0.3) "the threat is (1 - 0.5) / (1 - 0.9) = 5 ($($Matches[1]))" }
     $f2 = Probe 'return sc.scratch(0.95)'
     Write-Host "  $($f2.Result)"

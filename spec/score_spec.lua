@@ -386,7 +386,7 @@ describe("data/score.lua", function()
       local r = S.evaluate(situation({ life = 0.5, damaged = true }), knobs())
       assert.equals(S.HANDBACK, r.posture)
       assert.is_true(r.flags.EXPLORE_DAMAGE)
-      assert.equals("took damage while exploring with life below 0.9 of maximum "
+      assert.equals("took damage while exploring with life below 0.9 of your life pool "
         .. "(Ignore Damage Above Life Ratio) -- threat 5.0", r.reasons[1])
     end)
 
