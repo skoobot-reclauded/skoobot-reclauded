@@ -30,12 +30,20 @@ D-11's judgement bar moves to it). Concretely:
 |---|---|---|
 | Where it goes | a GitHub Release marked **prerelease**, and nowhere else | te4.org and the Steam Workshop as well |
 | Who it is for | testers who were pointed at it | anyone browsing the in-game Addons banner |
-| The bar | §4 of [release-0.1.md](release-0.1.md) — the mechanical gates | the mechanical gates **and** the judgement gate |
+| The bar | §4 of [release-0.1.md](release-0.1.md) — the mechanical gates, **plus D-16 for 0.1.0** | the mechanical gates **and** the judgement gate |
 | [publishing.md](publishing.md) | not executed | executed, by hand, by the maintainer |
 
 So `1.0.0` is a goal with a definition rather than a number that arrives eventually, and it is
 the one release where "does this feel good to a stranger" is a gate. Which build earns it is
 the owner's call and is deliberately not reducible to a checklist.
+
+**0.1.0 carries two more gates than the mechanical ones** (**D-16**, 2026-08-24, superseding
+D-14's *"0.1.0 ships on the mechanical gates alone"*): the owner has **tested it more than
+casually**, and it folds in **no partial issue implementations**. The first is a judgement the
+owner makes and is deliberately not a scenario count; it is lighter than 1.0.0's judgement gate
+and is not that gate moved back. The second means an issue is not done because its reported
+symptom stopped — closing on the symptom while the issue's own argument still stands is what it
+forbids. Whether later `0.x` releases inherit both is open; D-16 was made about 0.1.0.
 
 **`version = {1,7,6}`** is the ToME version the addon is built against. The engine's rule for
 whether an addon loads is `engine.version_nearly_same(game, addon)` (`engine/version.lua:90`):

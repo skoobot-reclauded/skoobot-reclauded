@@ -69,7 +69,9 @@ M4 is not gates only: the open rows are work.
 ## 4. Gates
 
 All green on the release commit, in this order; a tainted harness result is void. Every row
-except the last binds **both** 0.1.0 and 1.0.0; the last binds 1.0.0 only (D-14).
+binds **both** 0.1.0 and 1.0.0 except the last two: the judgement gate binds 1.0.0 only (D-14),
+and the two D-16 rows were added for 0.1.0 (2026-08-24) — whether a later `0.x` inherits them
+is open.
 
 | Gate | How |
 |---|---|
@@ -79,6 +81,8 @@ except the last binds **both** 0.1.0 and 1.0.0; the last binds 1.0.0 only (D-14)
 | Harness scenarios pass, untainted | `scenario-surface.ps1` (every entry point, parity with the port) · `scenario-talent-screen.ps1` (#56, #55) · `scenario-stop-notices.ps1` (#57, #58) · `scenario-t011-trivial-damage.ps1` (#6) · `scenario-t012-freeze.ps1` (#7) · `scenario-t013-glowing-chest.ps1` (#8) · `scenario-t015-drowning.ps1` (#10) · `scenario-t016-label-accumulation.ps1` (#51) · `scenario-t019-stale-conditions.ps1` (#52). `scenario-baseline-v1.ps1` measures the *original* and is not a gate on this addon. Added 2026-08-23 and part of the gate: `scenario-t010-marked-target.ps1` (#5, real combat) · `scenario-keybinds.ps1` (#50) · `scenario-loadout.ps1` (#18) · `scenario-salvage-power.ps1` and `scenario-salvage-entrance.ps1` (#62) · `scenario-first-run.ps1` (#54) · `scenario-debug-channel.ps1` (#46) · `scenario-liveness.ps1` (#13) · `scenario-flee.ps1` (#59) · `scenario-hold.ps1` (#15) · `scenario-conditions.ps1` (#12) · `scenario-scoring.ps1` (#11) · `scenario-hooks.ps1` (#14) · `scenario-settings.ps1` (#90 -- the only scenario that RESTARTS the game, because a setting that does not survive a restart is invisible to every other one) · `scenario-greeting.ps1` (#72) · `scenario-life.ps1` (#91). **Run the whole set with `tools/run-scenarios.ps1`**, which records one JSON line per scenario under `build/results/` and re-runs a tainted one once; `scenario-walking-skeleton.ps1` is excluded as superseded. |
 | The packed artifact loads standalone | `tools/pack.ps1 -Release`, then `tools/clean-build.ps1 -SkipPack` |
 | #54 first-run pass done, #50 done, #18 done | #50 and #18 closed; #54's pass is done and all three of its findings (#71 #72 #73) are built, awaiting the owner's play check before they are closed |
+| **Owner-tested, more than casually** (D-16) | The owner plays the release candidate. How much is their call and is deliberately not a scenario count — the harness proves the mechanics still work, and it cannot tell you whether the thing is pleasant to hand a character to. **Added 2026-08-24**, superseding D-14's ruling that 0.1.0 ships on the mechanical gates alone; a lighter bar than the judgement gate below, and not that gate moved back |
+| **No partial issue implementations** (D-16) | Nothing in the build may be work that stopped at its symptom. An issue is not done because the thing that was reported went away: if its own argument still stands, it is either finished or its remaining scope is filed as its own issue before the release is cut. Closed issues count — the failure mode is a closed issue whose unfinished half is now untracked, which is invisible to every other gate here |
 | **The judgement gate — 1.0.0 only** (D-14) | The owner plays the release candidate against 0.0.12 with the complaint themes in hand — marked-target talents stalling the rotation, stops on trivial damage, the pin / dominate / sleep freeze, glowing chests walked past, the talent menu overflowing, drowning while resting, configuration nobody could discover — and records the verdict. **Not a gate on 0.1.0 or any other `0.x`**, which is a beta handed to testers who were told what it is; it gates the first build that appears in the game's Addons browser, where the audience did not consent to being a tester. |
 
 ## 5. Explicitly not a gate
