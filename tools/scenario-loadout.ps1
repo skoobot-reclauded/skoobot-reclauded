@@ -356,6 +356,47 @@ return ok and res or ("ERR " .. tostring(res))
 '@
     Check ($esc -match 'proposal=false top_is_screen=true first=suggest count=1') 'Escape backs out of the proposal to the rules view without closing the screen or writing'
 
+    # #85: a proposal row is a thing to argue with. Selecting a TALENT row
+    # declines it -- darkened, still listed, and not written -- and selecting
+    # it again takes that back. The apply row is the one that commits, which
+    # is what the menu probe below still exercises.
+    $decline = Probe 'decline' @'
+local ok, res = pcall(function()
+  local d = lo.d
+  d:use(d.c_list.list[1], "left")            -- back into the proposal
+  if not d.proposal then return "ERR no proposal" end
+  -- The first row that is a talent, not the apply row or a header.
+  local row
+  for _, it in ipairs(d.c_list.list) do if not row and it.ptid then row = it end end
+  if not row then return "ERR no talent row in the proposal" end
+  local tid = row.ptid
+  local before = tostring(row.name):gsub("#[^#]*#", "")
+  d:use(row, "left")                         -- decline it
+  -- The VALUE, now. Holding the table and reading it at the end would
+  -- read it after the undo below, which is a probe that always says no.
+  local inset = (skoobot_reclauded.data(d.actor).declined or {})[tid] == true
+  local after, marked = nil, false
+  for _, it in ipairs(d.c_list.list) do
+    if it.ptid == tid then after = tostring(it.name):gsub("#[^#]*#", "") marked = it.declined == true end
+  end
+  -- and what the suggestion would now write
+  local wrote = 0
+  for _, e in ipairs(d.proposal.entries) do if e.tid == tid and not e.declined then wrote = wrote + 1 end end
+  d:use(row, "left")                         -- undo it
+  local set2 = skoobot_reclauded.data(d.actor).declined or {}
+  return ("tid=%s before=[%s] after=[%s] marked=%s inset=%s still_proposed=%d undone=%s"):format(
+    tid, before, tostring(after), tostring(marked), tostring(inset), wrote,
+    tostring(set2[tid] == nil))
+end)
+return ok and res or ("ERR " .. tostring(res))
+'@
+    Check ($decline -notmatch '^ERR') 'a talent row can be selected in the proposal'
+    Check ($decline -match 'marked=true inset=true') 'selecting it declines it, on the character'
+    Check ($decline -match 'after=\[.*\(declined\)') 'and the row says so rather than disappearing'
+    Check ($decline -match 'still_proposed=0') 'a declined talent is not what the suggestion would write'
+    Check ($decline -match 'undone=true') 'selecting it again takes the decline back'
+    Note "decline: $decline"
+
     $menu = Probe 'menu' @'
 local ok, res = pcall(function()
   local d = lo.d

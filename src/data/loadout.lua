@@ -276,8 +276,15 @@ local function priorities(n)
     return out
 end
 
+--- #85 item 4: invested points are a signal of what the player cares
+--- about, so within a cooldown band a talent at 4/5 sits above one at 1/5.
+--- Level goes BETWEEN cooldown and the tactical weight: cooldown stays the
+--- first key because it is about tempo -- a long cooldown wants firing
+--- first or it never fires -- and the weight stays last because it is the
+--- game's guess where level is the player's own.
 local function byPriority(a, b)
     if a.cooldown ~= b.cooldown then return a.cooldown > b.cooldown end
+    if (a.level or 0) ~= (b.level or 0) then return (a.level or 0) > (b.level or 0) end
     if a.weight ~= b.weight then return a.weight > b.weight end
     return tostring(a.tid) < tostring(b.tid)
 end
@@ -351,10 +358,17 @@ end
 --   counts     {entries=, unassigned=, skipped=, choices=}
 function M.discover(talents, opts)
     opts = opts or {}
+    local declined = isTable(opts.declined) and opts.declined or {}
     local entries, unassigned, skipped = {}, {}, {}
     for _, e in ipairs(talents or {}) do
         if type(e) == "table" and e.tid then
             local kind, r = classify(e, opts)
+            -- #85 item 2: a talent the player has said no to before is still
+            -- classified and still shown, marked, rather than hidden. Hiding
+            -- it would mean a declined talent silently disappearing from a
+            -- screen whose whole job is to say what the bot would do -- and
+            -- would leave no way to change one's mind.
+            if r and declined[r.tid] then r.declined = true end
             if kind == "entry" then entries[#entries + 1] = r
             elseif kind == "unassigned" then unassigned[#unassigned + 1] = r
             elseif kind == "skipped" then skipped[#skipped + 1] = r end
@@ -418,7 +432,7 @@ end
 -- @return {added=, removed=, kept=}
 function M.apply(proposal, rules, rm, mode)
     mode = mode or "merge"
-    local report = { added = 0, removed = 0, kept = 0, mode = mode }
+    local report = { added = 0, removed = 0, kept = 0, declined = 0, mode = mode }
     local hand = {}
     if mode == "replace" then
         for _, s in ipairs(rm.SECTIONS) do
@@ -436,7 +450,11 @@ function M.apply(proposal, rules, rm, mode)
         report.removed = #gone
     end
     for _, e in ipairs(proposal and proposal.entries or {}) do
-        if hand[e.tid] then
+        if e.declined then
+            -- #85 item 2: shown, never written. Declining is the player's
+            -- decision and applying the proposal must not quietly undo it.
+            report.declined = (report.declined or 0) + 1
+        elseif hand[e.tid] then
             report.kept = report.kept + 1
         else
             local at = rm.place(rules, { tid = e.tid, suggested = true }, e.section)

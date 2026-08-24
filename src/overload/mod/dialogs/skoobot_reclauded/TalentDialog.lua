@@ -353,14 +353,69 @@ function _M:proposalRow(e, placed, rules)
 	if placed then
 		desc = desc .. "\n\nAlready in a section you filled: Merge leaves it where it is; Replace moves it here."
 	end
+
+	-- #85 items 1 and 2. Three states a player has to be able to tell apart
+	-- at a glance, because they are three different answers to "what will
+	-- Merge do with this row":
+	--
+	--   NEW       -- would be added. What the suggestion is actually for,
+	--                and previously indistinguishable from a row that is
+	--                already in a section.
+	--   declined  -- said no to before, on this character. SHOWN, not
+	--                hidden: hiding it leaves no way to change one's mind
+	--                and quietly drops a talent off a screen whose job is
+	--                to say what the bot would do.
+	--   placed    -- already somewhere the player put it; Merge leaves it.
+	local isNew = not placed and #inS == 0 and not e.declined
+	if e.declined then
+		desc = desc .. "\n\n#GREY#Declined on this character: the suggestion will not place it. "
+			.. "Select it again to undo that.#WHITE#"
+	elseif isNew then
+		desc = desc .. "\n\n#LIGHT_GREEN#New: Merge would add this row.#WHITE# "
+			.. "Select it to decline it instead -- nothing is written either way until you apply."
+	end
 	desc = desc .. "\n\n" .. tostring(info.desc)
+
+	local suffix = ""
+	if e.declined then suffix = "  #GREY#(declined)#WHITE#"
+	elseif isNew then suffix = "  #LIGHT_GREEN#(new)#WHITE#" end
+
 	return {
 		char="", cname=plain, kind=kind, used=used, inSections=inS,
 		name=(e.priority and (tostring(e.priority) .. "  ") or "") .. tostring(info.name) ..
-			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or ""),
+			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or "") .. suffix,
 		tree=tostring(e.reason), desc=desc, ptid=e.tid, psection=e.section, placed=placed,
-		color=function() return placed and {0x80, 0x80, 0x80} or {0xFF, 0xFF, 0xFF} end,
+		declined=e.declined and true or false, isnew=isNew,
+		color=function()
+			if e.declined then return {0x50, 0x50, 0x50} end
+			if placed then return {0x80, 0x80, 0x80} end
+			if isNew then return {0x90, 0xFF, 0x90} end
+			return {0xFF, 0xFF, 0xFF}
+		end,
 	}
+end
+
+--- #85: the talents this character has said no to, kept with the character
+--- so the engine saves them. A set, not a list: a re-run must not be able
+--- to accumulate duplicates.
+function _M:declinedSet()
+	local d = skoobot_reclauded.data(self.actor)
+	d.declined = d.declined or {}
+	return d.declined
+end
+
+--- Selecting a proposed row argues with it. Rebuilds the proposal so the
+--- marks, the counts and the apply row all follow from one source.
+function _M:toggleDeclined(tid)
+	local set = self:declinedSet()
+	if set[tid] then set[tid] = nil else set[tid] = true end
+	local ok, proposal = pcall(self.L.propose, self.actor)
+	if ok then self.proposal = proposal self.hint = proposal end
+	self:refresh()
+	self:say(set[tid]
+		and "#GREY#Declined. It stays on the list, darkened, and the suggestion will not "
+			.. "place it. Select it again to undo.#WHITE#"
+		or "#LIGHT_GREEN#Back in the suggestion.#WHITE#")
 end
 
 function _M:generateProposalList()
@@ -375,7 +430,11 @@ function _M:generateProposalList()
 		end
 	end
 
-	tree[#tree + 1] = actionRow("apply", "Apply this suggestion...  (Enter: Merge / Replace / Cancel)", PROPOSAL_INTRO)
+	-- #85 item 3: say it is a preview at the top, in the apply row, and
+	-- nowhere else is needed -- these two are what a player looks at.
+	tree[#tree + 1] = actionRow("apply",
+		"#GOLD#PREVIEW -- nothing is written yet.#WHITE#  Apply this suggestion...  (Enter: Merge / Replace / Cancel)",
+		PROPOSAL_INTRO)
 
 	for i, section in ipairs(rm.SECTIONS) do
 		local nodes = {}
@@ -699,9 +758,14 @@ function _M:use(item, button)
 		return self:suggest()
 	end
 	if self.proposal then
-		-- Any row of the proposal: the one question there is to answer.
 		self:selectItem(item)
-		return self:applyMenu()
+		-- #85: the apply row is the one that commits; a talent row is a
+		-- thing to argue with. Clicking one declines it, and clicking it
+		-- again takes that back -- which is what "click to darken" has to
+		-- mean if it is to be safe to try.
+		if item.action == "apply" then return self:applyMenu() end
+		if item.ptid then return self:toggleDeclined(item.ptid) end
+		return
 	end
 	if not item.entry then return end
 	self:selectItem(item)

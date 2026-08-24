@@ -501,7 +501,7 @@ describe("data/loadout.lua", function()
       for _, s in ipairs(R.SECTIONS) do
         for _, e in ipairs(rules[s]) do assert.is_true(e.suggested, e.tid) end
       end
-      assert.are.same({ added = 4, removed = 0, kept = 0, mode = "merge" }, report)
+      assert.are.same({ added = 4, removed = 0, kept = 0, declined = 0, mode = "merge" }, report)
     end)
 
     it("defaults to merge", function()
@@ -521,7 +521,7 @@ describe("data/loadout.lua", function()
       assert.is_nil(rules.Combat[1].suggested)
       assert.is_nil(rules.Recovery[1].suggested)
       assert.is_true(rules.Recovery[2].suggested)
-      assert.are.same({ added = 2, removed = 0, kept = 2, mode = "merge" }, report)
+      assert.are.same({ added = 2, removed = 0, kept = 2, declined = 0, mode = "merge" }, report)
     end)
 
     it("merge re-run is idempotent: no duplicates, same order", function()
@@ -574,7 +574,7 @@ describe("data/loadout.lua", function()
       assert.are.same({}, rules.DamagePrevention)
       assert.are.same({ "T_HEAL" }, tids(rules.Recovery))
       assert.are.same({ "T_SUS" }, tids(rules.Sustain))
-      assert.are.same({ added = 4, removed = 3, kept = 0, mode = "replace" }, report)
+      assert.are.same({ added = 4, removed = 3, kept = 0, declined = 0, mode = "replace" }, report)
     end)
 
     it("works on the table in place, so whoever holds it sees the result", function()
@@ -632,6 +632,70 @@ describe("data/loadout.lua", function()
       local bare = { name = "a shortbow", subtype = "bow" }
       local p = L.discover({ talent("T_ATTACK", MELEE) }, { mainhand = bare })
       assert.is_nil(sectionOf(p).T_ATTACK)
+    end)
+  end)
+
+  -- #85: the proposal screen is a preview, and a preview a player can argue
+  -- with. Declining is theirs, kept on the character, and must survive a
+  -- re-run -- otherwise every re-run re-recommends the thing they rejected.
+  describe("declined talents (#85)", function()
+    local ATTACK = { mode = "activated", tactical = { ATTACK = 2 }, range = 1 }
+    local HEAL   = { mode = "activated", tactical = { HEAL = 2 } }
+
+    it("still shows a declined talent, marked, rather than hiding it", function()
+      local p = L.discover({ talent("T_ATTACK", ATTACK), talent("T_HEAL", HEAL) },
+        { declined = { T_ATTACK = true } })
+      local byTid = {}
+      for _, e in ipairs(p.entries) do byTid[e.tid] = e end
+      assert.is_not_nil(byTid.T_ATTACK, "a declined talent must stay visible")
+      assert.is_true(byTid.T_ATTACK.declined)
+      assert.is_nil(byTid.T_HEAL.declined)
+    end)
+
+    it("never writes one, whatever the mode", function()
+      local rules = R.new()
+      local p = L.discover({ talent("T_ATTACK", ATTACK), talent("T_HEAL", HEAL) },
+        { declined = { T_ATTACK = true } })
+      local report = L.apply(p, rules, R, "merge")
+      assert.equals(1, report.declined)
+      assert.equals(1, report.added)
+      assert.equals(0, #R.where(rules, { tid = "T_ATTACK" }))
+      assert.equals(1, #R.where(rules, { tid = "T_HEAL" }))
+    end)
+
+    it("un-declining puts it back, because the set is the only record", function()
+      local p1 = L.discover({ talent("T_ATTACK", ATTACK) }, { declined = { T_ATTACK = true } })
+      assert.is_true(p1.entries[1].declined)
+      local p2 = L.discover({ talent("T_ATTACK", ATTACK) }, { declined = {} })
+      assert.is_nil(p2.entries[1].declined)
+      local rules = R.new()
+      assert.equals(1, L.apply(p2, rules, R, "merge").added)
+    end)
+  end)
+
+  -- #85 item 4: invested points say what the player cares about.
+  describe("ordering by invested level (#85)", function()
+    local function att(cd, lvl)
+      return { mode = "activated", tactical = { ATTACK = 2 }, cooldown = cd }, lvl
+    end
+
+    it("a higher-level talent outranks a lower one in the same cooldown band", function()
+      local defA, lvlA = att(5, 1)
+      local defB, lvlB = att(5, 4)
+      local p = L.discover({ talent("T_LOW", defA, { level = lvlA }),
+                             talent("T_HIGH", defB, { level = lvlB }) })
+      assert.same({ "T_HIGH", "T_LOW" }, tidsIn(p, "Combat"))
+    end)
+
+    -- Cooldown stays the FIRST key: it is about tempo, and a long cooldown
+    -- wants firing first or it never fires at all. Level does not overturn
+    -- that, it breaks ties within it.
+    it("but does not overturn the cooldown band", function()
+      local defLong, _ = att(9, 1)
+      local defShort, _ = att(2, 5)
+      local p = L.discover({ talent("T_LONG", defLong, { level = 1 }),
+                             talent("T_SHORT", defShort, { level = 5 }) })
+      assert.same({ "T_LONG", "T_SHORT" }, tidsIn(p, "Combat"))
     end)
   end)
 end)

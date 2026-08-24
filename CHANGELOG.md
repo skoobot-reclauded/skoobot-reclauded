@@ -77,6 +77,18 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
 - **Stops are one kind of message.** Every stop is a `[SkooBot]` line in the message log in
   one colour per severity, repeated on the big-news banner, so it is not lost among combat
   lines. Messages that mention a key name the key you actually have bound (#57, #58).
+- **The loadout suggestion is a preview you can argue with** (#85). The proposal screen showed
+  every row alike, so a row it would *add* looked the same as one already in a section, and a
+  talent you had removed came back on every re-run as if it were a fresh idea. Rows are now
+  marked **(new)** in green for what Merge would add, and selecting any talent row **declines**
+  it: it stays on the list, darkened and marked, and the suggestion will not place it.
+  Selecting it again takes that back. The declined set is kept with the character, so it
+  survives a re-run and a reload, and nothing is hidden -- a declined talent you can no longer
+  see is one you can no longer change your mind about. The apply row now says **PREVIEW --
+  nothing is written yet** in as many words.
+  Within a section, talents you have put points into now sort above ones you have not, after
+  the cooldown band -- invested points being the clearest signal of what you actually care
+  about.
 - **A new installation is offered a way out, not just told about one** (#96). The first thing
   a fresh install does is stop at the first creature it sees, because nothing is in its Combat
   list. It said so, and left you to go and find the menu -- six keypresses from that message

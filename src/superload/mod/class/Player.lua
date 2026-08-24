@@ -1403,7 +1403,11 @@ local function proposeLoadout(p)
         end
     end
     table.sort(list, function(a, b) return a.tid < b.tid end)
-    local proposal = loadout.discover(list, { self = p, mainhand = mainhandFacts(p) })
+    -- #85: the talents this character has declined, so the proposal marks
+    -- them and never writes them. Kept with the character (data/rules), so
+    -- a re-run does not re-recommend what the player already said no to.
+    local proposal = loadout.discover(list, { self = p, mainhand = mainhandFacts(p),
+        declined = data(p).declined })
     chan.info("[Loadout] Proposed %d entries, %d unassigned, %d skipped, %d choices",
         proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices)
     return proposal
