@@ -1,5 +1,7 @@
 # SkooBot: Reclauded
 
+[![check](https://github.com/skoobot-reclauded/skoobot-reclauded/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/skoobot-reclauded/skoobot-reclauded/actions/workflows/check.yml)
+
 An autoplay addon for [Tales of Maj'Eyal](https://te4.org) — hand your character to a bot that
 rests, explores and fights, and hands control back when it judges the situation needs a human.
 
