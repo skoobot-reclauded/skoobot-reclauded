@@ -317,6 +317,48 @@ return ("%s | turn0=%d | %s | log: %s"):format(r, before, fr.status(), fr.lastlo
         Check ($first -match 'reason=(Stopped|Handed back|Cannot act): ') 'the bot handed back with a labelled reason'
         Check ($first -match '\[SkooBot\] ') 'the reason reached the message log under the [SkooBot] prefix'
         Note "first stop, nothing configured: $first"
+
+        # #96: the first toggle of a fresh installation is the one moment
+        # this addon cannot do anything at all, and describing the way out is
+        # not offering it -- the audit measured six keypresses from that
+        # message to a working bot. Checked HERE, on the real toggle, rather
+        # than in query mode: Ask answers a question, it does not open things.
+        if ($first -match 'reason=Cannot act: no Combat talent is configured') {
+            $offer = Probe 'setup-offer' @'
+local b = fr.b
+local dlg = game.dialogs[#game.dialogs]
+if not dlg then return "NODIALOG" end
+local title, body, buttons = tostring(dlg.title or "?"), "", {}
+for _, ui in ipairs(dlg.uis or {}) do
+  local u = ui.ui
+  if u and u.text then
+    local t = fr.plain(tostring(u.text))
+    if u.fct then buttons[#buttons+1] = t else body = body .. " " .. t end
+  end
+end
+local never = tostring(b.data(game.player).nosetupprompt)
+fr.closeAll()
+return ("dialog=[%s] buttons=[%s] never=%s body=[%s] left_open=%d"):format(
+  title, table.concat(buttons, " | "), never, (body:gsub("%s+", " ")), #game.dialogs)
+'@
+            if ($offer -eq 'NODIALOG') {
+                Check $false 'the dead end offers a way out, not only a message'
+            } else {
+                Check ($offer -match 'dialog=\[SkooBot: Reclauded\]') 'the dead end opens a dialog of its own'
+                Check ($offer -match 'Set up talents') 'with a button straight to the talent screen'
+                Check ($offer -match 'Not now') 'a way to dismiss it for this session'
+                Check ($offer -match "Don't ask again") 'and a way to never see it again on this character'
+                Check ($offer -match 'nothing to fight with') 'the body says what is wrong in one sentence'
+                # Escape and dismissal must not be the same as "never": a
+                # dialog that turns itself off when dismissed does it by
+                # accident.
+                Check ($offer -match 'never=nil') 'merely seeing it does not set the never-ask flag'
+                Check ($offer -match 'left_open=0') 'and it closes cleanly, leaving nothing over the map'
+                Note "setup offer: $offer"
+            }
+        } else {
+            Note "the offer is not measured this run: the first stop was not the dead end"
+        }
     } else {
         Note "still running at ${FirstStopDeadlineSec}s with nothing configured (resting/exploring, nothing met): $first"
     }

@@ -77,6 +77,15 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
 - **Stops are one kind of message.** Every stop is a `[SkooBot]` line in the message log in
   one colour per severity, repeated on the big-news banner, so it is not lost among combat
   lines. Messages that mention a key name the key you actually have bound (#57, #58).
+- **A new installation is offered a way out, not just told about one** (#96). The first thing
+  a fresh install does is stop at the first creature it sees, because nothing is in its Combat
+  list. It said so, and left you to go and find the menu -- six keypresses from that message
+  to a working bot. There is now a popup at that moment with **Set up talents**, which opens
+  the talent screen where one more press proposes a set from the talents you already know.
+  *Not now* silences it for the session and *Don't ask again* for that character; Escape is
+  "not now", never "never". It appears whether or not the stop popup is switched on, because
+  that setting is about noise during play and this is the one occasion the bot cannot start at
+  all -- on a run where you have almost certainly never seen the setting.
 - **One settings screen, and the thresholds now belong to the character** (#95, #90). The
   addon's configuration was in three places: the game's options tab, its own menu, and nothing
   saying how they related. There is now a **Settings** screen on the SkooBot menu holding all

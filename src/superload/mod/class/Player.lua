@@ -138,6 +138,8 @@ _G.skoobot_reclauded = bot
 
 -- Forward declarations for the mutually recursive core.
 local skoobot_act, checkForAdditionalAction, stop
+-- #96: raised from the dead-end site, defined with the notices below.
+local offerSetup
 
 --- One setting, as it applies RIGHT NOW (#95).
 ---
@@ -393,6 +395,7 @@ end
 
 bot.notice = notice
 local StopDialog   -- required on first use; the overload mounts the dialog tree
+local SetupDialog  -- #96, the same
 
 --- Stop the bot and tell the player why (#58). `severity` is notice.STOPPED
 --- (the player must look), notice.HANDED_BACK (finished, or yielded on
@@ -436,6 +439,53 @@ function stop(severity, text, opts)
             if suppress then bot.setSetting("STOP_POPUP", false) end
         end))
     end
+end
+
+--- #96: the dead end a fresh installation hits, offered as a choice.
+---
+--- Deliberately NOT gated on STOP_POPUP, which is off by default and is a
+--- preference about noise during play; this is the one moment a new
+--- installation cannot start at all. The dialog carries its own two ways
+--- of never seeing it again, so the preference it ignores is replaced by a
+--- better-placed one rather than simply overridden.
+---
+--- Silent when a dialog is already up: the talent screen may be open
+--- because the player is acting on the last one.
+function offerSetup()
+    local p = game.player
+    if not p then return end
+    -- Ask (query mode) answers a question; it does not open things. The
+    -- player pressed "what would you do", not "do it".
+    if bot.do_nothing then return end
+    if bot.setup_prompted then return end          -- this session
+    if data(p).nosetupprompt then return end       -- this character, for good
+    -- Never stack. This matters more than it looks: the offer is itself a
+    -- dialog, so a bot toggled again while it is up would hand back with "a
+    -- dialog is open: SkooBot: Reclauded" -- blocked by its own helpfulness.
+    -- Measured, not guessed: that is exactly what the first-run scenario
+    -- reported when this check was only about other people's dialogs.
+    if game.dialogs and #game.dialogs > 0 then return end
+
+    SetupDialog = SetupDialog or require("mod.dialogs.skoobot_reclauded.SetupDialog")
+    game:registerDialog(SetupDialog.new(
+        "#GOLD#SkooBot has nothing to fight with.#WHITE#\n\n"
+        .. "No talent is in its Combat list, so it stopped at the first thing it saw. "
+        .. "The talent screen can suggest a set from the talents this character already "
+        .. "knows -- you can change any of it afterwards, and nothing is written until "
+        .. "you accept it.\n\n"
+        .. "You can also reach it any time with "
+        .. bot.keyFor("MENU_SKOOBOT_RECLAUDED") .. ".",
+        function(choice)
+            if choice == "setup" then
+                game:registerDialog(require("mod.dialogs.skoobot_reclauded.TalentDialog").new(game.player))
+            elseif choice == "never" then
+                data(game.player).nosetupprompt = true
+                game.log("#GOLD#[SkooBot] It will not offer again for this character. "
+                    .. "%s opens the menu whenever you want it.", bot.keyFor("MENU_SKOOBOT_RECLAUDED"))
+            else
+                bot.setup_prompted = true
+            end
+        end))
 end
 
 -- Tries to stop the bot, returning true. A condition set to IGNORE is
@@ -2320,12 +2370,13 @@ function skoobot_act(noAction)
             -- resolves to nothing, and that is not "nothing configured".
             local rows = #getRules(game.player).Combat
             local configured = #rotation + heldCount
-            local text, extra
+            local text, extra, nothingConfigured
             if rows == 0 then
                 text = "no Combat talent is configured"
                 extra = { hint = "set talent usage in the SkooBot: Reclauded menu, "
                     .. bot.keyFor("MENU_SKOOBOT_RECLAUDED")
                     .. ", or let the bot suggest a loadout from the talent screen" }
+                nothingConfigured = true
             elseif heldCount == 0 then
                 text = "no Combat talent is ready -- every one is on cooldown or unusable"
             elseif heldCount == configured then
@@ -2335,7 +2386,12 @@ function skoobot_act(noAction)
                 text = ("no Combat talent is ready -- %d held while impaired, "
                     .. "the rest on cooldown or unusable"):format(heldCount)
             end
-            return stop(notice.CANNOT_ACT, text, extra)
+            stop(notice.CANNOT_ACT, text, extra)
+            -- #96: offer the way out rather than describing it. After the
+            -- stop, so the message log and the banner read the same as they
+            -- would without it and nothing depends on the dialog existing.
+            if nothingConfigured then offerSetup() end
+            return
         end
     end
 end
