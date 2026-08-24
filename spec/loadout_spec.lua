@@ -585,4 +585,53 @@ describe("data/loadout.lua", function()
       assert.are.equal(2, #held)
     end)
   end)
+
+  -- #98: the owner's playtest -- an Archer was recommended *Attack*, which
+  -- with a bow in hand is a wrong recommendation on the first screen a new
+  -- player sees. Keyed on the weapon, never on the class.
+  describe("a melee attack the main hand cannot deliver (#98)", function()
+    local MELEE  = { mode = "activated", tactical = { ATTACK = 2 }, range = 1 }
+    local RANGED = { mode = "activated", tactical = { ATTACK = 2 }, range = 6 }
+    local SLING  = { name = "a rough leather sling", subtype = "sling", archery = true }
+    local SWORD  = { name = "an iron longsword", subtype = "longsword", archery = false }
+
+    it("proposes the melee attack when there is no main hand to judge", function()
+      local p = L.discover({ talent("T_ATTACK", MELEE) })
+      assert.equals("Combat", sectionOf(p).T_ATTACK)
+    end)
+
+    it("proposes it with a melee weapon in hand", function()
+      local p = L.discover({ talent("T_ATTACK", MELEE) }, { mainhand = SWORD })
+      assert.equals("Combat", sectionOf(p).T_ATTACK)
+    end)
+
+    it("does NOT propose it with a sling in hand, and says why", function()
+      local p = L.discover({ talent("T_ATTACK", MELEE) }, { mainhand = SLING })
+      assert.is_nil(sectionOf(p).T_ATTACK)
+      local u = find(p.unassigned, "T_ATTACK")
+      assert.is_not_nil(u)
+      assert.is_truthy(u.reason:find("cannot make a melee attack", 1, true))
+      assert.is_truthy(u.reason:find("sling", 1, true))
+    end)
+
+    it("still proposes a RANGED attack with a sling in hand", function()
+      local p = L.discover({ talent("T_SHOOT", RANGED) }, { mainhand = SLING })
+      assert.equals("Combat", sectionOf(p).T_SHOOT)
+    end)
+
+    -- Fails safe: an unknown range must not be guessed at as melee, or a
+    -- ranged talent the game would not report on quietly leaves the
+    -- proposal -- a worse failure than the one being fixed.
+    it("keeps a talent whose range the game did not report", function()
+      local noRange = { mode = "activated", tactical = { ATTACK = 2 } }
+      local p = L.discover({ talent("T_MYSTERY", noRange) }, { mainhand = SLING })
+      assert.equals("Combat", sectionOf(p).T_MYSTERY)
+    end)
+
+    it("reads the subtype when the object does not say `archery`", function()
+      local bare = { name = "a shortbow", subtype = "bow" }
+      local p = L.discover({ talent("T_ATTACK", MELEE) }, { mainhand = bare })
+      assert.is_nil(sectionOf(p).T_ATTACK)
+    end)
+  end)
 end)

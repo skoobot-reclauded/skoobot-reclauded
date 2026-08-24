@@ -1232,6 +1232,8 @@ end
 local function loadoutTalent(p, tid, t)
     local ok, cd = pcall(p.getTalentCooldown, p, t)
     if not ok or type(cd) ~= "number" then cd = nil end
+    local okg, rng = pcall(p.getTalentRange, p, t)
+    if not okg or type(rng) ~= "number" then rng = nil end
     local okr, rt = pcall(p.getTalentRequiresTarget, p, t)
     if not okr then rt = t.requires_target and true or false end
     return {
@@ -1245,7 +1247,27 @@ local function loadoutTalent(p, tid, t)
             sustain_slots = t.sustain_slots, hide = t.hide,
             on_pre_use = t.on_pre_use,
             cooldown = cd, requires_target = rt and true or false,
+            -- #98: the reach, so the proposal can tell a melee attack from
+            -- a ranged one without knowing any talent by name. nil when the
+            -- game will not say, and data/loadout.lua treats nil as "not
+            -- known to be melee" rather than guessing.
+            range = rng,
         },
+    }
+end
+
+--- #98: what the main hand is, for the proposal. A bow or a sling cannot
+--- make a melee attack, so *Attack* is not a recommendation for the
+--- character holding one. Read here rather than in data/loadout.lua because
+--- that module is pure and this is the engine's inventory.
+local function mainhandFacts(p)
+    local okv, inv = pcall(p.getInven, p, p.INVEN_MAINHAND)
+    local o = okv and inv and inv[1] or nil
+    if not o then return nil end
+    return {
+        name    = tostring(o.name or "your weapon"),
+        subtype = tostring(o.subtype or ""),
+        archery = (o.archery or (o.combat and o.combat.archery)) and true or false,
     }
 end
 
@@ -1258,7 +1280,7 @@ local function proposeLoadout(p)
         end
     end
     table.sort(list, function(a, b) return a.tid < b.tid end)
-    local proposal = loadout.discover(list, { self = p })
+    local proposal = loadout.discover(list, { self = p, mainhand = mainhandFacts(p) })
     chan.info("[Loadout] Proposed %d entries, %d unassigned, %d skipped, %d choices",
         proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices)
     return proposal

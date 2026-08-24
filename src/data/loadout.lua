@@ -98,6 +98,38 @@ local UNMAPPED = {
 
 local function isTable(v) return type(v) == "table" end
 
+--- #98: can the weapon in the main hand make a melee attack at all?
+---
+--- A bow or a sling attacks through its ammunition, with T_SHOOT; swung as
+--- a club it is feeble, and the game gates most melee talents behind a
+--- melee weapon anyway. Proposing *Attack* to an Archer is therefore a
+--- visibly wrong recommendation on the first screen a new player sees --
+--- which is the whole cost, since at runtime the talent would simply be
+--- refused and the rotation would fall through.
+---
+--- Keyed on the weapon, not on the class: there is no list of "ranged
+--- classes" that survives contact with ToME's build variety, and the owner
+--- said as much when asking for this. A Sun Paladin with a staff is in
+--- melee on purpose, and a staff is not archery, so nothing here touches
+--- them.
+local ARCHERY_SUBTYPE = { bow = true, sling = true }
+
+--- Is this proposed talent a melee attack the main hand cannot deliver?
+---
+--- FAILS SAFE. Only a talent whose range is KNOWN and is 1 or less counts
+--- as melee: a nil range means the caller did not supply one, and guessing
+--- "melee" there would quietly drop a ranged talent from the proposal,
+--- which is a worse failure than the one being fixed.
+local function meleeWithoutAMeleeWeapon(e, opts)
+    local mh = opts and opts.mainhand
+    if not isTable(mh) then return nil end
+    if not (mh.archery or ARCHERY_SUBTYPE[tostring(mh.subtype)]) then return nil end
+    local rng = tonumber((e.t or {}).range)
+    if not rng or rng > 1 then return nil end
+    return ("you are holding %s, which cannot make a melee attack"):format(
+        tostring(mh.name or mh.subtype or "a ranged weapon"))
+end
+
 --- A tactical table with lower-cased keys and the `self` sub-table folded
 --- in: the runtime form is already lower-case; a data-file form or a fixture
 --- may not be.
@@ -216,7 +248,12 @@ local function classify(e, opts)
     end
     local cd = cooldownOf(t)
     local cdText = cd > 0 and ("; cooldown " .. tostring(cd)) or "; no cooldown"
-    if hasCombat then return "entry", rec(COMBAT, upperList(keys) .. cdText, tac) end
+    if hasCombat then
+        -- #98: right role, wrong hands.
+        local wrongHands = meleeWithoutAMeleeWeapon(e, opts)
+        if wrongHands then return "unassigned", rec(nil, upperList(keys) .. "; " .. wrongHands) end
+        return "entry", rec(COMBAT, upperList(keys) .. cdText, tac)
+    end
     if hasHeal then return "entry", rec(RECOVERY, upperList(keys) .. cdText, tac) end
     if hasDefend then return "entry", rec(PREVENTION, upperList(keys) .. cdText, tac) end
 
@@ -302,7 +339,9 @@ end
 --- Discover a loadout.
 -- @param talents a list of {tid=, t=<talent def or the plain fields of one>,
 --   level=<talent level>, active=<is the sustain up>, name=<display name>}
--- @param opts optional: self = the actor handed to a function-form tactical
+-- @param opts optional: self = the actor handed to a function-form tactical;
+--   mainhand = {name=, subtype=, archery=} for the weapon in the main hand,
+--   which decides whether a melee attack is worth proposing at all (#98)
 -- @return a proposal:
 --   entries    {tid, name, section, priority, reason, hidden, conditional, cooldown}
 --              in section order, then priority order
