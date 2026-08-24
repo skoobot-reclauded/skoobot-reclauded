@@ -189,6 +189,16 @@ Defects inherited from 0.0.12, all reported by its users:
   fight": pinned next to an enemy, the bot attacks; pinned with nothing in reach it hands back
   saying so, instead of trying a step the game refuses (#12).
 
+And one nobody reported, found here:
+
+- **Your settings are kept** (#90). Everything on the *[SkooBot: Reclauded]* options tab — the
+  thresholds, the ratios, the stop popup, the log level — lasted exactly one session. The file
+  on disk was correct and the tab showed the right value all session, so the loss was invisible
+  until the next start, when every option quietly went back to its default. SkooBot 0.0.12 has
+  the same defect, under its own name; if you ever set something there and felt it had not
+  taken, it had not. Settings you had already chosen are recovered on first load rather than
+  lost.
+
 ### Not in this version
 
 - Walking to a glowing chest as a scored objective, and a non-linear life curve for your own power, are after 0.1 (#11, follow-ups).

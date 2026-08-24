@@ -213,9 +213,11 @@ class:bindHook("GameOptions:generateList", function(self, data)
                 game:registerDialog(GetQuantity.new(prompt or tabTitle,
                     "From " .. minVal .. " to " .. maxVal, settings[option] or minVal, maxVal,
                     function(qty)
-                    settings[option] = qty
-                    game:saveSettings("tome.skoobot_reclauded." .. option,
-                        ("tome.skoobot_reclauded." .. option .. " = %s\n"):format(tostring(settings[option])))
+                    -- #90: through setSetting, so the tab and the runtime
+                    -- write the same file format. This used to build the
+                    -- line itself, and the line it built could not be
+                    -- loaded back.
+                    skoobot_reclauded.setSetting(option, qty)
                     self.c_list:drawItem(item)
                 end, minVal))
             end

@@ -75,6 +75,7 @@ local keys = dofile("/data-skoobot_reclauded/keys.lua")
 local logm = dofile("/data-skoobot_reclauded/log.lua")
 local conditions = dofile("/data-skoobot_reclauded/conditions.lua")
 local score = dofile("/data-skoobot_reclauded/score.lua")
+local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -289,12 +290,27 @@ function bot.keyFor(virtual)
 end
 
 --- Set one of this addon's settings and persist it, the way the options tab
---- does. Shared by the tab and by the stop popup's checkbox (#58).
+--- does. Shared by the tab, the stop popup's checkbox (#58) and the log-level
+--- entry -- one writer, so the file format cannot drift between them (#90).
+---
+--- The file has to create the addon's namespace table before assigning into
+--- it: the engine runs every /settings/*.cfg as Lua at startup, long before
+--- any addon exists, so an unguarded line indexes nil, dies, and is
+--- swallowed. data/cfg.lua owns that format; every writer goes through here
+--- so there is one of it.
+---
+--- A value the format cannot hold is not written to disk rather than
+--- written in a form that will not load. The live table still takes it, so
+--- the session behaves as asked and only the persistence is refused.
 function bot.setSetting(option, value)
     local s = config.settings.tome.skoobot_reclauded
     s[option] = value
-    game:saveSettings("tome.skoobot_reclauded." .. option,
-        ("tome.skoobot_reclauded.%s = %s\n"):format(option, tostring(value)))
+    local text, why = cfgfmt.line(option, value)
+    if not text then
+        chan.warn("[Settings] %s not saved: %s", tostring(option), tostring(why))
+        return
+    end
+    game:saveSettings(cfgfmt.file(option), text)
 end
 
 bot.notice = notice

@@ -206,6 +206,35 @@ tick; `tooltip` is optional UI sugar. A collision sweep of every v1-defined name
 | `config.settings.tome` availability at hook time | S:7–8 | created by T/mod/init.lua:81 via E/Module.lua:976 (font bootstrap), **before** loadAddons at :1041 | ok† | Guaranteed on 1.7.6 — but as an incidental side effect of the font system (the engine's own code still guards it, E/Module.lua:1043–1044). Open the defaults file with `config.settings.tome = config.settings.tome or {}`. |
 | top-level `config.settings.SkooBot` run-once guard | S:2–5 | no collision; never persisted | ok | Per-boot flag, as v1 assumed. |
 
+
+### The settings files are Lua, and they run before you exist
+
+`Game:saveSettings(name, text)` writes `/settings/<name>.cfg` (E/Game.lua:519). The engine
+**runs every one of those files as Lua at startup** — it has to, the config decides what to
+load — which is long before any addon's `hooks/load.lua`. So the obvious content
+
+```lua
+tome.myaddon.SOME_OPTION = 77          -- v1 wrote exactly this, under tome.SkooBot
+```
+
+indexes a field that does not exist yet. The error is swallowed, the addon then seeds its
+defaults over nothing, and the player's choice is gone on the next start. **The failure is
+invisible within a session**: the file on disk is right, and the live table is right until the
+process ends. Only a restart shows it, which is why nothing caught it for the whole port
+(#90) — and SkooBot 0.0.12 has the same defect, so it was inherited rather than introduced.
+
+Write a form that creates the table first:
+
+```lua
+tome.myaddon = tome.myaddon or {}
+tome.myaddon.SOME_OPTION = 77
+```
+
+and, for files an older build already wrote, read them yourself before seeding defaults —
+`fs.open("/settings/<name>.cfg", "r")` reaches them from inside the game (verified 2026-08-23),
+and parsing the assignment is safer than executing a file off the player's disk.
+`src/data/cfg.lua` owns both halves; `tools/scenario-settings.ps1` is the only check in the
+suite that restarts the game, because a restart is the only thing that can see this.
 ## engine.util / core misc / load mechanism
 
 | symbol | v1 use | 1.7.6 | status | note |

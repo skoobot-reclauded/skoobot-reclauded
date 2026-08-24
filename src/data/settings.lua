@@ -21,6 +21,48 @@ config.settings.skoobot_reclauded.loaded = true
 config.settings.tome.skoobot_reclauded = config.settings.tome.skoobot_reclauded or {}
 local s = config.settings.tome.skoobot_reclauded
 
+-- #90: recover what the engine could not.
+--
+-- Each setting lives in its own /settings/*.cfg, which the engine runs as
+-- Lua at startup -- BEFORE any addon exists. A file written by any build
+-- before this one says `tome.skoobot_reclauded.X = v` with no table to put
+-- it in, so it dies, is swallowed, and the defaults below land on nothing.
+-- Every option the player ever chose was silently discarded on the next
+-- start, and only a restart showed it: the file was right, and the live
+-- table was right for the rest of the session.
+--
+-- data/cfg.lua writes a form that creates the table first, so from now on
+-- the engine's own load works. This pass is for the files already on disk.
+-- It runs BEFORE the defaults, and only fills what is still nil, so a value
+-- the engine did manage to load wins and re-reading is harmless.
+--
+-- The file is READ, not executed: it is on the player's disk, and running
+-- it would be running whatever is in it.
+--
+-- Everything here is best-effort. A missing file, an unreadable one, a line
+-- that says something unexpected -- each falls through to the default,
+-- which is exactly what happened before this existed. It must never be the
+-- reason the addon fails to load.
+local cfg = dofile("/data-skoobot_reclauded/cfg.lua")
+local PERSISTED = {
+    "LOWHEALTH_RATIO", "IGNORE_DAMAGE_HEALTH_RATIO",
+    "MAX_INDIVIDUAL_POWER", "MAX_DIFF_POWER", "MAX_COMBINED_POWER", "MAX_ENEMY_COUNT",
+    "NORMAL_POWER_RATIO", "ELITES_POWER_RATIO", "BOSS_POWER_RATIO",
+    "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL",
+}
+for _, name in ipairs(PERSISTED) do
+    if type(s[name]) == "nil" then
+        local ok, value = pcall(function()
+            local f = fs.open(cfg.path(name), "r")
+            if not f then return nil end
+            local text = f:read(4096)
+            f:close()
+            return cfg.parse(text, name)
+        end)
+        if ok and value ~= nil then s[name] = value end
+    end
+end
+
 if type(s.LOWHEALTH_RATIO)      == "nil" then s.LOWHEALTH_RATIO      = 0.5 end
 -- T-011: below this life fraction, damage taken while exploring hands back;
 -- above it, a scratch (a single poison tick) is ignored. Added over v1.
