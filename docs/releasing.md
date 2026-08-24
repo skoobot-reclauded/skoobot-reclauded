@@ -67,7 +67,14 @@ are already on `main`; if one is not, it is not in this release.
    `tools/clean-build.ps1`. A release is cut from a clean checkout of `main`; the tree must
    show nothing in `git status`.
 2. **Bump `addon_version`** in `src/init.lua`. Bump `version` only under the rule in §1.
-   Read the `description` field while there: it is the text both listings show.
+   Read the `description` field while there: it is the text the Addons menu shows, and from
+   1.0.0 both listings.
+
+   > **0.1.0 is the exception: there is nothing to bump.** The manifest has said `{0,1,0}`
+   > since the scaffold and 0.1.0 is the first release, so this step is a *check*, not an
+   > edit — confirm it reads `{0,1,0}` and move on. Bumping it here would ship 0.2.0 as the
+   > first release and burn 0.1.0 forever, because no release number is ever reused (§1).
+   > Every release after this one really does bump.
 3. **Move the CHANGELOG.** `## [Unreleased]` → `## [0.x.y] - <today>`; add a fresh empty
    `## [Unreleased]` above it.
 4. **Commit:** `Release 0.x.y (#n)`, where `#n` is the issue that tracks the release — for
