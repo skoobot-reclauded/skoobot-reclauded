@@ -103,6 +103,24 @@ local TUTORIAL = table.concat({
 		"is written until you choose Merge or Replace.",
 }, "\n") .. "\n"
 
+-- #85: the right-hand guide while a proposal is shown. The rules tutorial
+-- is about editing and says nothing about a preview, so it was the wrong
+-- half of the screen to leave standing there -- and it is the one place
+-- with room to explain what the marks mean.
+local PROPOSAL_GUIDE = table.concat({
+	"#GOLD#PREVIEW -- nothing has been written yet.#WHITE#",
+	"These are the rules the bot would use, read from the game's own talent data. Selecting a " ..
+		"row shows why it is placed where it is.",
+	"#LIGHT_GREEN#(new)#WHITE# is a row Merge would add. #GREY#(declined)#WHITE# is one you have " ..
+		"said no to before on this character: it stays listed, and is not placed. A talent already " ..
+		"in a section you filled yourself is left where it is.",
+	"Select a talent row to decline it; select it again to take that back. The choice is remembered " ..
+		"with the character.",
+	"On the first row, Enter offers #TAN#Merge#WHITE# (add what is new, keep every row you placed), " ..
+		"#TAN#Replace#WHITE# (clear the rules first, and it asks) or #TAN#Cancel#WHITE#. Escape " ..
+		"cancels too, and writes nothing.",
+}, "\n\n") .. "\n"
+
 local PROPOSAL_INTRO = "This is a suggestion, read from the game's own talent data: nothing has been written. " ..
 	"Select a row to see why it is placed where it is. Press Enter on any row to choose Merge (add what is new, " ..
 	"keep every row you placed yourself), Replace (clear the current rules first) or Cancel; Escape cancels."
@@ -125,7 +143,19 @@ function _M:init(actor)
 
 	local vsep = Separator.new{dir="horizontal", size=self.ih - 10}
 	local halfwidth = math.floor((self.iw - vsep.w) / 2)
+	-- #85: the guide swaps between the editing tutorial and the proposal
+	-- guide. Its height is frozen at whichever is taller BEFORE the layout is
+	-- built, so swapping cannot reflow the description pane under it --
+	-- auto_height would otherwise resize the panel on every switch.
 	self.c_tut = Textzone.new{width=halfwidth, height=1, auto_height=true, no_color_bleed=true, text=TUTORIAL}
+	local tutH = self.c_tut.h
+	self.c_tut.text = PROPOSAL_GUIDE
+	self.c_tut:generate()
+	self.c_tut.auto_height = false
+	self.c_tut.h = math.max(tutH, self.c_tut.h)
+	self.c_tut.dest_area.h = self.c_tut.h
+	self.c_tut.text = TUTORIAL
+	self.c_tut:generate()
 	self.c_desc = TextzoneList.new{width=halfwidth, height=self.ih - self.c_tut.h - 20, scrollbar=true,
 		no_color_bleed=true}
 
@@ -376,14 +406,20 @@ function _M:proposalRow(e, placed, rules)
 	end
 	desc = desc .. "\n\n" .. tostring(info.desc)
 
+	-- Plain text, never colour codes: the row's COLOUR is what marks its
+	-- state (below), and a code in the label would have to be parsed.
 	local suffix = ""
-	if e.declined then suffix = "  #GREY#(declined)#WHITE#"
-	elseif isNew then suffix = "  #LIGHT_GREEN#(new)#WHITE#" end
+	if e.declined then suffix = "  (declined)"
+	elseif isNew then suffix = "  (new)" end
 
 	return {
 		char="", cname=plain, kind=kind, used=used, inSections=inS,
-		name=(e.priority and (tostring(e.priority) .. "  ") or "") .. tostring(info.name) ..
-			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or "") .. suffix,
+		-- :toTString(), which this row never did while the rules view (line
+		-- ~250) always has. A talent's name carries colour codes, so without
+		-- it every proposal row printed "#GOLD#..." at the player -- since
+		-- #18, and the (new) and (declined) marks only made it obvious.
+		name=((e.priority and (tostring(e.priority) .. "  ") or "") .. tostring(info.name) ..
+			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or "") .. suffix):toTString(),
 		tree=tostring(e.reason), desc=desc, ptid=e.tid, psection=e.section, placed=placed,
 		declined=e.declined and true or false, isnew=isNew,
 		color=function()
@@ -432,9 +468,11 @@ function _M:generateProposalList()
 
 	-- #85 item 3: say it is a preview at the top, in the apply row, and
 	-- nowhere else is needed -- these two are what a player looks at.
-	tree[#tree + 1] = actionRow("apply",
-		"#GOLD#PREVIEW -- nothing is written yet.#WHITE#  Apply this suggestion...  (Enter: Merge / Replace / Cancel)",
-		PROPOSAL_INTRO)
+	-- Short on purpose. This column is half of half the dialog, and the long
+	-- version was clipped to "PREVIEW -- nothing is written yet. App" at
+	-- 1440p and worse below it -- a warning nobody could read. The preview
+	-- state is said in the guide panel, which has the room for it.
+	tree[#tree + 1] = actionRow("apply", "Apply or cancel...  (Enter)", PROPOSAL_INTRO)
 
 	for i, section in ipairs(rm.SECTIONS) do
 		local nodes = {}
@@ -500,6 +538,7 @@ function _M:suggest()
 	end
 	self.proposal = proposal
 	self.hint = proposal
+	self:setGuide(PROPOSAL_GUIDE)
 	print(("[SKOOBOT] [TalentDialog] suggestion shown: %d entries, %d unassigned, %d skipped, %d choices"):format(
 		proposal.counts.entries, proposal.counts.unassigned, proposal.counts.skipped, proposal.counts.choices))
 	self:refresh()
@@ -508,10 +547,19 @@ function _M:suggest()
 	return true
 end
 
+--- #85: which guide the right-hand panel shows. Called on every entry to
+--- and exit from the proposal, so the panel always matches the view.
+function _M:setGuide(text)
+	if not self.c_tut or self.c_tut.text == text then return end
+	self.c_tut.text = text
+	self.c_tut:generate()
+end
+
 function _M:cancelProposal()
 	if not self.proposal then return end
 	self.proposal = nil
 	print("[SKOOBOT] [TalentDialog] suggestion cancelled")
+	self:setGuide(TUTORIAL)
 	self:refresh()
 	self:say("Suggestion cancelled. Nothing was written.")
 end
@@ -540,6 +588,7 @@ function _M:applyProposal(mode)
 	end
 	local report = self.L.apply(self.proposal, mode, self.actor)
 	self.proposal = nil
+	self:setGuide(TUTORIAL)   -- #85: the other way out of the proposal
 	print(("[SKOOBOT] [TalentDialog] suggestion applied (%s): %d added, %d removed, %d kept"):format(
 		report.mode, report.added, report.removed, report.kept))
 	self:refresh()

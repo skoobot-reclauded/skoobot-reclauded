@@ -455,13 +455,24 @@ for _, it in ipairs(d.c_list.list) do if it.nodes then headers[#headers+1] = fr.
 local rows = {}
 for _, e in ipairs(P.entries) do rows[#rows+1] = e.section .. ":" .. tostring(e.tid) end
 local first = d.c_list.list[1]
-return ("entries=%d unassigned=%d skipped=%d choices=%d headers=[%s] first=[%s] intro=[%s] rows=[%s]"):format(
+-- #85: the right-hand guide, which should now be about the PROPOSAL and
+-- not the editing tutorial. Colour codes are stripped, so a code still
+-- sitting in a row's label as literal text would show up here too.
+local guide = fr.plain(d.c_tut and d.c_tut.text or ""):gsub("%s+", " ")
+return ("entries=%d unassigned=%d skipped=%d choices=%d headers=[%s] first=[%s] intro=[%s] guide=[%s] rows=[%s]"):format(
   P.counts.entries, P.counts.unassigned, P.counts.skipped, P.counts.choices, table.concat(headers, " | "),
   fr.plain(first and first.name), fr.plain(d.c_desc and d.c_desc.cur_item == d.status_key and "(intro)" or "?"),
-  table.concat(rows, ","))
+  guide, table.concat(rows, ","))
 '@
     Check ($prop -match 'entries=[1-9]') 'the suggestion proposes at least one rule for a fresh character'
-    Check ($prop -match 'first=\[PREVIEW -- nothing is written yet\.  Apply this suggestion\.\.\.  \(Enter: Merge / Replace / Cancel\)\]') 'the proposal view leads with the apply row, says it is a preview (#85), and names its three answers'
+    # #85: the row is SHORT -- this column is half of half the dialog, and
+    # a warning clipped to "PREVIEW -- nothing is written yet. App" at 1440p
+    # is a warning nobody reads. The preview state is said in the guide
+    # panel, checked below, which has the room for it.
+    Check ($prop -match 'first=\[Apply or cancel\.\.\.  \(Enter\)\]') 'the proposal view leads with a short apply row'
+    Check ($prop -match 'guide=\[.*PREVIEW -- nothing has been written yet') 'the guide panel says it is a preview, where there is room to read it'
+    Check ($prop -match 'guide=\[.*\(new\) is a row Merge would add') 'and explains what the row marks mean'
+    Check ($prop -notmatch 'guide=\[.*Drag from Available') 'the editing tutorial is not left standing in the proposal view'
     Note "proposal: $prop"
 
     $am = Probe 'apply-menu' @'
