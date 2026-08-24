@@ -620,6 +620,13 @@ dies*.
   timed source using a mechanism not listed — and it is why `permanent` is returned rather
   than hidden.
 
+**One thing deliberately left alone**: `data/power.lua`'s `survivalScore`, the life term
+inside the raw power heuristic, still reads `life / max_life` — for every actor, the player
+included. It is v1's arithmetic, salvaged unchanged under #62, and it is the input to every
+threshold the player has tuned; moving it would shift every power level at once for a gain
+that only shows on the handful of creatures carrying `die_at`. The life scaling this issue is
+about is applied *outside* it, in `score.ownPower`.
+
 **What did NOT change**: the knobs, their defaults, and their meanings. `LOWHEALTH_RATIO` is
 still "a fraction of your life", and for the overwhelming majority of characters — anything
 with `die_at` at 0 — every figure here is arithmetically identical to what it replaced. That
