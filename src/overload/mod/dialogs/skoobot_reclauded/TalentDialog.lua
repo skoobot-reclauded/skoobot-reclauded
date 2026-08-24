@@ -113,7 +113,11 @@ local PROPOSAL_GUIDE = table.concat({
 		"row shows why it is placed where it is.",
 	"#LIGHT_GREEN#(new)#WHITE# is a row Merge would add. #GREY#(declined)#WHITE# is one you have " ..
 		"said no to before on this character: it stays listed, and is not placed. A talent already " ..
-		"in a section you filled yourself is left where it is.",
+		"in a section you filled yourself is left where it is, and is not marked.",
+	"#LIGHT_RED#Would be removed#WHITE# at the bottom is the other half of the answer: rules this " ..
+		"addon placed for you before that the suggestion no longer makes. Merge and Replace both " ..
+		"take those away. A row you placed or edited by hand is never there -- touching a row is how " ..
+		"you keep it.",
 	"Select a talent row to decline it; select it again to take that back. The choice is remembered " ..
 		"with the character.",
 	"On the first row, Enter offers #TAN#Merge#WHITE# (add what is new, keep every row you placed), " ..
@@ -370,10 +374,13 @@ end
 --- priority, kind, the reason in the Tree column, the sections it is already
 --- in -- with the full reason and the talent's description on the right.
 function _M:proposalRow(e, placed, rules)
-	local info = self.R.describe(self.actor, {tid=e.tid})
+	-- #98: a proposal can now carry an ACTION row (the paired flee), not
+	-- only talent ids, so the entry shape comes from one place.
+	local entry = self.L.module.entryOf(e)
+	local info = self.R.describe(self.actor, entry)
 	local plain = (tostring(info.name):gsub("#[^#]*#", ""))
 	local kind = KIND_LABELS[info.kind] or tostring(info.kind)
-	local inS, used = membership(self.rm, rules, {tid=e.tid})
+	local inS, used = membership(self.rm, rules, entry)
 	local marks = {}
 	if e.hidden then marks[#marks + 1] = "hidden" end
 	if e.conditional then marks[#marks + 1] = "conditional" end
@@ -396,7 +403,11 @@ function _M:proposalRow(e, placed, rules)
 	--                and quietly drops a talent off a screen whose job is
 	--                to say what the bot would do.
 	--   placed    -- already somewhere the player put it; Merge leaves it.
-	local isNew = not placed and #inS == 0 and not e.declined
+	-- `inS` is keyed by SECTION NAME, so #inS is always 0 -- which made
+	-- every row that the player had not hand-placed read as new, including
+	-- the ones a previous suggestion had already written. The owner's build
+	-- matched the recommendation exactly and every row said (new).
+	local isNew = not placed and next(inS) == nil and not e.declined
 	if e.declined then
 		desc = desc .. "\n\n#GREY#Declined on this character: the suggestion will not place it. "
 			.. "Select it again to undo that.#WHITE#"
@@ -420,7 +431,7 @@ function _M:proposalRow(e, placed, rules)
 		-- #18, and the (new) and (declined) marks only made it obvious.
 		name=((e.priority and (tostring(e.priority) .. "  ") or "") .. tostring(info.name) ..
 			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or "") .. suffix):toTString(),
-		tree=tostring(e.reason), desc=desc, ptid=e.tid, psection=e.section, placed=placed,
+		tree=tostring(e.reason), desc=desc, ptid=e.tid or self.rm.key(entry), psection=e.section, placed=placed,
 		declined=e.declined and true or false, isnew=isNew,
 		color=function()
 			if e.declined then return {0x50, 0x50, 0x50} end
@@ -454,6 +465,31 @@ function _M:toggleDeclined(tid)
 		or "#LIGHT_GREEN#Back in the suggestion.#WHITE#")
 end
 
+--- #85: one row for a rule the proposal would TAKE AWAY.
+---
+--- Merge prunes the rows this addon wrote before (suggested = true) that
+--- the suggestion no longer makes, and keeps every row the player placed by
+--- hand. Nothing on the screen said so, so a suggestion that quietly
+--- dropped a talent looked exactly like one that changed nothing -- the
+--- owner only caught it by comparing the two lists themselves.
+function _M:removalRow(entry, section, rules)
+	local info = self.R.describe(self.actor, entry)
+	local plain = (tostring(info.name):gsub("#[^#]*#", ""))
+	local inS, used = membership(self.rm, rules, entry)
+	local why = ("In %s now, and the suggestion does not include it."):format(self.rm.LABELS[section])
+	return {
+		char="", cname=plain, kind=KIND_LABELS[info.kind] or tostring(info.kind),
+		used=used, inSections=inS, removal=true, ptid=entry.tid,
+		name=(tostring(info.name) .. "  (would be removed)"):toTString(),
+		tree="not in the suggestion",
+		desc=why .. "\n\nMerge removes it, because this addon placed it and no longer would. "
+			.. "Replace removes it too. To keep it, move or reorder it by hand before applying: "
+			.. "a row you have touched is yours, and Merge leaves those alone.\n\n"
+			.. tostring(info.desc),
+		color=function() return {0xFF, 0x80, 0x80} end,
+	}
+end
+
 function _M:generateProposalList()
 	local P, rm, rules = self.proposal, self.rm, self.R.get(self.actor)
 	local tree, chars = {}, {}
@@ -484,6 +520,23 @@ function _M:generateProposalList()
 			"longest cooldown first, so the big hitters fire when they are ready and the rotation falls through " ..
 			"to the fillers.", nodes, true, "proposal:" .. section)
 	end
+
+	-- #85: what applying would take away, before what it leaves out.
+	local proposed = {}
+	for _, e in ipairs(P.entries) do if not e.declined then proposed[e.tid] = true end end
+	local losing, lost = {}, {}
+	for _, section in ipairs(rm.SECTIONS) do
+		for _, e in ipairs(rules[section] or {}) do
+			if e.tid and e.suggested and not hand[e.tid] and not proposed[e.tid] and not lost[e.tid] then
+				lost[e.tid] = true
+				losing[#losing + 1] = self:removalRow(e, section, rules)
+			end
+		end
+	end
+	tree[#tree + 1] = header(nil, ("Would be removed (%d)"):format(#losing),
+		"Rules this addon placed for you before that the suggestion no longer makes. Merge and Replace "
+		.. "both remove them. Rows you placed or edited by hand are never in this list -- Merge leaves "
+		.. "those alone -- so touching a row is how you keep it.", losing, #losing > 0, "proposal:removed")
 
 	local out = {}
 	for _, e in ipairs(P.unassigned) do out[#out + 1] = self:proposalRow(e, false, rules) end
@@ -603,8 +656,28 @@ function _M:applyMenu()
 	local rules = self.R.get(self.actor)
 	local new = #self.L.unplaced(self.proposal, self.actor)
 	local current = self.rm.count(rules)
+	-- #85: and how many it would take away, which the menu never said.
+	local proposed, gone = {}, 0
+	for _, e in ipairs(self.proposal.entries) do if not e.declined then proposed[e.tid] = true end end
+	-- A talent the player owns ANYWHERE is kept by merge, even where this
+	-- addon also placed it, so it is not a removal. Same rule as apply().
+	local hand = {}
+	for _, section in ipairs(self.rm.SECTIONS) do
+		for _, e in ipairs(rules[section] or {}) do
+			if e.tid and not e.suggested then hand[e.tid] = true end
+		end
+	end
+	local counted = {}
+	for _, section in ipairs(self.rm.SECTIONS) do
+		for _, e in ipairs(rules[section] or {}) do
+			if e.tid and e.suggested and not hand[e.tid] and not proposed[e.tid] and not counted[e.tid] then
+				counted[e.tid] = true
+				gone = gone + 1
+			end
+		end
+	end
 	local list = {
-		{name=("Merge: add %d new, keep every row you placed"):format(new),
+		{name=("Merge: add %d new, remove %d, keep every row you placed"):format(new, gone),
 			action=function() self:applyProposal("merge") end},
 		{name=("Replace: clear the %d current row%s, write the %d suggested"):format(
 			current, current == 1 and "" or "s", #self.proposal.entries),

@@ -26,16 +26,18 @@ local function talent(tid, def, over)
   return e
 end
 
+--- #98: a proposal may carry an ACTION row, which has no tid. Keyed by tid
+--- here, so those are skipped rather than indexing the table with nil.
 local function sectionOf(proposal)
   local out = {}
-  for _, e in ipairs(proposal.entries) do out[e.tid] = e.section end
+  for _, e in ipairs(proposal.entries) do if e.tid then out[e.tid] = e.section end end
   return out
 end
 
 local function tidsIn(proposal, section)
   local out = {}
   for _, e in ipairs(proposal.entries) do
-    if e.section == section then out[#out + 1] = e.tid end
+    if e.section == section and e.tid then out[#out + 1] = e.tid end
   end
   return out
 end
@@ -696,6 +698,75 @@ describe("data/loadout.lua", function()
       local p = L.discover({ talent("T_LONG", defLong, { level = 1 }),
                              talent("T_SHORT", defShort, { level = 5 }) })
       assert.same({ "T_LONG", "T_SHORT" }, tidsIn(p, "Combat"))
+    end)
+  end)
+
+  -- #98, the owner's ask: a character the suggestion arms with a ranged
+  -- attack should be given somewhere to stand. Keyed on the talents the
+  -- suggestion itself placed, so no class or weapon list is involved.
+  describe("the paired keep-sight flee (#98)", function()
+    local MELEE  = { mode = "activated", tactical = { ATTACK = 2 }, range = 1 }
+    local SHOOT  = { mode = "activated", tactical = { ATTACK = 2 }, range = 6 }
+    local HEAL   = { mode = "activated", tactical = { HEAL = 2 } }
+
+    local function combatKinds(p)
+      local out = {}
+      for _, e in ipairs(p.entries) do
+        if e.section == "Combat" then out[#out + 1] = e.action and ("action:" .. e.action) or e.tid end
+      end
+      return out
+    end
+
+    it("adds it when a Combat row reaches past arm's length", function()
+      local p = L.discover({ talent("T_SHOOT", SHOOT) })
+      assert.same({ "T_SHOOT", "action:flee" }, combatKinds(p))
+    end)
+
+    -- Under the attacks, never over them: above, the bot would back away
+    -- before shooting.
+    it("puts it LAST, under every attack", function()
+      local p = L.discover({ talent("T_SHOOT", SHOOT), talent("T_ATTACK", MELEE) })
+      local k = combatKinds(p)
+      assert.equals("action:flee", k[#k])
+      assert.is_true(#k >= 3)
+    end)
+
+    it("does not add it to a melee-only character", function()
+      local p = L.discover({ talent("T_ATTACK", MELEE) })
+      assert.same({ "T_ATTACK" }, combatKinds(p))
+    end)
+
+    it("does not add it when nothing is in Combat at all", function()
+      local p = L.discover({ talent("T_HEAL", HEAL) })
+      assert.same({}, combatKinds(p))
+    end)
+
+    it("carries keep_los, which is the whole point of the row", function()
+      local p = L.discover({ talent("T_SHOOT", SHOOT) })
+      local flee
+      for _, e in ipairs(p.entries) do if e.action then flee = e end end
+      assert.is_not_nil(flee)
+      assert.equals("nearest", flee.from)
+      assert.is_true(flee.keep_los)
+      assert.is_truthy(tostring(flee.reason):find("range", 1, true))
+    end)
+
+    it("is written into the rules as an action row, not as a talent", function()
+      local rules = R.new()
+      local p = L.discover({ talent("T_SHOOT", SHOOT) })
+      local report = L.apply(p, rules, R, "merge")
+      assert.equals(2, report.added)
+      assert.equals(1, #R.where(rules, { action = "flee", from = "nearest", keep_los = true }))
+    end)
+
+    -- unplaced() counts what Merge would add, and the count is shown on the
+    -- apply menu: an action row it could not see would make that a lie.
+    it("counts toward what Merge would add, and not once it is placed", function()
+      local rules = R.new()
+      local p = L.discover({ talent("T_SHOOT", SHOOT) })
+      assert.equals(2, #L.unplaced(p, rules, R))
+      L.apply(p, rules, R, "merge")
+      assert.equals(0, #L.unplaced(L.discover({ talent("T_SHOOT", SHOOT) }), rules, R))
     end)
   end)
 end)

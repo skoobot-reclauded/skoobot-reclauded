@@ -213,6 +213,9 @@ local function classify(e, opts)
             slot = t.sustain_slots,
             level = tonumber(e.level) or 0,
             active = e.active and true or false,
+            -- #98: kept so the proposal can tell a character that fights at
+            -- range from one that does not, without knowing any class.
+            range = tonumber(t.range),
         }
         if #tags > 0 then r.reason = r.reason .. " (" .. table.concat(tags, ", ") .. ")" end
         return r
@@ -266,6 +269,44 @@ local function classify(e, opts)
         reasons[1] = upperList(keys) .. ": a resource or an unknown key, not a role the bot has"
     end
     return "unassigned", rec(nil, table.concat(reasons, "; "))
+end
+
+--- #98: a character the suggestion arms with a RANGED attack is a
+--- character that wants somewhere to stand.
+---
+--- The owner's ask: "anyone with shoot as a part of their recommendation
+--- should also come with flee but keep LOS". Keyed on the talents the
+--- suggestion itself placed, not on the class and not on the weapon --
+--- which is option 2 of #98 in its simplest form, and the reason it is not
+--- much of a band-aid: a Combat rotation that reaches past arm's length IS
+--- the evidence that the character fights at range. The Sun-Paladin-with-a-
+--- staff case that makes weapon and class tests fail does not arise, because
+--- that character has no ranged attack to trigger it.
+---
+--- It goes LAST in Combat, under every attack. Above them the bot would
+--- back away before shooting; below, it is what the row is for -- the thing
+--- to do when nothing else can be done this turn.
+---
+--- Depends on #97 being fixed: before that, this row looped forever against
+--- an immobile enemy out of talent range, and suggesting it to every ranged
+--- character would have shipped that loop to all of them.
+local FLEE_KEEP_LOS = { action = "flee", from = "nearest", keep_los = true }
+
+local function wantsFleeRow(combatEntries)
+    for _, e in ipairs(combatEntries) do
+        local r = tonumber(e.range)
+        if r and r > 1 then return true, e end
+    end
+    return false
+end
+
+--- The rules-table shape of a proposed entry: a talent id, or an action.
+--- One place, so a caller cannot half-support the action rows.
+function M.entryOf(e)
+    if e.action then
+        return { action = e.action, from = e.from, keep_los = e.keep_los }
+    end
+    return { tid = e.tid }
 end
 
 --- Priority numbers with gaps, 100 downwards, so hand edits fit between.
@@ -387,6 +428,20 @@ function M.discover(talents, opts)
     for _, s in ipairs(M.SECTIONS) do
         local list = bySection[s]
         table.sort(list, byPriority)
+        -- #98: after the sort, so it is last whatever the attacks look like.
+        if s == COMBAT and not opts.no_flee_row then
+            local wants, why = wantsFleeRow(list)
+            if wants then
+                list[#list + 1] = {
+                    action = FLEE_KEEP_LOS.action, from = FLEE_KEEP_LOS.from,
+                    keep_los = FLEE_KEEP_LOS.keep_los, section = COMBAT,
+                    name = "Flee but keep sight",
+                    reason = ("you fight at range (%s reaches %d), so this backs off without breaking sight"):format(
+                        tostring(why.name or why.tid), tonumber(why.range) or 0),
+                    cooldown = 0, weight = 0, level = 0,
+                }
+            end
+        end
         local prio = priorities(#list)
         for i, e in ipairs(list) do
             e.priority = prio[i]
@@ -408,7 +463,7 @@ end
 function M.unplaced(proposal, rules, rm)
     local out = {}
     for _, e in ipairs(proposal and proposal.entries or {}) do
-        if #rm.where(rules, { tid = e.tid }) == 0 then out[#out + 1] = e end
+        if #rm.where(rules, M.entryOf(e)) == 0 then out[#out + 1] = e end
     end
     return out
 end
@@ -446,7 +501,7 @@ function M.apply(proposal, rules, rm, mode)
                 if e.tid and not e.suggested then hand[e.tid] = true end
             end
         end
-        local gone = rm.prune(rules, function(e) return not e.suggested or hand[e.tid] == true end)
+        local gone = rm.prune(rules, function(e) return not e.suggested or (e.tid and hand[e.tid] == true) end)
         report.removed = #gone
     end
     for _, e in ipairs(proposal and proposal.entries or {}) do
@@ -457,7 +512,9 @@ function M.apply(proposal, rules, rm, mode)
         elseif hand[e.tid] then
             report.kept = report.kept + 1
         else
-            local at = rm.place(rules, { tid = e.tid, suggested = true }, e.section)
+            local placement = M.entryOf(e)
+            placement.suggested = true
+            local at = rm.place(rules, placement, e.section)
             if at then report.added = report.added + 1 end
         end
     end
