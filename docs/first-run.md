@@ -188,15 +188,15 @@ Escape > Options > [SkooBot: Reclauded].
 
 The menu still fits the screen at 800×600 (413×381).
 
-**Not changed, and why.** The two choice names are v1's. *Set Skill Usage* is the talent-rules
+**Changed since (#73).** The two choice names were v1's. *Set Skill Usage* is the talent-rules
 screen; *Activate/Deactivate Bot Stop Conditions* is neither activate nor deactivate but a
-WARN / STOP / IGNORE choice. They should read *a) Talent rules -- which talents the bot may
-use* and *b) Stop conditions -- when it hands back*. They were left alone because
-`tools/scenario-keybinds.ps1` asserts the three names verbatim in two places and that file is
-another lane's tonight; the rename is a one-commit change to both files.
+WARN / STOP / IGNORE choice. They read *a) Talent rules -- which talents the bot may use* and
+*b) Stop conditions -- when it hands back* now. They were left alone on the night of this pass
+because `tools/scenario-keybinds.ps1` asserts the three names verbatim in two places and that
+file was another lane's; the rename moved both files together, as predicted.
 
-**Findings.** F5 (should, `Menu.lua` + `scenario-keybinds.ps1`) — filed, §11. F6 (done,
-`Menu.lua`) — the help paragraph.
+**Findings.** F5 (`Menu.lua` + `scenario-keybinds.ps1`) — filed as #73 and fixed there.
+F6 (done, `Menu.lua`) — the help paragraph.
 
 ## 5. The talent screen from scratch
 
@@ -459,7 +459,7 @@ each, under the game lease; none tainted.
 | F9 | should | `Menu.lua` | WARN / STOP / IGNORE unexplained; condition shown by code | **fixed** |
 | F13, F4, F8 | should | `Player.lua` | stop texts in setting keys; cooldown text hedges; condition labels are codes | issue filed |
 | F3 | should | `src/hooks/load.lua` `ToME:runDone` | nothing visible at load on a fresh character | issue filed |
-| F5 | should | `Menu.lua` + `scenario-keybinds.ps1` | *Set Skill Usage* / *Activate/Deactivate…* | issue filed |
+| F5 | should | `Menu.lua` + `scenario-keybinds.ps1` | *Set Skill Usage* / *Activate/Deactivate…* | **fixed** (#73) |
 | F11 | should | `src/hooks/load.lua` (ranges) | every option prompts *From 0 to 1000000* | **fixed** (#74) |
 | F2 | note | engine | the Addons list shows no description | nothing to do |
 | F7 | note | `TalentDialog.lua` | *clear the 0 current rows* on a fresh character | nothing to do |

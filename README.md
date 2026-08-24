@@ -49,7 +49,7 @@ while hovering to see how it was made up.
 
 The menu (`Shift+F7`) holds the two things you configure per character:
 
-- **Set Skill Usage** — the talent screen. Four sections — *Combat*, *Damage Prevention*,
+- **Talent rules** — the talent screen. Four sections — *Combat*, *Damage Prevention*,
   *Recovery*, *Sustain* — each an ordered list where position is priority; below them,
   everything the character can use, activatable items included. A talent may sit in several
   sections. Drag with the mouse, or use the keys the screen lists.

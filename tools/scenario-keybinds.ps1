@@ -187,7 +187,7 @@ return "installed"
     $m0 = Probe 'menu' 'return kb.menu()'
     Check ($m0 -match 'status=\[Keybinds: OK\]') 'the menu says "Keybinds: OK"'
     Check ($m0 -match 'details=\[\]') 'no collision rows under it'
-    Check ($m0 -match 'choices=\[a\) Set Skill Usage \| b\) Activate/Deactivate Bot Stop Conditions \| c\) Cancel\]') 'the three choices keep their letters'
+    Check ($m0 -match 'choices=\[a\) Talent rules -- which talents the bot may use \| b\) Stop conditions -- when it hands back \| c\) Cancel\]') 'the three choices keep their letters'
     Check ($m0 -match 'stays=true') 'selecting the status row leaves the menu open'
 
     # ----- 2: another addon on Shift+F3 ---------------------------------------
@@ -205,7 +205,7 @@ return "installed"
     $m1 = Probe 'menu' 'return kb.menu()'
     Check ($m1 -match 'status=\[Keybinds: 1 collision \(see log\)\]') 'the menu says "Keybinds: 1 collision (see log)"'
     Check ($m1 -match 'details=\[Shift\+F3: "Toggle SkooBot: Reclauded" and "Harness collider"\]') 'the row under it names the key and both actions'
-    Check ($m1 -match 'choices=\[a\) Set Skill Usage \| b\) Activate/Deactivate Bot Stop Conditions \| c\) Cancel\]') 'the choices are unchanged'
+    Check ($m1 -match 'choices=\[a\) Talent rules -- which talents the bot may use \| b\) Stop conditions -- when it hands back \| c\) Cancel\]') 'the choices are unchanged'
     if ($m1 -match 'w=(\d+) game\.w=(\d+)') { Check ([int]$Matches[1] -le [int]$Matches[2]) "the widened menu fits the screen ($($Matches[1]) <= $($Matches[2]))" }
 
     # ----- 3: the player remaps onto the base game ---------------------------

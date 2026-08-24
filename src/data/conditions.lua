@@ -23,7 +23,7 @@
 -- Two kinds of entry share the list, told apart by `default`:
 --
 --   * POLICY entries have a default of WARN, STOP or IGNORE. They are what
---     the player sees in "Activate/Deactivate Bot Stop Conditions" and what
+--     the player sees under "Stop conditions" in the SkooBot menu, and what
 --     the save keeps (code and chosen stoptype only; everything else is
 --     read from here on every access). Their order IS the menu's order and
 --     the saved list's order, and their codes and labels are the save's --

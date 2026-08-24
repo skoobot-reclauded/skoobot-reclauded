@@ -163,10 +163,20 @@ local function keybindRows()
 end
 
 function _M:generateList()
+	-- #73: named by what they do. v1's wording was "Set Skill Usage" and
+	-- "Activate/Deactivate Bot Stop Conditions" -- the first is the talent
+	-- rules screen and the second is neither activating nor deactivating
+	-- anything, it is a WARN / STOP / IGNORE choice. A player migrating from
+	-- the original also sees two menus whose rows read alike (first-run.md
+	-- section 8); these do not.
+	--
+	-- #54 added the help paragraph under the rows rather than rename them,
+	-- because the names were asserted verbatim in another lane's scenario
+	-- that night. The scenarios move with the names here.
 	local raw = {
-		{1,   name="Set Skill Usage",                           order="skillconfig"},
-		{2,   name="Activate/Deactivate Bot Stop Conditions",  order="botstopconditions"},
-		{999, name="Cancel",                                    order="donothing"},
+		{1,   name="Talent rules -- which talents the bot may use", order="skillconfig"},
+		{2,   name="Stop conditions -- when it hands back",         order="botstopconditions"},
+		{999, name="Cancel",                                        order="donothing"},
 	}
 	-- The status rows go last, so the choices keep their letters and their
 	-- positions whatever the keybind state.

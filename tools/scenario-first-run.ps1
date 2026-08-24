@@ -365,7 +365,7 @@ return ("title=[%s] rows=[%s] w=%d h=%d game=%dx%d help_has_toggle=%s help_has_m
   tostring(m.title), table.concat(rows, " | "), m.w, m.h, game.w, game.h,
   tostring(help:find(toggle, 1, true) ~= nil), tostring(help:find(menukey, 1, true) ~= nil), help)
 '@
-    Check ($menu -match 'rows=\[a\) Set Skill Usage \| b\) Activate/Deactivate Bot Stop Conditions \| c\) Cancel \| Keybinds: OK\]') 'the menu lists its three choices and the keybind status'
+    Check ($menu -match 'rows=\[a\) Talent rules -- which talents the bot may use \| b\) Stop conditions -- when it hands back \| c\) Cancel \| Keybinds: OK\]') 'the menu lists its three choices and the keybind status'
     Check ($menu -match 'help=\[How to start: ') 'the help text under the choices starts with how to start'
     Check ($menu -match 'help_has_toggle=true help_has_menu=true') 'the help text names the bound toggle and menu keys'
     Check ($menu -match 'Keys: ') 'the help text lists the keys'

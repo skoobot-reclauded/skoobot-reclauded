@@ -77,6 +77,11 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
 - **Stops are one kind of message.** Every stop is a `[SkooBot]` line in the message log in
   one colour per severity, repeated on the big-news banner, so it is not lost among combat
   lines. Messages that mention a key name the key you actually have bound (#57, #58).
+- **The menu says what its choices do** (#73). *Set Skill Usage* and *Activate/Deactivate Bot
+  Stop Conditions* — v1's wording, where the first is the talent-rules screen and the second is
+  neither activating nor deactivating anything — are now *Talent rules — which talents the bot
+  may use* and *Stop conditions — when it hands back*. With both addons installed the two menus
+  no longer read alike either.
 - **Keys.** Shift+F3 toggle, Shift+F4 stop, Shift+F5 run once, Shift+F6 ask what it would do,
   Shift+F7 menu. The original's Alt+F1 / Shift+F1 stay with the original.
 - **Talent picker fits the screen.** Long lists scroll instead of running off the top and

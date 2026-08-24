@@ -314,7 +314,7 @@ fire and a detector without an entry cannot exist.
 **Two kinds of entry share the list**, told apart by `default`:
 
 - **Policy entries** have a default of WARN / STOP / IGNORE. They are what the player sees in
-  *Activate/Deactivate Bot Stop Conditions* and what the save keeps. Their codes, labels,
+  *Stop conditions* in the SkooBot menu and what the save keeps. Their codes, labels,
   defaults and **order** were v1's thirteen, unchanged, until #77 added the fourteenth:
   `DEBUFF_*` ×5, **`TURNS_BLACKOUT`**, `LIFE_*` ×2, `DIALOG_LORE`, `TERRAIN_GLOWING_CHEST`,
   `SCOUTER_*` ×4. v1's thirteen keep their codes, labels, defaults and relative order, so a
