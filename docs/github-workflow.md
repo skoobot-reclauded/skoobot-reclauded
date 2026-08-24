@@ -397,10 +397,20 @@ with the list in hand. Worked through on **2026-08-24**; `[x]` rows were verifie
       account's token, and the original SkooBot is still untouchable (§2.1). What changes is
       exposure: anyone can now open issues and pull requests (so the templates and the `next`
       label do real work from day one); a leaked token would let someone act as the bot in
-      public, so the expiry in §7 is worth shortening rather than lengthening; and GitHub's
-      secret scanning runs on public repositories, which is a reason to confirm — not assume —
-      that no credential has ever been committed (`git log -p -S` over the whole history,
-      before the flip: once public, a leaked value is leaked whatever the history later says).
+      public; and GitHub's secret scanning runs on public repositories, which is a reason to
+      confirm — not assume — that no credential has ever been committed.
+- [x] **The credential audit is done** (2026-08-24), and it covered the tracker as well as
+      the tree. Every commit in the history was scanned for token shapes, private keys and
+      vault paths: nothing. So were all 104 issue bodies and all 215 comments — **which this
+      list had never asked for**, and which is where the only findings were: an inventory of
+      what the vault holds, a machine path, and a recorded token fingerprint. No value was
+      ever committed or posted. The five items were edited, the removed text kept in the
+      maintainer's local notes, and the residue is a tool name plus two file extensions that
+      the public `.gitignore` already carries. **The rule this leaves behind: issue bodies and
+      comments are as public as code, and anything filed from now on is written that way.**
+- [x] **The PAT expiry stays 2026-11-19.** Owner's decision, 2026-08-24: it is fine as it is.
+      Shortening it was a suggestion, not a finding — **do not re-raise it**. Rotation is
+      §1.2.1 of the maintainer's operations notes and the push scripts warn from 30 days out.
 
 ---
 
@@ -418,12 +428,23 @@ tracked in #17 and #41.
   account, configured as in §2.2 and §3, reproduces the whole setup. The mailbox is a
   separate account and is covered by the next point.
 - **The recovery material for the vault and the project mailbox is held by the maintainer
-  off-machine** — [owner to confirm where]. It is not in this repository and not on the
-  development VM alone, by design (see below).
-- **A second human admin on the org is** [owner to name]. Until that bracket is filled, the
-  org has one human, and "what if they are gone" has the answer the original had. Naming a
-  second admin is the single cheapest step in this section and the one that changes the
-  answer.
+  off-machine** — confirmed 2026-08-24. It lives in the maintainer's own personal vault,
+  under their own backups, outside this repository and outside every repository this project
+  controls. *Where* is deliberately not recorded anywhere in the project's own material: the
+  operations notes are the map of the project's vault, and the recovery material for that
+  vault must not be described by the same map. What matters here is that a single machine
+  loss does not end the bot identity or the mailbox.
+- **There will be no second org admin.** Decided by the owner, and not an open question —
+  do not re-raise it, and do not file it as a risk. **This is the honest position, stated
+  plainly:** the org has one human, so if that person stops answering, nobody can merge a
+  pull request, change a setting, or mint a token, and the project is in the position the
+  original was in. That is a cost the owner has weighed and accepted, not an oversight
+  waiting to be corrected.
+
+  What carries continuity instead is the last point in this section, and it is not nothing:
+  the repository is public and GPL-3.0, so a fork needs no one's permission and loses no
+  history. The difference from the original is that this time the code, the tests, the
+  harness and the reasoning all travel with it.
 - **The machine account can triage, once someone holds its token.** Filing, labelling,
   commenting and closing all work as the bot (§2.2), so a second admin with a fresh token can
   keep the tracker honest without touching code. Merging is a human decision; §5 does not
