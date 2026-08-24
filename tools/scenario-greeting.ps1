@@ -74,6 +74,16 @@ function gr.log(n)
   end
   return table.concat(out, " || ")
 end
+-- ToME:runDone greets the character at LOAD, before the bridge can be asked
+-- anything, so the log ALREADY carries a Ready. line before this scenario
+-- does a thing. Asking "is there a Ready. line" therefore proves nothing --
+-- it says yes when greet() is a no-op, and yes again when it greets twice.
+-- Count them, and check the difference.
+function gr.count(n)
+  local c = 0
+  for _ in gr.log(n):gmatch("Ready%.") do c = c + 1 end
+  return c
+end
 function gr.state()
   local p, b = game.player, skoobot_reclauded
   return ("rules=%d greeted=%s"):format(
@@ -104,12 +114,14 @@ for _, s in ipairs(b.rules.module.SECTIONS) do
   for i = #l, 1, -1 do l[i] = nil end
 end
 b.data(p).greeted = nil
-return gr.state()
+return ("%s before=%d"):format(gr.state(), gr.count(60))
 '@
     Check ($state -match 'rules=0 greeted=nil') 'the character has no rules and has not been greeted'
+    $before = if ($state -match 'before=(\d+)') { [int]$Matches[1] } else { -1 }
 
-    $first = Probe 'skoobot_reclauded.greet() return gr.log(6)'
-    Check ($first -match 'Ready\.') 'the greeting is written to the message log'
+    $first = Probe 'local said = skoobot_reclauded.greet() return ("said=%s now=%d :: %s"):format(tostring(said), gr.count(60), gr.log(6))'
+    Check ($first -match 'said=true') 'a character with nothing configured is greeted'
+    Check ($first -match ('now=' + ($before + 1) + '\b')) 'exactly one new line reaches the message log'
     Check ($first -match 'opens the menu') 'it says what the menu key does'
     Check ($first -match 'starts it') 'and what the toggle key does'
     Check ($first -match '\[SkooBot\]') 'it carries the addon prefix, like every other line'
@@ -120,8 +132,9 @@ return gr.state()
     Write-Host '  --- 2. the same character again: silence'
     $flag = Probe 'return gr.state()'
     Check ($flag -match 'greeted=true') 'the character is marked as greeted'
-    $second = Probe 'skoobot_reclauded.greet() return gr.log(3)'
-    Check ($second -notmatch 'Ready\.') 'a second load says nothing'
+    $second = Probe 'local said = skoobot_reclauded.greet() return ("said=%s now=%d"):format(tostring(said), gr.count(60))'
+    Check ($second -match 'said=false') 'a second load is refused'
+    Check ($second -match ('now=' + ($before + 1) + '\b')) 'a second load says nothing'
 
     # ----- 3: a configured character is never greeted -----------------------
     Write-Host ''
