@@ -465,12 +465,16 @@ public repositories.
 - **The review flow was revisited** (§5). It waits on there being an outside contributor, not on
   the repository being public — that happened and changed nothing, because the reviewer and the
   pusher are still the same person.
+- **The repository's website URL is empty, and that is the right value for now.** The flip removed
+  a dead `…/tree/master/docs` link — a docs path on a branch this repository does not have — and
+  did not replace it. The list said to set it to the README or to the same path on `main`, and
+  that advice was wrong: the field renders in exactly one place, the **About** sidebar of the repo
+  landing page, and pointing it back at a file inside the same repository sends a visitor to a
+  page they are already on. It is for a project's home *off* GitHub — a docs site, a package page,
+  a listing. The value this project eventually wants is therefore the **te4.org addon page**,
+  which does not exist until 1.0.0 (**D-14**). Blank until then, and blank costs nothing.
 
-### Still open
-
-- **The repository's website URL is empty.** The dead `…/tree/master/docs` link was removed at the
-  flip and not replaced, so this is cosmetic rather than broken — but a visitor gets no link.
-  Owner action; the bot token lacks admin. Set it to the README or to `…/tree/main/docs`.
+Nothing from the original list remains to be done.
 
 ### What the list got wrong, worth keeping
 
