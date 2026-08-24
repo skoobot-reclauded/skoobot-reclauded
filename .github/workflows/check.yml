@@ -1,12 +1,15 @@
 # Advisory checks: what tools/githooks/pre-commit does, on a machine that is
 # not the maintainer's, plus a packaging check and a tag check.
 #
-# Advisory means exactly that. While the repository is private on GitHub's free
-# plan, required status checks are not available, so this cannot block a
-# merge; and after it goes public it is not to be made blocking for
-# history-protection reasons (D-9: the owner accepted the history-rewrite risk
-# and closed the question). Whether to require these checks is a separate
-# decision taken at going-public. See docs/github-workflow.md section 6.
+# Advisory means exactly that: nothing here blocks a merge. The repository went
+# public on 2026-08-24, so required status checks became technically possible
+# that day -- and were deliberately not turned on. Two separate reasons, and
+# only the first is settled: this must never be made blocking for
+# history-protection purposes (D-9: the owner accepted the history-rewrite risk
+# and closed the question), and whether to require it for the different purpose
+# of catching a broken push is an open decision, to be taken when there is an
+# outside contributor whose work it would actually be checking.
+# See docs/github-workflow.md section 6.
 #
 # It cannot run the harness: there is no game on a runner. In-game behaviour
 # is verified by tools/scenario-*.ps1 on the maintainer's machine.
