@@ -537,7 +537,7 @@ particular creature, is not. Two exist:
 | save | what it is | why it is kept |
 |---|---|---|
 | `skirmishy` | level 5 Halfling Skirmisher, Norgos Lair 1, sling, rotation *Halfling Luck · Shoot · Flee but keep sight*, standing 10 grids from an immobile brown mold with `T_SHOOT` at range 6 | **reproduces #97** — the two-grid flee/approach oscillation. The geometry *is* the bug; a generated fixture cannot stand in the right place |
-| `shooty` | level 11 Cornac Archer, Rhaloren Camp 3, `T_HEADSHOT` and `T_SHOOT` configured | a real played ranged character, which no generated fixture is. Does **not** reproduce #97: no flee row, and it is saved on stairs |
+| `shooty` | level 11 Cornac Archer, Rhaloren Camp 3, `T_HEADSHOT` and `T_SHOOT` configured | a real played ranged character, which no generated fixture is. Does **not** reproduce #97: no flee row, and it stands one step from the stairs it hands back on |
 
 Such a save:
 
@@ -563,11 +563,17 @@ enough — verified by loading one: `Module:instanciate` takes the list from `sa
 Two saves rather than one, on purpose: the harness drives the `-bridge` copy, and the original
 stays untouched as the thing a player would load, with no development addon attached.
 
-**A save on a level change will not start.** Loading `shooty` and activating the bot hands
-back immediately with *standing on a level change* — that character was saved on stairs. The
-entrance exemption (#62) is granted to the tile a character **arrives** on, and a load is not
-an arrival, so a save made on stairs has no exemption to inherit. Worth knowing before
-concluding that a fixture reproduces nothing: step off first.
+**A save near a level change hands back almost at once, and that is correct.** Loading
+`shooty` and activating the bot hands back on the second decision with *standing on a level
+change*. It is not a defect and the exemption is not broken: that character is saved on
+**floor** at 44,22, with the stairs one step east at 45,22. The bot auto-explored the one
+step and stopped on the stairs — exactly what #62 describes, since auto-explore itself stops
+there and a level change is only ever the player's decision.
+
+Worth stating because it looks like a defect from the outside, and was briefly recorded here
+as one: a fixture that hands back immediately is not evidence of anything until the tile it
+stopped on has been checked. `game.level.map:checkEntity(x, y, engine.Map.TERRAIN,
+"change_level")` on the start tile and its eight neighbours settles it in one probe.
 
 **One JSON line per run, under `build/results/`.** `run-scenarios.ps1` runs every
 `tools/scenario-*.ps1` as its own `powershell -ExecutionPolicy Bypass -File` child, under one
