@@ -17,7 +17,16 @@
 # The Lua tree is built with hererocks into $HOME, deliberately OUTSIDE the
 # workspace: `luacheck .` descends into dot-directories (verified on 1.2.0),
 # so a .lua/ or .luarocks/ tree in the checkout would be linted along with
-# the addon. Versions are pinned to the ones the repo is written against.
+# the addon.
+#
+# EVERY tool here is pinned, including the interpreters -- which they were not
+# until #107. `--luajit 2.1` and `--luajit 2.0` each build the HEAD of a
+# rolling branch, so the most important tool in the job was the one thing in it
+# that could change between two runs of the same commit. That is not
+# hypothetical: run 3 went red on unchanged code because a newer 2.1 rolling
+# build compiles `return 1 & 3`, which the build the maintainer had locally
+# rejects. Both are now pinned to a commit, recorded below with the date they
+# were known good, so a red run means the code changed.
 
 name: check
 
@@ -28,6 +37,25 @@ on:
 
 permissions:
   contents: read
+
+# The pinned interpreters (#107). Bump deliberately: change the SHA, let the
+# run go green, and say in the commit message what moved and why.
+#
+# LUAJIT21_COMMIT is the development dialect -- what the maintainer's machine
+# runs and what luacheck is configured against.
+#
+# LUAJIT20_COMMIT is the game's. Worth being exact about what it is and is not:
+# ToME 1.7.6 ships LuaJIT **2.0.2**, and this is the head of the v2.0 branch,
+# which is 2.0.5 plus build fixes. Pinning to 2.0.2 itself was not chosen --
+# a 2013 release does not build on a current runner (GCC 10 made -fno-common
+# the default, which 2.0.x predates) -- and the gap does not matter for what
+# this job tests: 2.0.2 and 2.0.5 are the same Lua 5.1 parser, and the 2.1-only
+# library surface (table.new, table.clear, the string buffer) is absent from
+# both. If that ever stops being true, this comment is the thing that was
+# wrong.
+env:
+  LUAJIT21_COMMIT: 1ee778a4e37122d8ca7d5733c590a47dafd6b15c  # v2.1, green 2026-08-24
+  LUAJIT20_COMMIT: 71797fa75ffa1ddbd9b41bbd55d6c2d4236164b0  # v2.0, green 2026-08-24
 
 concurrency:
   group: check-${{ github.ref }}
@@ -55,13 +83,18 @@ jobs:
       - name: Install LuaJIT 2.1 and luarocks (outside the workspace)
         # hererocks is a single dependency-free Python script; fetching it
         # directly avoids pip's externally-managed-environment refusal on a
-        # system Python. It builds LuaJIT from the v2.1 branch and installs a
+        # system Python. It builds LuaJIT from the pinned commit and installs a
         # luarocks configured for that tree, so C rocks (luafilesystem,
         # luasystem, lua-term) find the right headers.
+        #
+        # `@<sha>` is hererocks' git-ref form. Plain `2.1` is the rolling branch
+        # head and is what #107 was filed about.
         run: |
+          echo "LuaJIT 2.1 pinned to $LUAJIT21_COMMIT"
           curl -fsSL -o "$HOME/hererocks.py" \
             https://raw.githubusercontent.com/luarocks/hererocks/master/hererocks.py
-          python3 "$HOME/hererocks.py" "$HOME/lua" --luajit 2.1 --luarocks latest
+          python3 "$HOME/hererocks.py" "$HOME/lua" \
+            --luajit "@$LUAJIT21_COMMIT" --luarocks latest
           # hererocks normalises the interpreter to bin/lua whatever the
           # implementation, and this repository asks for it by the name
           # `luajit`: the parse steps below, and -- the one that actually bites
@@ -179,16 +212,19 @@ jobs:
 
       - name: Install LuaJIT 2.0 and luarocks (outside the workspace)
         run: |
+          echo "LuaJIT 2.0 pinned to $LUAJIT20_COMMIT"
           curl -fsSL -o "$HOME/hererocks.py" \
             https://raw.githubusercontent.com/luarocks/hererocks/master/hererocks.py
-          python3 "$HOME/hererocks.py" "$HOME/lua20" --luajit 2.0 --luarocks latest
+          python3 "$HOME/hererocks.py" "$HOME/lua20" \
+            --luajit "@$LUAJIT20_COMMIT" --luarocks latest
           # Same naming point as the job above: .busted asks for `luajit`.
           ln -sf "$HOME/lua20/bin/lua" "$HOME/lua20/bin/luajit"
           # This job exists ONLY to run under the interpreter the game ships, so
           # the version is the thing being tested and must not be taken on
           # trust. A silent fall back to 2.1 here would make the job report
           # success while proving nothing -- the exact failure it was built to
-          # catch (#63).
+          # catch (#63). The check is on the SERIES, which cannot tell one 2.0
+          # build from another; the pin above is what makes it a fixed one.
           "$HOME/lua20/bin/luajit" -v | grep -q '^LuaJIT 2\.0' || {
             echo "::error::$HOME/lua20/bin/lua is not LuaJIT 2.0"
             "$HOME/lua20/bin/luajit" -v; exit 1; }
