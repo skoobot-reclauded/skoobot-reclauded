@@ -157,7 +157,14 @@ whether the Combat section is empty or merely on cooldown, and the message hedge
 (*none configured, or all on cooldown*). A new character should read *no Combat talent is
 configured*; a mid-fight player should read *every Combat talent is on cooldown*.
 
-**Findings.** F4 (should, `Player.lua` the cooldown site) — filed with the stop-text issue, §11.
+**Changed since (#71).** It does now. A character with no Combat row at all reads *Cannot act:
+no Combat talent is configured*, with the same hint; rows that exist and could not be used this
+turn read *no Combat talent is ready -- every one is on cooldown or unusable*; the two holding
+cases (#75) are unchanged. What is counted is configured ROWS, not resolved talents, so a rule
+naming a talent this character does not have is not reported as nothing configured.
+
+**Findings.** F4 (should, `Player.lua` the cooldown site) — filed with the stop-text issue, §11,
+and fixed there (#71).
 
 ## 4. The menu
 
@@ -286,12 +293,20 @@ never stops), and the second dialog names the condition by its label.
 **The labels are still codes in capitals**: *Life: BIGLOSS*, *Power Level: STRONGERENEMY*,
 *Dialog: LORE*. A player cannot tell BIGENEMY from STRONGERENEMY from CROWDPOWER without the
 options tab, which since this branch explains them — under different names. The labels live in
-`DEFAULT_CONDITIONS` (`Player.lua`); `stopListIsCurrent` compares labels, so a rename
-reconciles a saved list on first load with the player's choices kept, which is exactly what the
-#52 reconcile is for.
+`M.LIST` (`src/data/conditions.lua`, where #12 moved them from v1's `DEFAULT_CONDITIONS`);
+`conditions.isCurrent` compares labels, so a rename reconciles a saved list on first load with
+the player's choices kept, which is exactly what the #52 reconcile is for.
+
+**Changed since (#71).** They are words: *Stunned*, *Confused*, *Dazed*, *Frozen*, *Asleep*,
+*Turns lost while unable to act*, *Big life loss in one turn*, *Low life with enemies in view*,
+*A lore dialog opened*, *Glowing chest in view*, *Too many enemies in view*, *An enemy above
+Maximum Enemy Power*, *An enemy too far above your power*, *Enemies together too far above your
+power* — the last three naming the options-tab titles they are compared against. The reconcile
+did what it is for: a saved list takes the new labels on first load and every WARN / STOP /
+IGNORE choice survives.
 
 **Findings.** F8 (should, `Player.lua` `DEFAULT_CONDITIONS`) — filed with the stop-text
-issue, §11. F9 (done, `Menu.lua`) — the policy wording.
+issue, §11, and fixed there (#71). F9 (done, `Menu.lua`) — the policy wording.
 
 ## 7. The options tab
 
@@ -361,6 +376,7 @@ skoobot_devbridge, skoobot_reclauded`).
   (`Shift+F6`) says *"[SkooBot] Cannot act: no Combat talent is ready -- none configured, or
   all on cooldown (set talent usage in the SkooBot: Reclauded menu, Shift+F7, or let the bot
   suggest a loadout from the talent screen)"* — the live key. Both leave both bots inactive.
+  Since #71 this addon's half reads *no Combat talent is configured*, with the same hint.
 - **No shared state.** `v1: ai_active=nil skoobot_start=true | ours: table=true active=false |
   v1 fields on player: autotalents=false stopconditions=false | ours: false` — nothing written
   on the player by either until it is configured; the original's settings live under
@@ -411,14 +427,16 @@ Stopped: 13 enemies in sight, above MAX_ENEMY_COUNT (restart with Shift+F3)
 Stopped: lost more than 25% of max life in one turn (half of LOWHEALTH_RATIO) (restart with Shift+F3)
 ```
 
-Proposed rewrites, naming the option's title and the number compared:
+**Changed since (#71).** They name the option's title as the tab shows it, and the number
+compared against. The life stops print the ratio itself rather than *half of maximum*, so the
+wording holds at any setting; the power levels are whole since #84:
 
 ```
-Stopped: life is below half of maximum (Low Health Ratio 0.5)
+Stopped: life is below 0.5 of maximum (Low Health Ratio)
 Stopped: took damage while exploring with life below 0.9 of maximum (Ignore Damage Above Life Ratio)
 Stopped: an enemy's power level, 52, is above 200 (Maximum Enemy Power)
-Stopped: an enemy's power level, 52, is more than 10 above yours, 31.2 at current life (Maximum Enemy Power Above Yours)
-Stopped: the enemies in view add up to 140, more than 500 above yours, 31.2 at current life (Maximum Combined Enemy Power)
+Stopped: an enemy's power level, 52, is more than 10 above yours, 31 at current life (Maximum Enemy Power Above Yours)
+Stopped: the enemies in view add up to 140, more than 500 above yours, 31 at current life (Maximum Combined Enemy Power)
 Stopped: 13 enemies in sight, more than 12 (Maximum Enemy Count)
 Stopped: lost more than 25% of maximum life in one turn (half of Low Health Ratio)
 ```
@@ -457,8 +475,8 @@ each, under the game lease; none tainted.
 | F10 | should | `src/hooks/load.lua` (wording) | two power titles read backwards; "power level" unexplained; combined power no longer a margin; shouting | **fixed** |
 | F6 | should | `Menu.lua` | the menu named no key and gave no way in | **fixed** (help paragraph) |
 | F9 | should | `Menu.lua` | WARN / STOP / IGNORE unexplained; condition shown by code | **fixed** |
-| F13, F4, F8 | should | `Player.lua` | stop texts in setting keys; cooldown text hedges; condition labels are codes | issue filed |
-| F3 | should | `src/hooks/load.lua` `ToME:runDone` | nothing visible at load on a fresh character | issue filed |
+| F13, F4, F8 | should | `Player.lua` | stop texts in setting keys; cooldown text hedges; condition labels are codes | **fixed** (#71) |
+| F3 | should | `src/hooks/load.lua` `ToME:runDone` | nothing visible at load on a fresh character | **fixed** (#72) |
 | F5 | should | `Menu.lua` + `scenario-keybinds.ps1` | *Set Skill Usage* / *Activate/Deactivate…* | **fixed** (#73) |
 | F11 | should | `src/hooks/load.lua` (ranges) | every option prompts *From 0 to 1000000* | **fixed** (#74) |
 | F2 | note | engine | the Addons list shows no description | nothing to do |

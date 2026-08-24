@@ -89,11 +89,21 @@ M.HANDED_BACK = "handed_back"
 --   ctx.chestInView  function(p) -> is an unopened glowing chest in view
 --   ctx.delta        life change this turn (SITE_LOOP only)
 --   ctx.turnsLost    whole turns the character never got (#77)
+--   ctx.title        function(key) -> the option's title in the options tab
 
 --- A status attribute as the counter it is: 0 when absent.
 local function counter(p, name)
     local v = p:attr(name)
     return type(v) == "number" and v or 0
+end
+
+--- The option's title as the [SkooBot: Reclauded] tab shows it (#71), for a
+--- message the player reads cold. The act loop puts data/cfg.lua's map on
+--- the context; a caller that does not -- a unit test, a probe -- gets the
+--- key back, which reads worse but never errors.
+local function title(ctx, name)
+    local t = ctx and ctx.title
+    return (t and t(name)) or name
 end
 
 --- A power condition: a STOP policy entry whose detector and message are
@@ -116,14 +126,14 @@ M.LIST = {
     -- here: they are the model-validity boundary, a stop because the threat
     -- estimate cannot be trusted while they hold (design 2.1). Not demoted
     -- to score inputs (the body's retraction).
-    { code = "DEBUFF_STUNNED", label = "Debuff: STUNNED", default = "WARN",
+    { code = "DEBUFF_STUNNED", label = "Stunned", default = "WARN",
       category = "debuff", site = M.SITE_TURN, blocks = {},
       detect = function(p) return counter(p, "stunned") > 0 end,
       message = function(p)
           local n = counter(p, "stunned")
           return "you are stunned" .. (n > 1 and (" (x" .. n .. ")") or "")
       end },
-    { code = "DEBUFF_CONFUSED", label = "Debuff: CONFUSED", default = "WARN",
+    { code = "DEBUFF_CONFUSED", label = "Confused", default = "WARN",
       category = "debuff", site = M.SITE_TURN, blocks = {},
       -- The value is the chance, 0-50, that a move or a talent goes astray
       -- and loses the turn (Actor.lua:1395, :5953). v1 tested `== 1`, so
@@ -137,11 +147,11 @@ M.LIST = {
     -- never_move, no healing, talents only reach the ice) and FROZEN_FEET
     -- (a pin). Both set `frozen` and never_move; only the first encases,
     -- which the ENCASED liveness entry below reads separately.
-    { code = "DEBUFF_DAZED", label = "Debuff: DAZED", default = "WARN",
+    { code = "DEBUFF_DAZED", label = "Dazed", default = "WARN",
       category = "debuff", site = M.SITE_TURN, blocks = { move = true }, blocked = "dazed",
       detect = function(p) return counter(p, "dazed") > 0 end,
       message = "you are dazed" },
-    { code = "DEBUFF_FROZEN", label = "Debuff: FROZEN", default = "WARN",
+    { code = "DEBUFF_FROZEN", label = "Frozen", default = "WARN",
       category = "debuff", site = M.SITE_TURN, blocks = { move = true }, blocked = "frozen",
       detect = function(p) return counter(p, "frozen") > 0 end,
       message = "you are frozen" },
@@ -152,7 +162,7 @@ M.LIST = {
     -- so the stop never fired (T-012). A Solipsist with Lucid Dreamer up is
     -- not asleep by this test at all; one who wants sleep left alone sets
     -- the condition to IGNORE.
-    { code = "DEBUFF_ASLEEP", label = "Debuff: ASLEEP", default = "WARN",
+    { code = "DEBUFF_ASLEEP", label = "Asleep", default = "WARN",
       category = "debuff", site = M.SITE_TURN, blocks = { move = true, act = true }, blocked = "asleep",
       detect = function(p) return (p:attr("sleep") and not p:attr("lucid_dreamer")) and true or false end,
       message = "you are asleep" },
@@ -173,7 +183,7 @@ M.LIST = {
     --
     -- WARN by default -- it is news, not danger, and the thing that caused
     -- it is over by the time this fires.
-    { code = "TURNS_BLACKOUT", label = "Turns: BLACKOUT", default = "WARN",
+    { code = "TURNS_BLACKOUT", label = "Turns lost while unable to act", default = "WARN",
       category = "turns", site = M.SITE_TURN, blocks = {}, severity = M.HANDED_BACK,
       detect = function(_, ctx) return (ctx.turnsLost or 0) >= M.BLACKOUT_TURNS end,
       message = function(_, ctx)
@@ -183,32 +193,35 @@ M.LIST = {
 
     -- Life. BIGLOSS is read where the life delta is computed, once per real
     -- turn; LOWLIFE only while something hostile is in view, as v1 had it.
-    { code = "LIFE_BIGLOSS", label = "Life: BIGLOSS", default = "WARN",
+    { code = "LIFE_BIGLOSS", label = "Big life loss in one turn", default = "WARN",
       category = "life", site = M.SITE_LOOP, blocks = {},
       detect = function(p, ctx)
           return ctx.delta < 0 and math.abs(ctx.delta) / p.max_life >= ctx.cfg("LOWHEALTH_RATIO") / 2
       end,
       message = function(_, ctx)
-          return "lost more than " .. math.floor(100 * ctx.cfg("LOWHEALTH_RATIO") / 2)
-              .. "% of max life in one turn (half of LOWHEALTH_RATIO)"
+          return ("lost more than %d%% of maximum life in one turn (half of %s)")
+              :format(math.floor(100 * ctx.cfg("LOWHEALTH_RATIO") / 2), title(ctx, "LOWHEALTH_RATIO"))
       end },
-    { code = "LIFE_LOWLIFE", label = "Life: LOWLIFE", default = "STOP",
+    { code = "LIFE_LOWLIFE", label = "Low life with enemies in view", default = "STOP",
       category = "life", site = M.SITE_TURN, blocks = {},
       detect = function(p, ctx)
           return ctx.hostiles > 0 and p.life < p.max_life * ctx.cfg("LOWHEALTH_RATIO")
       end,
-      message = "life is below LOWHEALTH_RATIO" },
+      message = function(_, ctx)
+          return ("life is below %s of maximum (%s)")
+              :format(tostring(ctx.cfg("LOWHEALTH_RATIO")), title(ctx, "LOWHEALTH_RATIO"))
+      end },
 
     -- A lore popup is not a state of the character: the act loop reads the
     -- dialog stack itself and consults this entry's policy by code (IGNORE
     -- closes the popup and carries on). No detector, on purpose.
-    { code = "DIALOG_LORE", label = "Dialog: LORE", default = "IGNORE",
+    { code = "DIALOG_LORE", label = "A lore dialog opened", default = "IGNORE",
       category = "dialog", site = M.SITE_DIALOG, blocks = {} },
 
     -- Hands back (not a stop) while exploring, once per chest: the player
     -- decides whether to open it, since they can be guarded (T-013). Walking
     -- TO the chest is #11's, deliberately not here.
-    { code = "TERRAIN_GLOWING_CHEST", label = "Terrain: Glowing Chest", default = "WARN",
+    { code = "TERRAIN_GLOWING_CHEST", label = "Glowing chest in view", default = "WARN",
       category = "terrain", site = M.SITE_EXPLORE, blocks = {}, severity = M.HANDED_BACK,
       detect = function(p, ctx) return ctx.chestInView(p) and true or false end,
       message = "a glowing chest is nearby -- open it yourself, they can be guarded" },
@@ -228,10 +241,10 @@ M.LIST = {
     -- the character's own (life-scaled) power by that much. The default
     -- stays 500, so the setting's meaning changed under it: it is the
     -- margin above yours.
-    scored("SCOUTER_ENEMYCOUNT",    "Power Level: ENEMYCOUNT"),
-    scored("SCOUTER_BIGENEMY",      "Power Level: BIGENEMY"),
-    scored("SCOUTER_STRONGERENEMY", "Power Level: STRONGERENEMY"),
-    scored("SCOUTER_CROWDPOWER",    "Power Level: CROWDPOWER"),
+    scored("SCOUTER_ENEMYCOUNT",    "Too many enemies in view"),
+    scored("SCOUTER_BIGENEMY",      "An enemy above Maximum Enemy Power"),
+    scored("SCOUTER_STRONGERENEMY", "An enemy too far above your power"),
+    scored("SCOUTER_CROWDPOWER",    "Enemies together too far above your power"),
 
     -- Liveness: no default, so never in the menu or the save. `generic`
     -- marks the catch-all whose name is used only when no named condition

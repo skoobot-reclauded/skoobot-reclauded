@@ -283,23 +283,23 @@ return "installed"
     $c1 = Probe "return sp.probe({ MAX_COMBINED_POWER = $(N $Mc), MAX_DIFF_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000 })" 60
     Write-Host "  weighted   $($c1.Result)"
     if ($c1.Result -match '^SETUP') { Inconclusive "crowd weighted: $($c1.Result)" }
-    Check ($c1.Result -notmatch 'MAX_COMBINED_POWER') 'with the rank weights, the bot does NOT stop for the crowd'
+    Check ($c1.Result -notmatch 'Maximum Combined Enemy Power') 'with the rank weights, the bot does NOT stop for the crowd'
     Check ($c1.Result -match 'dturn=0') 'query advances no game turn'
     $c2 = Probe "return sp.probe({ MAX_COMBINED_POWER = $(N $Mc), MAX_DIFF_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000, NORMAL_POWER_RATIO = 1 })" 60
     Write-Host "  unweighted $($c2.Result)"
     if ($c2.Result -match '^SETUP') { Inconclusive "crowd unweighted: $($c2.Result)" }
-    Check ($c2.Result -match 'MAX_COMBINED_POWER above yours') 'with NORMAL_POWER_RATIO at 1 (v1''s arithmetic) the same crowd stops the bot -- so the weight is what lets it through'
+    Check ($c2.Result -match '\(Maximum Combined Enemy Power\)') 'with NORMAL_POWER_RATIO at 1 (v1''s arithmetic) the same crowd stops the bot -- so the weight is what lets it through'
     Check ($c2.Result -match 'at current life') 'the crowd reason names the life-scaled own power it was compared with'
-    if ($c2.Result -match 'the combined enemy power level, ([\d.]+), is more than') { Check ([math]::Abs([double]$Matches[1] - $sumR) -lt 1) "the reason carries the unweighted sum ($($Matches[1]) ~ $([math]::Round($sumR, 1)))" }
+    if ($c2.Result -match 'the enemies in view add up to ([\d.]+), more than') { Check ([math]::Abs([double]$Matches[1] - $sumR) -lt 1) "the reason carries the unweighted sum ($($Matches[1]) ~ $([math]::Round($sumR, 1)))" }
     # A stop clears the loop scratch, so the weighted sum is observed by
     # forcing the crowd stop with a zero margin and reading the bot's figure.
     $c3 = Probe "return sp.probe({ MAX_COMBINED_POWER = 0, MAX_DIFF_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000 })" 60
     Write-Host "  zero-margin $($c3.Result)"
     if ($c3.Result -match '^SETUP') { Inconclusive "crowd zero margin: $($c3.Result)" }
-    if ($c3.Result -match 'the combined enemy power level, ([\d.]+), is more than') { Check ([math]::Abs([double]$Matches[1] - $sumW) -lt 1) "the bot's own crowd figure is the weighted sum ($($Matches[1]) ~ $([math]::Round($sumW, 1)) = 0.4 x $([math]::Round($sumR, 1)))" }
+    if ($c3.Result -match 'the enemies in view add up to ([\d.]+), more than') { Check ([math]::Abs([double]$Matches[1] - $sumW) -lt 1) "the bot's own crowd figure is the weighted sum ($($Matches[1]) ~ $([math]::Round($sumW, 1)) = 0.4 x $([math]::Round($sumR, 1)))" }
     else { Check $false 'with a zero margin the crowd stop fires and reports the weighted sum' }
-    if ($c3.Result -match 'yours \(([\d.]+) at current life\)' -and $c3.Result -match 'mine_expected=([\d.]+)') {
-        $got = [double]($c3.Result -replace '.*yours \(([\d.]+) at current life\).*', '$1'); $exp = [double]($c3.Result -replace '.*mine_expected=([\d.]+).*', '$1')
+    if ($c3.Result -match 'above yours, ([\d.]+) at current life' -and $c3.Result -match 'mine_expected=([\d.]+)') {
+        $got = [double]($c3.Result -replace '.*above yours, ([\d.]+) at current life.*', '$1'); $exp = [double]($c3.Result -replace '.*mine_expected=([\d.]+).*', '$1')
         # 0.51, not 0.15: the reason prints power levels WHOLE since #84, so
         # the figure read back can be up to half a point from the exact one.
         # The comparison the bot made is still on the exact value -- only the
@@ -316,11 +316,11 @@ return "installed"
     $s1 = Probe "return sp.probe({ MAX_DIFF_POWER = $(N $Md), MAX_COMBINED_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000 })" 60
     Write-Host "  weighted   $($s1.Result)"
     if ($s1.Result -match '^SETUP') { Inconclusive "strongest weighted: $($s1.Result)" }
-    Check ($s1.Result -notmatch 'MAX_DIFF_POWER') 'with the rank weights, the bot does NOT stop for the strongest common'
+    Check ($s1.Result -notmatch 'Maximum Enemy Power Above Yours') 'with the rank weights, the bot does NOT stop for the strongest common'
     $s2 = Probe "return sp.probe({ MAX_DIFF_POWER = $(N $Md), MAX_COMBINED_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000, NORMAL_POWER_RATIO = 1 })" 60
     Write-Host "  unweighted $($s2.Result)"
     if ($s2.Result -match '^SETUP') { Inconclusive "strongest unweighted: $($s2.Result)" }
-    Check ($s2.Result -match 'MAX_DIFF_POWER above yours') 'with NORMAL_POWER_RATIO at 1 the same common stops the bot'
+    Check ($s2.Result -match '\(Maximum Enemy Power Above Yours\)') 'with NORMAL_POWER_RATIO at 1 the same common stops the bot'
 
     # ----- item 2: boss -- the rank band decides the weight -------------------
     Write-Host ''
@@ -330,15 +330,15 @@ return "installed"
     $b2 = Probe "return sp.probe({ MAX_INDIVIDUAL_POWER = $(N $Mi), MAX_DIFF_POWER = 1000000, MAX_COMBINED_POWER = 1000000, ranks = { 2, 2, 2 } })" 60
     Write-Host "  rank 2     $($b2.Result)"
     if ($b2.Result -match '^SETUP') { Inconclusive "boss control: $($b2.Result)" }
-    Check ($b2.Result -notmatch 'MAX_INDIVIDUAL_POWER') 'rank 2 (normal, x0.4): no stop'
+    Check ($b2.Result -notmatch '\(Maximum Enemy Power\)') 'rank 2 (normal, x0.4): no stop'
     $b3 = Probe "return sp.probe({ MAX_INDIVIDUAL_POWER = $(N $Mi), MAX_DIFF_POWER = 1000000, MAX_COMBINED_POWER = 1000000, ranks = { 3.5, 2, 2 } })" 60
     Write-Host "  rank 3.5   $($b3.Result)"
     if ($b3.Result -match '^SETUP') { Inconclusive "unique: $($b3.Result)" }
-    Check ($b3.Result -notmatch 'MAX_INDIVIDUAL_POWER') 'rank 3.5 (unique, x1): no stop -- face value is under 1.2x'
+    Check ($b3.Result -notmatch '\(Maximum Enemy Power\)') 'rank 3.5 (unique, x1): no stop -- face value is under 1.2x'
     $b4 = Probe "return sp.probe({ MAX_INDIVIDUAL_POWER = $(N $Mi), MAX_DIFF_POWER = 1000000, MAX_COMBINED_POWER = 1000000, ranks = { 4, 2, 2 } })" 60
     Write-Host "  rank 4     $($b4.Result)"
     if ($b4.Result -match '^SETUP') { Inconclusive "boss: $($b4.Result)" }
-    Check ($b4.Result -match 'above MAX_INDIVIDUAL_POWER') 'rank 4 (boss, x2): the bot stops'
+    Check ($b4.Result -match '\(Maximum Enemy Power\)') 'rank 4 (boss, x2): the bot stops'
     # The stop clears the loop scratch, so the figure is read from the reason.
     if ($b4.Result -match "an enemy's power level, ([\d.]+), is above") { Check ([math]::Abs([double]$Matches[1] - $boss * $r1) -lt 1) "the reason carries the boss-weighted figure ($($Matches[1]) ~ $([math]::Round($boss * $r1, 1)))" }
 
@@ -354,14 +354,14 @@ return "installed"
     $l1 = Probe "return sp.probe({ MAX_DIFF_POWER = $(N $Ml), MAX_COMBINED_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000 })" 60
     Write-Host "  full life  $($l1.Result)"
     if ($l1.Result -match '^SETUP') { Inconclusive "life full: $($l1.Result)" }
-    Check ($l1.Result -notmatch 'MAX_DIFF_POWER') 'at full life the bot does NOT stop'
+    Check ($l1.Result -notmatch 'Maximum Enemy Power Above Yours') 'at full life the bot does NOT stop'
     $l2 = Probe "return sp.probe({ MAX_DIFF_POWER = $(N $Ml), MAX_COMBINED_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000, life = 0.4 })" 60
     Write-Host "  40% life   $($l2.Result)"
     if ($l2.Result -match '^SETUP') { Inconclusive "life 40%: $($l2.Result)" }
-    Check ($l2.Result -match 'MAX_DIFF_POWER above yours') 'at 40% life the same enemy stops the bot -- own power is scaled by life'
+    Check ($l2.Result -match '\(Maximum Enemy Power Above Yours\)') 'at 40% life the same enemy stops the bot -- own power is scaled by life'
     Check ($l2.Result -match 'at current life') 'the reason says the figure is at current life'
-    if ($l2.Result -match 'yours \(([\d.]+) at current life\)' -and $l2.Result -match 'mine_expected=([\d.]+)') {
-        $got = [double]($l2.Result -replace '.*yours \(([\d.]+) at current life\).*', '$1'); $exp = [double]($l2.Result -replace '.*mine_expected=([\d.]+).*', '$1')
+    if ($l2.Result -match 'above yours, ([\d.]+) at current life' -and $l2.Result -match 'mine_expected=([\d.]+)') {
+        $got = [double]($l2.Result -replace '.*above yours, ([\d.]+) at current life.*', '$1'); $exp = [double]($l2.Result -replace '.*mine_expected=([\d.]+).*', '$1')
         Check ([math]::Abs($got - $exp) -lt 0.51) "the own power the bot compared with is power x life/max_life at 40% life ($got ~ $exp)"
     } else { Check $false 'the 40%-life reason carries the own-power figure' }
     Check ($l2.Result -match 'dturn=0') 'query advances no game turn'

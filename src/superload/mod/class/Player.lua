@@ -1533,6 +1533,9 @@ function conditionContext(p, hostiles)
     local ctx = {
         hostiles    = #hostiles,
         cfg         = cfg,
+        -- #71: the option titles, so a message can name the knob the way
+        -- the options tab does rather than by its key.
+        title       = cfgfmt.title,
         chestInView = glowingChestInView,
         -- #77: whole turns the character never got, counted by the act
         -- wrapper against the engine's own clock rather than the bot's
@@ -2088,22 +2091,31 @@ function skoobot_act(noAction)
             -- blank rotation, so the hint names the way out of THAT -- and
             -- only then: pointing a player with a full rotation at the
             -- loadout suggestion because their talents are held is noise.
+            -- #71: "none configured, or all on cooldown" handed the player
+            -- an either/or the code had already resolved. A character with
+            -- no Combat row at all has configured nothing -- the fresh-
+            -- character case the hint is for -- and any other empty rotation
+            -- is rows that exist and could not be used this turn. Rows, not
+            -- #rotation: a row naming a talent this character does not have
+            -- resolves to nothing, and that is not "nothing configured".
+            local rows = #getRules(game.player).Combat
             local configured = #rotation + heldCount
-            local why
-            if heldCount == 0 then
-                why = "none configured, or all on cooldown"
-            elseif heldCount == configured then
-                why = ("every one is held while impaired (%d)"):format(heldCount)
-            else
-                why = ("%d held while impaired, the rest on cooldown or unusable"):format(heldCount)
-            end
-            local extra = nil
-            if configured == 0 then
+            local text, extra
+            if rows == 0 then
+                text = "no Combat talent is configured"
                 extra = { hint = "set talent usage in the SkooBot: Reclauded menu, "
                     .. bot.keyFor("MENU_SKOOBOT_RECLAUDED")
                     .. ", or let the bot suggest a loadout from the talent screen" }
+            elseif heldCount == 0 then
+                text = "no Combat talent is ready -- every one is on cooldown or unusable"
+            elseif heldCount == configured then
+                text = ("no Combat talent is ready -- every one is held while impaired (%d)")
+                    :format(heldCount)
+            else
+                text = ("no Combat talent is ready -- %d held while impaired, "
+                    .. "the rest on cooldown or unusable"):format(heldCount)
             end
-            return stop(notice.CANNOT_ACT, "no Combat talent is ready -- " .. why, extra)
+            return stop(notice.CANNOT_ACT, text, extra)
         end
     end
 end

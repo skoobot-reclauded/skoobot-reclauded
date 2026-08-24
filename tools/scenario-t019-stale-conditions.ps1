@@ -157,7 +157,7 @@ return "installed"
     Check ($after -match 'chest=WARN')               'the added condition is present with its default'
     Check ($after -match 'lowlife=IGNORE')           'the user''s own setting survived'
     Check ($after -match 'retired=false')            'a retired code was dropped'
-    Check ($after -match 'stunned_label=Debuff: STUNNED') 'labels were refreshed'
+    Check ($after -match 'stunned_label=Stunned') 'labels were refreshed'
 
     Write-Host ''
     Write-Host '  --- an unknown code fails closed'

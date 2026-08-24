@@ -17,7 +17,7 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   `skoobot_reclauded`. It can be installed alongside the original SkooBot: its settings, its
   keys and its menus are its own, and neither addon reads the other's.
 - **Glowing chests**: the bot hands back while an unopened glowing chest is in view, so you
-  decide whether to open one. A new stop condition, *Terrain: Glowing Chest*, default WARN; set
+  decide whether to open one. A new stop condition, *Glowing chest in view*, default WARN; set
   it to IGNORE to walk past as 0.0.12 did (#8).
 - **Ignore scratches while exploring**: a new option, *Ignore Damage Above Life Ratio* (default
   0.9). Damage taken while exploring hands back only once life has fallen below it; a single
@@ -30,8 +30,8 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   game's own talent data -- which talents attack, heal, defend, or are kept up -- and shows it
   with a reason per row before anything is written. *Merge* adds what is new and keeps every row
   you placed yourself; *Replace* clears the list first and asks. Mutually exclusive sustains (the
-  chants, the hymns) are left for you to pick. The "no Combat talent is ready" stop points at
-  it (#18).
+  chants, the hymns) are left for you to pick. The "no Combat talent is configured" stop
+  points at it (#18).
 - **Keybind collisions are reported, never fixed for you**: if another addon or the base game
   has an action on one of SkooBot: Reclauded's keys, one `[SkooBot]` line says which two
   actions share it and points at Escape > Key Bindings, and the menu shows *Keybinds: N
@@ -82,6 +82,17 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   neither activating nor deactivating anything — are now *Talent rules — which talents the bot
   may use* and *Stop conditions — when it hands back*. With both addons installed the two menus
   no longer read alike either.
+- **The stop reasons and the condition list are in words, not setting keys** (#71). A stop that
+  read *an enemy's power level, 52, is above MAX_INDIVIDUAL_POWER* named something you could
+  not find anywhere on screen. It now names the option as the tab titles it, and the figure it
+  compared against: *an enemy's power level, 52, is above 200 (Maximum Enemy Power)*. Likewise
+  *life is below 0.5 of maximum (Low Health Ratio)*, and the crowd and count stops. The stop
+  conditions themselves are worded too -- *Big life loss in one turn* rather than *Life:
+  BIGLOSS*, *An enemy too far above your power* rather than *Power Level: STRONGERENEMY* -- and
+  your WARN / STOP / IGNORE choices carry over untouched, because the list is matched by code.
+  The dead-end stop no longer hedges either: a fresh character reads *no Combat talent is
+  configured* and a character mid-fight reads *every one is on cooldown or unusable*, instead
+  of being handed both and left to guess.
 - **Power levels read as whole numbers** (#84). *"an enemy's power level, 1080.1, is more than…"*
   claimed a precision the figure does not have — it is a rough sum over a creature's life,
   damage, crits, speed, defence, stats and weapons. Every power level you see is rounded now:
@@ -154,7 +165,7 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   you would be *asked* about — sealed doors, locked doors, loose rocks — as somewhere it may
   not route through or flee into. You can still walk into one yourself, and it still hands back
   when the prompt opens, because the vault is your decision.
-- **A new stop condition: *Turns: BLACKOUT*** (#77, default WARN). Paralysis, stoning and time
+- **A new stop condition: *Turns lost while unable to act*** (#77, default WARN). Paralysis, stoning and time
   stuns take turns away without the bot ever getting one — it cannot notice while it is
   happening, because the game never asks it what to do. On the first turn it gets back it now
   says *lost N turns while unable to act*, so a fight that has moved on while you looked away
@@ -173,7 +184,7 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
 - **The bot walks to a glowing chest instead of stopping across the room from it** (#78). It
   used to hand back the moment one came into view, leaving you to walk there yourself. It now
   walks over and hands back *next to* the chest, with the same message and the same
-  *Terrain: Glowing Chest* setting deciding whether it happens at all — set it to IGNORE and
+  *Glowing chest in view* setting deciding whether it happens at all — set it to IGNORE and
   the bot neither walks nor stops, exactly as before. It only walks with nothing hostile in
   sight and the room reading as safe, it re-checks that every step, and it gives up rather than
   crossing the whole level or routing through a sealed door.

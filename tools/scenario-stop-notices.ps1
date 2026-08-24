@@ -284,7 +284,7 @@ return "installed"
     Write-Host "  $($s5b.Result)"
     Check ($s5b.Result -match 'banner=nil') 'banner=false (the player pressed stop) shows no banner'
 
-    # ----- 6: the real cooldown site names the live menu key ----------------
+    # ----- 6: the real dead-end site names the live menu key ----------------
     Write-Host ''
     Write-Host '  --- the real site: a hostile next to us and no talents configured'
     $s6 = Probe 'return sn.cooldownSite()' 60
@@ -292,7 +292,7 @@ return "installed"
     if ($s6.Result -match '^SETUP') {
         Write-Host "  INFO  inconclusive here ($($s6.Result)); the rendering is covered above"
     } else {
-        Check ($s6.Result -match 'reason=Cannot act: no Combat talent is ready') 'the cooldown stop is a CANNOT_ACT notice'
+        Check ($s6.Result -match 'reason=Cannot act: no Combat talent is configured') 'the dead-end stop is a CANNOT_ACT notice, and names the case (#71)'
         # The key may be followed by more hint (#18 added a second clause), so
         # accept a comma or the closing bracket after it.
         Check ($s6.Result -match ('SkooBot: Reclauded menu, ' + [regex]::Escape($menuKey) + '[,)]')) 'the hint names the menu key that is bound (#57)'

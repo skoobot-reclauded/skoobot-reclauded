@@ -425,13 +425,13 @@ return "installed"
     if ($b.Result -match '^SETUP') { Inconclusive $b.Result }
     $null = Assert-Result $b 'the STRONGERENEMY flag is set and BIGENEMY (raised out of reach) is not' -Match 'flags=\[STRONGERENEMY\] '
     $null = Assert-Result $b "the score's own posture is HANDBACK" -Match 'posture=handback '
-    $null = Assert-Result $b 'the bot stops with v1''s wording, the life-scaled own power, and the threat score' -Match 'reason=Stopped: an enemy''s power level, [\d.]+, is more than MAX_DIFF_POWER above yours \([\d.]+ at current life\) -- threat [\d.]+ log='
-    $null = Assert-Result $b 'the score''s reason is the stop''s reason' -Match 'why=\[an enemy''s power level, [\d.]+, is more than MAX_DIFF_POWER above yours'
+    $null = Assert-Result $b 'the bot stops with v1''s wording, the life-scaled own power, and the threat score' -Match 'reason=Stopped: an enemy''s power level, [\d.]+, is more than [\d.]+ above yours, [\d.]+ at current life \(Maximum Enemy Power Above Yours\) -- threat [\d.]+ log='
+    $null = Assert-Result $b 'the score''s reason is the stop''s reason' -Match 'why=\[an enemy''s power level, [\d.]+, is more than [\d.]+ above yours,'
     if ($b.Result -match 'terms=\[ind=[\d.]+ str=([\d.]+) ' -and $b.Result -match '-- threat ([\d.]+)') {
         $str = [double]($b.Result -replace '.*terms=\[ind=[\d.]+ str=([\d.]+) .*', '$1'); $thr = [double]($b.Result -replace '.*-- threat ([\d.]+).*', '$1')
         Ok ([math]::Abs($str - $thr) -lt 0.06 -and $thr -gt 1) "the threat in the reason is the stronger term ($thr ~ $str), over 1"
     }
-    if ($b.Result -match 'an enemy''s power level, ([\d.]+), is more than MAX_DIFF_POWER above yours \(([\d.]+) at current life\)') {
+    if ($b.Result -match 'an enemy''s power level, ([\d.]+), is more than [\d.]+ above yours, ([\d.]+) at current life') {
         $max = [double]$Matches[1]; $mine = [double]$Matches[2]
         $exp = [double]($b.Result -replace '.* mine=([\d.]+) .*', '$1')
         Ok ([math]::Abs($mine - $exp) -lt 0.51) "own power in the reason is the heuristic on the life curve at 40% life ($mine ~ $exp)"
@@ -488,7 +488,7 @@ return "installed"
     # The same crowd with the flag NOT accepted stops, as before (#62), with the score appended.
     $e2 = Probe 'return sc.probe({ MAX_COMBINED_POWER = 0, MAX_DIFF_POWER = 1000000, MAX_INDIVIDUAL_POWER = 1000000 })'
     Write-Host "  $($e2.Result)"
-    $null = Assert-Result $e2 'the same crowd at STOP stops the bot with v1''s wording and the threat score' -Match 'reason=Stopped: the combined enemy power level, [\d.]+, is more than MAX_COMBINED_POWER above yours \([\d.]+ at current life\) -- threat [\d.]+ log='
+    $null = Assert-Result $e2 'the same crowd at STOP stops the bot with v1''s wording and the threat score' -Match 'reason=Stopped: the enemies in view add up to [\d.]+, more than [\d.]+ above yours, [\d.]+ at current life \(Maximum Combined Enemy Power\) -- threat [\d.]+ log='
     $null = Assert-Result $e2 'and the posture says HANDBACK' -Match 'posture=handback '
     $null = Probe 'return sc.unspawn()'
 
@@ -519,7 +519,7 @@ return "installed"
     $f = Probe 'return sc.scratch(0.5)'
     Write-Host "  $($f.Result)"
     if ($f.Result -match '^SETUP') { Inconclusive $f.Result }
-    $null = Assert-Result $f 'the stop fires with the T-011 wording and the threat' -Match 'reason=Stopped: took damage while exploring, and life is below IGNORE_DAMAGE_HEALTH_RATIO -- threat [\d.]+$'
+    $null = Assert-Result $f 'the stop fires with the T-011 wording and the threat' -Match 'reason=Stopped: took damage while exploring with life below [\d.]+ of maximum \(Ignore Damage Above Life Ratio\) -- threat [\d.]+$'
     if ($f.Result -match '-- threat ([\d.]+)') { Ok ([math]::Abs([double]$Matches[1] - 5) -lt 0.3) "the threat is (1 - 0.5) / (1 - 0.9) = 5 ($($Matches[1]))" }
     $f2 = Probe 'return sc.scratch(0.95)'
     Write-Host "  $($f2.Result)"

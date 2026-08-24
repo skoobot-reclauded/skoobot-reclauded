@@ -23,6 +23,11 @@ local function actor(attrs, over)
   return a
 end
 
+-- The option titles the messages quote come from the game, not from a copy
+-- here (#71), so a title renamed in data/cfg.lua is renamed in these
+-- expectations too.
+local TITLES = assert(loadfile(manifest.path("src/data/cfg.lua")))()
+
 --- A detector context: the settings v1 shipped, no hostiles, a quiet loop,
 --- no chest.
 local function context(over)
@@ -35,6 +40,8 @@ local function context(over)
     score = { flags = {}, details = {}, suffix = " -- threat 0.0" },
     own = 50,
     cfg = function(k) return settings[k] end,
+    -- #71: the messages name the option the way the options tab does.
+    title = TITLES.title,
     chestInView = function() return false end,
     delta = 0,
   }
@@ -47,20 +54,20 @@ end
 -- order, plus TURNS_BLACKOUT (#77) after the debuffs -- the same family of
 -- "what happened to you", and the first entry added since the port.
 local V1 = {
-  { "DEBUFF_STUNNED",        "Debuff: STUNNED",            "WARN" },
-  { "DEBUFF_CONFUSED",       "Debuff: CONFUSED",           "WARN" },
-  { "DEBUFF_DAZED",          "Debuff: DAZED",              "WARN" },
-  { "DEBUFF_FROZEN",         "Debuff: FROZEN",             "WARN" },
-  { "DEBUFF_ASLEEP",         "Debuff: ASLEEP",             "WARN" },
-  { "TURNS_BLACKOUT",        "Turns: BLACKOUT",            "WARN" },
-  { "LIFE_BIGLOSS",          "Life: BIGLOSS",              "WARN" },
-  { "LIFE_LOWLIFE",          "Life: LOWLIFE",              "STOP" },
-  { "DIALOG_LORE",           "Dialog: LORE",               "IGNORE" },
-  { "TERRAIN_GLOWING_CHEST", "Terrain: Glowing Chest",     "WARN" },
-  { "SCOUTER_ENEMYCOUNT",    "Power Level: ENEMYCOUNT",    "STOP" },
-  { "SCOUTER_BIGENEMY",      "Power Level: BIGENEMY",      "STOP" },
-  { "SCOUTER_STRONGERENEMY", "Power Level: STRONGERENEMY", "STOP" },
-  { "SCOUTER_CROWDPOWER",    "Power Level: CROWDPOWER",    "STOP" },
+  { "DEBUFF_STUNNED",        "Stunned",                                    "WARN"   },
+  { "DEBUFF_CONFUSED",       "Confused",                                   "WARN"   },
+  { "DEBUFF_DAZED",          "Dazed",                                      "WARN"   },
+  { "DEBUFF_FROZEN",         "Frozen",                                     "WARN"   },
+  { "DEBUFF_ASLEEP",         "Asleep",                                     "WARN"   },
+  { "TURNS_BLACKOUT",        "Turns lost while unable to act",             "WARN"   },
+  { "LIFE_BIGLOSS",          "Big life loss in one turn",                  "WARN"   },
+  { "LIFE_LOWLIFE",          "Low life with enemies in view",              "STOP"   },
+  { "DIALOG_LORE",           "A lore dialog opened",                       "IGNORE" },
+  { "TERRAIN_GLOWING_CHEST", "Glowing chest in view",                      "WARN"   },
+  { "SCOUTER_ENEMYCOUNT",    "Too many enemies in view",                   "STOP"   },
+  { "SCOUTER_BIGENEMY",      "An enemy above Maximum Enemy Power",         "STOP"   },
+  { "SCOUTER_STRONGERENEMY", "An enemy too far above your power",          "STOP"   },
+  { "SCOUTER_CROWDPOWER",    "Enemies together too far above your power",  "STOP"   },
 }
 
 describe("data/conditions.lua", function()
@@ -201,7 +208,7 @@ describe("data/conditions.lua", function()
       assert.is_true(d.detect(low, context({ hostiles = 1 })))
       assert.is_false(d.detect(low, context({ hostiles = 0 })))
       assert.is_false(d.detect(actor({}, { life = 50, max_life = 100 }), context({ hostiles = 1 })))
-      assert.equals("life is below LOWHEALTH_RATIO", C.message(d, low, context()))
+      assert.equals("life is below 0.5 of maximum (Low Health Ratio)", C.message(d, low, context()))
     end)
 
     it("BIGLOSS is half the ratio lost in one turn, at the loop site", function()
@@ -210,8 +217,18 @@ describe("data/conditions.lua", function()
       assert.is_true(d.detect(actor(), context({ delta = -25 })))
       assert.is_false(d.detect(actor(), context({ delta = -24 })))
       assert.is_false(d.detect(actor(), context({ delta = 25 })))
-      assert.equals("lost more than 25% of max life in one turn (half of LOWHEALTH_RATIO)",
+      assert.equals("lost more than 25% of maximum life in one turn (half of Low Health Ratio)",
         C.message(d, actor(), context({ delta = -25 })))
+    end)
+
+    -- The titles ride on the context, which the act loop fills in. Anything
+    -- else calling a message -- a probe, a test, a future caller -- must get
+    -- the key rather than an error or a blank (#71).
+    it("names the key itself when the context carries no titles (#71)", function()
+      local bare = context()
+      bare.title = nil
+      assert.equals("life is below 0.5 of maximum (LOWHEALTH_RATIO)",
+        C.message(C.find("LIFE_LOWLIFE"), actor({}, { life = 40 }), bare))
     end)
   end)
 
@@ -280,7 +297,8 @@ describe("data/conditions.lua", function()
 
     it("the message is the score's wording of the flag with the threat appended", function()
       local d = C.find("SCOUTER_STRONGERENEMY")
-      local wording = "an enemy's power level, 61, is more than MAX_DIFF_POWER above yours (50.0 at current life)"
+      local wording = "an enemy's power level, 61, is more than 10 above yours, 50 at current life "
+        .. "(Maximum Enemy Power Above Yours)"
       local s = scoreOf({ SCOUTER_STRONGERENEMY = true }, { SCOUTER_STRONGERENEMY = wording }, " -- threat 1.0")
       assert.equals(wording .. " -- threat 1.0", C.message(d, actor(), context({ score = s })))
     end)
@@ -412,7 +430,7 @@ describe("data/conditions.lua", function()
       assert.equals("WARN", byCode.TERRAIN_GLOWING_CHEST.stoptype)
       assert.equals("IGNORE", byCode.LIFE_LOWLIFE.stoptype)
       assert.is_nil(byCode.RETIRED_CONDITION)
-      assert.equals("Debuff: STUNNED", byCode.DEBUFF_STUNNED.label)
+      assert.equals("Stunned", byCode.DEBUFF_STUNNED.label)
       for i, row in ipairs(V1) do assert.equals(row[1], list[i].code) end
     end)
 

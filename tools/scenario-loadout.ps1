@@ -17,7 +17,7 @@
       * a hand edit in the screen clears the suggested mark on that row;
       * the screen's first row carries the unassigned count, opens the
         proposal, backs out on Escape, and applies through the action menu;
-      * the dead-end stop ("no Combat talent is ready") names the suggestion.
+      * the dead-end stop ("no Combat talent is configured") names the suggestion.
     No game.turn advances -- deterministic. Mouse drag is not driven.
 
     Exit codes:  0 pass   1 fail   2 tainted   3 inconclusive
@@ -526,8 +526,8 @@ return ok and res or ("ERR " .. tostring(res))
 '@ 120
     if ($dead -match '^SETUP') {
         Write-Host "  INFO  dead-end stop not reached ($dead); the hint text is covered by the source, not this run"
-    } elseif ($dead -match 'no Combat talent is ready') {
-        Check ($dead -match 'suggest a loadout from the talent screen') 'the "no Combat talent is ready" stop names the suggestion as the way out'
+    } elseif ($dead -match 'no Combat talent is configured') {
+        Check ($dead -match 'suggest a loadout from the talent screen') 'the "no Combat talent is configured" stop names the suggestion as the way out'
         Check ($dead -match 'dturn=0 ') 'query advances no game turn'
     } else {
         Write-Host "  INFO  the one decision stopped for another reason ($dead); the dead-end hint is not measured in this run"

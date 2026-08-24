@@ -78,7 +78,7 @@ truth — `Assert-Turns -AtLeast 10` is "at least one turn".) The gap is measura
 real turn after it:
 
 ```lua
-{ code = "TURNS_BLACKOUT", label = "Turns: BLACKOUT", default = "WARN",
+{ code = "TURNS_BLACKOUT", label = "Turns lost while unable to act", default = "WARN",
   detect = function(_, ctx) return (ctx.turnsLost or 0) >= 1 end,   -- one of ITS turns
   msg    = "lost %d turns while unable to act" }                    -- built, #77; see 3.1
 ```
@@ -300,7 +300,7 @@ One entry is the single source of truth for a condition's menu label, detection,
 policy, where the act loop consults it, what it says, and what capability it takes away.
 
 ```lua
-{ code = "DEBUFF_DAZED", label = "Debuff: DAZED", default = "WARN",
+{ code = "DEBUFF_DAZED", label = "Dazed", default = "WARN",
   category = "debuff", site = "turn", blocks = { move = true }, blocked = "dazed",
   detect  = function(p) return counter(p, "dazed") > 0 end,
   message = "you are dazed" },
@@ -317,8 +317,12 @@ fire and a detector without an entry cannot exist.
   *Stop conditions* in the SkooBot menu and what the save keeps. Their codes, labels,
   defaults and **order** were v1's thirteen, unchanged, until #77 added the fourteenth:
   `DEBUFF_*` ×5, **`TURNS_BLACKOUT`**, `LIFE_*` ×2, `DIALOG_LORE`, `TERRAIN_GLOWING_CHEST`,
-  `SCOUTER_*` ×4. v1's thirteen keep their codes, labels, defaults and relative order, so a
-  saved list still reconciles into this one without losing a choice.
+  `SCOUTER_*` ×4. v1's thirteen keep their codes, defaults and relative order, so a
+  saved list still reconciles into this one without losing a choice. Their **labels** are not
+  v1's: #71 replaced the code-in-capitals (*Life: BIGLOSS*) with what the condition is (*Big
+  life loss in one turn*), which the reconcile carries onto a saved list on first load. The
+  code is the identity; the label is prose for the player and may be reworded whenever it
+  reads badly.
 - **Liveness entries** have no default and no policy: `CANNOT_MOVE` (`attr("never_move")`)
   and `ENCASED` (`attr("encased_in_ice")` or `attr("encased")`). They are never in the menu or
   the save, because §1 says liveness is not configurable; they exist so the capability they

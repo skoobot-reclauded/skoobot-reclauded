@@ -15,7 +15,7 @@
       2. what the player sees at load: the engine-log ready line, and whether
          anything reached the message log;
       3. the first toggle with nothing configured, to its first stop, and the
-         deterministic dead-end ("no Combat talent is ready") with its hint
+         deterministic dead-end ("no Combat talent is configured") with its hint
          naming the live menu key and the loadout suggestion;
       4. the menu by key: the choices, the keybind status (#50), and the help
          text under them naming how to start and every bound key;
@@ -339,7 +339,7 @@ return ("reason=[%s] dturn=%d banner=[%s] log: %s"):format(tostring(b.last_reaso
     if ($dead -match '^SETUP') {
         Note "dead-end not reached: $dead"
     } else {
-        Check ($dead -match 'reason=\[Cannot act: no Combat talent is ready -- none configured, or all on cooldown\]') 'with a hostile in view and nothing configured the bot says no Combat talent is ready'
+        Check ($dead -match 'reason=\[Cannot act: no Combat talent is configured\]') 'with a hostile in view and nothing configured the bot says exactly that, without offering cooldown as an alternative'
         Check ($dead -match 'set talent usage in the SkooBot: Reclauded menu, \S+, or let the bot suggest a loadout from the talent screen') 'the hint names the menu key and the loadout suggestion'
         Check ($dead -match 'dturn=0 ') 'query advances no game turn'
         Note "dead-end, verbatim: $dead"
@@ -483,7 +483,7 @@ fr.closeAll()
 return out
 '@
     Check ($sc -match 'picker=\[Stop conditions: pick one to change\] items=14 ') 'choice b) lists the fourteen conditions'
-    Check ($sc -match 'policy=\[Debuff: STUNNED -- what should the bot do\?\] options=\[a\) IGNORE -- never stop for this \| b\) WARN -- stop once, then carry on if restarted \| c\) STOP -- stop every time it applies\]') 'picking one names it and explains IGNORE, WARN and STOP'
+    Check ($sc -match 'policy=\[Stunned -- what should the bot do\?\] options=\[a\) IGNORE -- never stop for this \| b\) WARN -- stop once, then carry on if restarted \| c\) STOP -- stop every time it applies\]') 'picking one names it and explains IGNORE, WARN and STOP'
     Check ($sc -match 'after=WARN top=none') 'the choice is applied and every dialog closes'
     Note "stop conditions: $sc"
 
