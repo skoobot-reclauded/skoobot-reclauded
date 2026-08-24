@@ -1364,7 +1364,47 @@ end
 --- else. A step the engine then refuses (move() returned false: the grid
 --- changed under us) is marked failed for this iteration like a refused
 --- talent, so it is not retried until the next turn.
+--- #97: is retreating from this target pointless?
+---
+--- The reported loop: a Skirmisher with `Shoot` (range 6) and *Flee but
+--- keep sight* under it, ten grids from an immobile brown mold with sight
+--- 10. At nine grids a farther neighbour still has line of sight, so the
+--- flee takes it; at ten, farther means eleven, which is out of sight, so
+--- no step qualifies, the row falls through as designed, and the act loop
+--- does the next right thing -- it paths toward the target to get in
+--- range. Two grids, forever, in FIGHT, without ever handing back. The bot
+--- was closing the distance and retreating from it on alternate turns.
+---
+--- What makes it permanent is that the mold never moves, so the geometry
+--- resets exactly. THAT is the thing to test, not the ranges: a rule keyed
+--- on "can anything in the rotation reach it" has the same oscillation one
+--- grid outside a talent's range whenever that talent is on cooldown.
+---
+--- So: a target that cannot move and is not already adjacent cannot become
+--- adjacent, and stepping away from it buys nothing. Adjacent is the
+--- exception and is deliberate -- backing off a mold you are standing next
+--- to is exactly what the row is for, since that is where it can hurt you.
+---
+--- Approximation, knowingly. The principled question is whether the target
+--- is a threat AT THIS DISTANCE, which needs its talents and their ranges;
+--- that is #99, and this is the subset of it that is certain, cheap, and
+--- enough for the reported case. An immobile creature with a ranged attack
+--- is not covered, and fleeing while keeping sight would not have helped
+--- against one anyway.
+local function pointlessFlee(p, target)
+    local a = target and target.actor
+    if not a or not a.x then return nil end
+    if not a:attr("never_move") then return nil end
+    if core.fov.distance(p.x, p.y, a.x, a.y) <= 1 then return nil end
+    return ("%s cannot follow, and is not next to you"):format(tostring(a.name))
+end
+
 local function SAI_flee(entry, hostiles)
+    local pointless = pointlessFlee(game.player, fleeTarget(entry, hostiles))
+    if pointless then
+        chan.debug("[Combat] [Flee] Pointless (%s): %s", pointless, tostring(rules.key(entry)))
+        return false, pointless, true
+    end
     local x, y, h = fleeStep(entry, hostiles)
     if not x then
         chan.debug("[Combat] [Flee] Not available (%s): %s", tostring(h), tostring(rules.key(entry)))
@@ -2030,13 +2070,16 @@ function skoobot_act(noAction)
             end
             -- #67: what cornered the character, if a flee was tried and had
             -- nowhere to go. Kept for the fallthrough below.
-            local blockedFlee = nil
+            local blockedFlee, uselessFlee = nil, nil
             for _, item in ipairs(combatTalents) do
                 if type(item) == "table" then
                     if fireTier() then checkForAdditionalAction() return end
-                    local fled, why = SAI_flee(item, hostiles)
+                    local fled, why, pointless = SAI_flee(item, hostiles)
                     if fled then checkForAdditionalAction() return end
-                    blockedFlee = why or blockedFlee
+                    -- #97: a flee skipped as pointless is not a flee with
+                    -- nowhere to go, and must not be reported as cornered.
+                    if pointless then uselessFlee = why or uselessFlee
+                    else blockedFlee = why or blockedFlee end
                 else
                     tier[#tier + 1] = item
                 end
@@ -2072,6 +2115,19 @@ function skoobot_act(noAction)
                 end
                 if not hasTalent then
                     return stop(notice.CANNOT_ACT, "cornered: " .. blockedFlee
+                        .. ", and the rotation is flee only")
+                end
+            end
+            -- #97: the same shape for a flee that was skipped rather than
+            -- blocked. "Cornered" would be untrue -- there is somewhere to
+            -- go, there is just no reason to go there.
+            if uselessFlee then
+                local hasTalent = false
+                for _, item in ipairs(rotation) do
+                    if type(item) ~= "table" then hasTalent = true break end
+                end
+                if not hasTalent then
+                    return stop(notice.CANNOT_ACT, "nothing to flee from: " .. uselessFlee
                         .. ", and the rotation is flee only")
                 end
             end

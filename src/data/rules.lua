@@ -58,7 +58,10 @@ for _, f in ipairs(M.FLEE_FROM) do FLEE_FROM_SET[f] = true end
 M.CORNERED_LABEL =
     "A flee does not stop the bot by itself -- unless it is the whole rotation: cornered with no talent "
  .. "placed below it, the bot hands back saying so rather than walking into the thing it was told to run "
- .. "from."
+ .. "from. It is also skipped when the thing it would run from CANNOT MOVE and is not already next to you "
+ .. "(#97): something that cannot follow you is not worth stepping away from, and doing it anyway made the "
+ .. "bot retreat and close the distance on alternate turns forever. Standing next to one is the exception, "
+ .. "since that is where it can reach you."
 
 M.ACTIONS = {
     { action = "flee", from = "nearest",
