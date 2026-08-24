@@ -498,10 +498,15 @@ function M.apply(proposal, rules, rm, mode)
     else
         for _, s in ipairs(rm.SECTIONS) do
             for _, e in ipairs(rules[s] or {}) do
-                if e.tid and not e.suggested then hand[e.tid] = true end
+                -- #98: keyed by rm.key, which answers for an action row too.
+                local k = rm.key(e)
+                if k and not e.suggested then hand[k] = true end
             end
         end
-        local gone = rm.prune(rules, function(e) return not e.suggested or (e.tid and hand[e.tid] == true) end)
+        local gone = rm.prune(rules, function(e)
+            local k = rm.key(e)
+            return not e.suggested or (k ~= nil and hand[k] == true)
+        end)
         report.removed = #gone
     end
     for _, e in ipairs(proposal and proposal.entries or {}) do
@@ -509,7 +514,7 @@ function M.apply(proposal, rules, rm, mode)
             -- #85 item 2: shown, never written. Declining is the player's
             -- decision and applying the proposal must not quietly undo it.
             report.declined = (report.declined or 0) + 1
-        elseif hand[e.tid] then
+        elseif hand[rm.key(M.entryOf(e))] then
             report.kept = report.kept + 1
         else
             local placement = M.entryOf(e)

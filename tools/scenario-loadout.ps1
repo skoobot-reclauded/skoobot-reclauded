@@ -320,7 +320,8 @@ local ok, res = pcall(function()
 end)
 return ok and res or ("ERR " .. tostring(res))
 '@
-    Check ($show -match 'headers=6 ') 'the proposal view shows the four sections, Not placed and Your choice'
+    # #85 added a seventh group: what applying would take AWAY.
+    Check ($show -match 'headers=7 ') 'the proposal view shows the four sections, Would be removed, Not placed and Your choice'
     Check ($show -match "rows=(\d+) " -and [int]$Matches[1] -ge $entries) 'every proposed entry has a row'
     Check ($show -match 'placed=1 ') 'the hand-placed talent is shown as already placed'
     Check ($show -match "with_reason=(\d+) " -and [int]$Matches[1] -ge $entries) 'every row carries its reason'

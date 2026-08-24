@@ -407,7 +407,10 @@ function _M:proposalRow(e, placed, rules)
 	-- every row that the player had not hand-placed read as new, including
 	-- the ones a previous suggestion had already written. The owner's build
 	-- matched the recommendation exactly and every row said (new).
-	local isNew = not placed and next(inS) == nil and not e.declined
+	-- `e.section` is nil for the Not-placed group -- the talents the
+	-- suggestion leaves OUT. Merge would not add those, so calling them new
+	-- was the same lie in the other direction.
+	local isNew = e.section ~= nil and not placed and next(inS) == nil and not e.declined
 	if e.declined then
 		desc = desc .. "\n\n#GREY#Declined on this character: the suggestion will not place it. "
 			.. "Select it again to undo that.#WHITE#"
@@ -495,10 +498,16 @@ function _M:generateProposalList()
 	local tree, chars = {}, {}
 
 	-- Talents the player has placed by hand anywhere: Merge leaves those alone.
+	-- #98: keyed with rm.key, not e.tid. A proposal can carry an ACTION row
+	-- now, which has no tid, and `proposed[e.tid] = true` is a write with a
+	-- nil key -- which is not nil-safe like a read, and threw
+	-- "table index is nil" out of generateList, leaving the screen half
+	-- rebuilt. rm.key answers for every entry shape there is.
 	local hand = {}
 	for _, s in ipairs(rm.SECTIONS) do
 		for _, e in ipairs(rules[s]) do
-			if e.tid and not e.suggested then hand[e.tid] = true end
+			local k = rm.key(e)
+			if k and not e.suggested then hand[k] = true end
 		end
 	end
 
@@ -513,7 +522,10 @@ function _M:generateProposalList()
 	for i, section in ipairs(rm.SECTIONS) do
 		local nodes = {}
 		for _, e in ipairs(P.entries) do
-			if e.section == section then nodes[#nodes + 1] = self:proposalRow(e, hand[e.tid] == true, rules) end
+			if e.section == section then
+				local k = rm.key(self.L.module.entryOf(e))
+				nodes[#nodes + 1] = self:proposalRow(e, k ~= nil and hand[k] == true, rules)
+			end
 		end
 		tree[#tree + 1] = header(section, ("%d. %s -- suggested"):format(i, rm.LABELS[section]),
 			rm.DESCRIPTIONS[section] .. "\n\nThe rows below are a suggestion, in the order the bot would try them: " ..
@@ -523,12 +535,16 @@ function _M:generateProposalList()
 
 	-- #85: what applying would take away, before what it leaves out.
 	local proposed = {}
-	for _, e in ipairs(P.entries) do if not e.declined then proposed[e.tid] = true end end
+	for _, e in ipairs(P.entries) do
+		local k = rm.key(self.L.module.entryOf(e))
+		if k and not e.declined then proposed[k] = true end
+	end
 	local losing, lost = {}, {}
 	for _, section in ipairs(rm.SECTIONS) do
 		for _, e in ipairs(rules[section] or {}) do
-			if e.tid and e.suggested and not hand[e.tid] and not proposed[e.tid] and not lost[e.tid] then
-				lost[e.tid] = true
+			local k = rm.key(e)
+			if k and e.suggested and not hand[k] and not proposed[k] and not lost[k] then
+				lost[k] = true
 				losing[#losing + 1] = self:removalRow(e, section, rules)
 			end
 		end
@@ -658,20 +674,25 @@ function _M:applyMenu()
 	local current = self.rm.count(rules)
 	-- #85: and how many it would take away, which the menu never said.
 	local proposed, gone = {}, 0
-	for _, e in ipairs(self.proposal.entries) do if not e.declined then proposed[e.tid] = true end end
+	for _, e in ipairs(self.proposal.entries) do
+		local k = self.rm.key(self.L.module.entryOf(e))
+		if k and not e.declined then proposed[k] = true end
+	end
 	-- A talent the player owns ANYWHERE is kept by merge, even where this
 	-- addon also placed it, so it is not a removal. Same rule as apply().
 	local hand = {}
 	for _, section in ipairs(self.rm.SECTIONS) do
 		for _, e in ipairs(rules[section] or {}) do
-			if e.tid and not e.suggested then hand[e.tid] = true end
+			local k = self.rm.key(e)
+			if k and not e.suggested then hand[k] = true end
 		end
 	end
 	local counted = {}
 	for _, section in ipairs(self.rm.SECTIONS) do
 		for _, e in ipairs(rules[section] or {}) do
-			if e.tid and e.suggested and not hand[e.tid] and not proposed[e.tid] and not counted[e.tid] then
-				counted[e.tid] = true
+			local k = self.rm.key(e)
+			if k and e.suggested and not hand[k] and not proposed[k] and not counted[k] then
+				counted[k] = true
 				gone = gone + 1
 			end
 		end

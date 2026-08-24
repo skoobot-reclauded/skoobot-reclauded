@@ -490,7 +490,10 @@ local top = game.dialogs[#game.dialogs]
 return ("title=[%s] names=[%s] back_on_screen=%s proposal_still=%s"):format(title, table.concat(names, " | "),
   tostring(top == d), tostring(d.proposal ~= nil))
 '@
-    Check ($am -match 'title=\[Apply the suggested loadout\] names=\[a\) Merge: add \d+ new, keep every row you placed \| b\) Replace: clear the 0 current rows, write the \d+ suggested \| c\) Cancel: write nothing\]') 'Enter offers Merge, Replace and Cancel, each saying what it writes'
+    # #85: Merge says what it would REMOVE as well as what it would add --
+    # a suggestion that drops a talent used to look like one that changed
+    # nothing.
+    Check ($am -match 'title=\[Apply the suggested loadout\] names=\[a\) Merge: add \d+ new, remove \d+, keep every row you placed \| b\) Replace: clear the 0 current rows, write the \d+ suggested \| c\) Cancel: write nothing\]') 'Enter offers Merge, Replace and Cancel, each saying what it writes and what it takes away'
     Check ($am -match 'back_on_screen=true proposal_still=true') 'Cancel returns to the proposal, still unwritten'
     Note "apply menu: $am"
 

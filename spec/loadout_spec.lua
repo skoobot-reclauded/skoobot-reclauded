@@ -769,4 +769,36 @@ describe("data/loadout.lua", function()
       assert.equals(0, #L.unplaced(L.discover({ talent("T_SHOOT", SHOOT) }), rules, R))
     end)
   end)
+
+  -- The owner's crash: a character whose Combat already held a hand-placed
+  -- "flee but keep sight" met a proposal that also carried one. The dialog
+  -- keyed its bookkeeping on e.tid, which an action row does not have, and
+  -- a table write with a nil key is an error -- not nil-safe like a read.
+  -- Keyed by rules.key now, which answers for every entry shape.
+  describe("an action row already placed by hand (#98)", function()
+    local SHOOT = { mode = "activated", tactical = { ATTACK = 2 }, range = 6 }
+    local FLEE  = { action = "flee", from = "nearest", keep_los = true }
+
+    it("keys by rules.key, so an entry with no tid is not a nil index", function()
+      assert.equals("action:flee:nearest:los", R.key(FLEE))
+      assert.equals("tid:T_SHOOT", R.key({ tid = "T_SHOOT" }))
+    end)
+
+    it("does not add a second flee when the player already placed one", function()
+      local rules = R.new()
+      R.place(rules, { action = FLEE.action, from = FLEE.from, keep_los = FLEE.keep_los }, "Combat")
+      local p = L.discover({ talent("T_SHOOT", SHOOT) })
+      local report = L.apply(p, rules, R, "merge")
+      assert.equals(1, #R.where(rules, FLEE), "the hand-placed flee must not be duplicated")
+      assert.equals(1, report.kept, "it is the player's row, so merge keeps it")
+    end)
+
+    it("counts it as already placed, so Merge reports nothing to add", function()
+      local rules = R.new()
+      R.place(rules, { tid = "T_SHOOT" }, "Combat")
+      R.place(rules, { action = FLEE.action, from = FLEE.from, keep_los = FLEE.keep_los }, "Combat")
+      local p = L.discover({ talent("T_SHOOT", SHOOT) })
+      assert.equals(0, #L.unplaced(p, rules, R))
+    end)
+  end)
 end)
