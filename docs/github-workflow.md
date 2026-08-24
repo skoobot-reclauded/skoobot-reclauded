@@ -247,7 +247,8 @@ so that a reader without the record still knows what was decided and why.
 ## 5. How a change reaches `main`
 
 This is the review rule, written as the practice it already is. Decided by the owner on
-2026-08-23; revisiting it is deferred to going public (§8, #35).
+2026-08-23. Revisiting it was once deferred to going public; that happened on 2026-08-24
+and changed nothing here (§8).
 
 1. **Every code change is made in a worktree on an issue branch.** The integration checkout
    is always `main` and always clean; anything that touches `src/`, `tools/` or `spec/` is
@@ -277,10 +278,11 @@ This is the review rule, written as the practice it already is. Decided by the o
 
 What this is **not**: a pull-request review flow. For the maintainer's own and the assistant's
 work, the reviewer and the pusher are the same person, and a PR would add a round-trip without
-adding a reader. **A PR-based review flow is deferred until the repository is public** (#35),
-when outside contributors make a second reader real; contributions from outside will arrive
-as pull requests because that is the only way in, and how they are reviewed and merged is
-decided then (see [CONTRIBUTING.md](../CONTRIBUTING.md) for what a PR needs meanwhile).
+adding a reader. **A PR-based review flow waits on there being an outside contributor**, not on the
+repository being public — that happened on 2026-08-24, and the reviewer and the pusher are
+still the same person. Contributions from outside will arrive as pull requests because that is
+the only way in, and how they are reviewed and merged is decided when the first one arrives
+(see [CONTRIBUTING.md](../CONTRIBUTING.md) for what a PR needs meanwhile).
 
 Nothing above is branch protection or a ruleset, and none is to be added for this purpose:
 **D-9** — the owner accepted the history-rewrite risk on 2026-08-21 and closed the question.
@@ -444,8 +446,10 @@ with the list in hand. Worked through on **2026-08-24**; `[x]` rows were verifie
 
 The original SkooBot did not die of technical difficulty. It died with two working
 contributor fixes unmerged while the maintainer was unavailable. This section is what is
-known today about avoiding that, stated plainly; the gap between it and a real answer is
-tracked in #17 and #41.
+known today about avoiding that, stated plainly. Both issues that once tracked the gap — #17,
+the contribution path, and #41, the bus-factor interim — are closed, and closed by being
+answered rather than abandoned: the answer is the rest of this section. What is still open is
+the recovery material, which is #40.
 
 - **The org owner can do everything on GitHub.** `skoobot-reclauded` is owned by the
   `SkoobyDoo` account. That account can flip the repository public, add admins, and mint a
