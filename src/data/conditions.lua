@@ -90,6 +90,8 @@ M.HANDED_BACK = "handed_back"
 --   ctx.delta        life change this turn (SITE_LOOP only)
 --   ctx.turnsLost    whole turns the character never got (#77)
 --   ctx.title        function(key) -> the option's title in the options tab
+--   ctx.life         data/life.lua's reading of the life pool (#91)
+--   ctx.describeLife function(reading) -> that reading in the player's words
 
 --- A status attribute as the counter it is: 0 when absent.
 local function counter(p, name)
@@ -104,6 +106,31 @@ end
 local function title(ctx, name)
     local t = ctx and ctx.title
     return (t and t(name)) or name
+end
+
+--- The life pool as data/life.lua reads it (#91): the fraction of what the
+--- game will actually kill this character at, discounted for anything about
+--- to lapse. The act loop puts it on the context; a caller that does not --
+--- a probe, a test -- gets the naive life/max_life these checks used before
+--- #91, which is right for the ordinary character with no die_at at all.
+local function pool(p, ctx)
+    local el = ctx and ctx.life
+    if type(el) == "table" then return el end
+    local max = tonumber(p and p.max_life) or 0
+    local f = max > 0 and ((tonumber(p.life) or 0) / max) or 1
+    if f < 0 then f = 0 elseif f > 1 then f = 1 end
+    return { safe_fraction = f, safe_max = max, trusted = true, expiring = {} }
+end
+
+--- That reading in the player's words. data/life.lua does the wording --
+--- it knows what it discounted and why -- and rides in on the context;
+--- without it, the plain percentage, which is all there is to say when
+--- nothing was discounted.
+local function saidLife(p, ctx)
+    local el = pool(p, ctx)
+    local d = ctx and ctx.describeLife
+    if d then return d(el) end
+    return ("%d%% of your life pool"):format(math.floor(100 * (el.safe_fraction or 0) + 0.5))
 end
 
 --- A power condition: a STOP policy entry whose detector and message are
@@ -196,7 +223,9 @@ M.LIST = {
     { code = "LIFE_BIGLOSS", label = "Big life loss in one turn", default = "WARN",
       category = "life", site = M.SITE_LOOP, blocks = {},
       detect = function(p, ctx)
-          return ctx.delta < 0 and math.abs(ctx.delta) / p.max_life >= ctx.cfg("LOWHEALTH_RATIO") / 2
+          local el = pool(p, ctx)
+          return ctx.delta < 0 and el.safe_max > 0
+              and math.abs(ctx.delta) / el.safe_max >= ctx.cfg("LOWHEALTH_RATIO") / 2
       end,
       message = function(_, ctx)
           return ("lost more than %d%% of maximum life in one turn (half of %s)")
@@ -205,11 +234,13 @@ M.LIST = {
     { code = "LIFE_LOWLIFE", label = "Low life with enemies in view", default = "STOP",
       category = "life", site = M.SITE_TURN, blocks = {},
       detect = function(p, ctx)
-          return ctx.hostiles > 0 and p.life < p.max_life * ctx.cfg("LOWHEALTH_RATIO")
+          return ctx.hostiles > 0 and pool(p, ctx).safe_fraction < ctx.cfg("LOWHEALTH_RATIO")
       end,
-      message = function(_, ctx)
-          return ("life is below %s of maximum (%s)")
-              :format(tostring(ctx.cfg("LOWHEALTH_RATIO")), title(ctx, "LOWHEALTH_RATIO"))
+      -- #91: the figure is a fraction of the POOL, so it says so, and says
+      -- what it did not count when the two readings differ.
+      message = function(p, ctx)
+          return ("%s -- below %s (%s)"):format(
+              saidLife(p, ctx), tostring(ctx.cfg("LOWHEALTH_RATIO")), title(ctx, "LOWHEALTH_RATIO"))
       end },
 
     -- A lore popup is not a state of the character: the act loop reads the

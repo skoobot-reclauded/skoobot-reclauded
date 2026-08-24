@@ -208,7 +208,8 @@ describe("data/conditions.lua", function()
       assert.is_true(d.detect(low, context({ hostiles = 1 })))
       assert.is_false(d.detect(low, context({ hostiles = 0 })))
       assert.is_false(d.detect(actor({}, { life = 50, max_life = 100 }), context({ hostiles = 1 })))
-      assert.equals("life is below 0.5 of maximum (Low Health Ratio)", C.message(d, low, context()))
+      assert.equals("40% of your life pool -- below 0.5 (Low Health Ratio)",
+        C.message(d, low, context()))
     end)
 
     it("BIGLOSS is half the ratio lost in one turn, at the loop site", function()
@@ -227,8 +228,74 @@ describe("data/conditions.lua", function()
     it("names the key itself when the context carries no titles (#71)", function()
       local bare = context()
       bare.title = nil
-      assert.equals("life is below 0.5 of maximum (LOWHEALTH_RATIO)",
+      assert.equals("40% of your life pool -- below 0.5 (LOWHEALTH_RATIO)",
         C.message(C.find("LIFE_LOWLIFE"), actor({}, { life = 40 }), bare))
+    end)
+
+    -- #91: what the act loop actually passes. The context carries
+    -- data/life.lua's reading, so these checks are over the pool the game
+    -- kills at rather than over max_life -- which for anything with a
+    -- die_at is a different number entirely.
+    describe("over the life pool (#91)", function()
+      local LIFE = assert(loadfile(manifest.path("src/data/life.lua")))()
+
+      --- A context holding the real reading for an actor.
+      local function ctxFor(a, over)
+        local c = context(over)
+        c.life = LIFE.of(a)
+        c.describeLife = LIFE.describe
+        return c
+      end
+
+      it("does not stop a Lich at zero life with five hundred points to spend", function()
+        local lich = actor({}, { life = 0, max_life = 100, die_at = -500 })
+        local d = C.find("LIFE_LOWLIFE")
+        assert.is_false(d.detect(lich, ctxFor(lich, { hostiles = 3 })))
+        -- ...and the old arithmetic would have: 0 / 100 is under 0.5.
+        assert.is_true(lich.life < lich.max_life * 0.5)
+      end)
+
+      it("stops the same character when the pool really is low", function()
+        local lich = actor({}, { life = -400, max_life = 100, die_at = -500 })
+        local d = C.find("LIFE_LOWLIFE")
+        assert.is_true(d.detect(lich, ctxFor(lich, { hostiles = 3 })))
+      end)
+
+      it("stops early when what is holding the pool up is about to lapse", function()
+        -- Heroism at one turn left, life below zero: the full reading is
+        -- comfortable and the safe one is empty. Handing back after the
+        -- effect ends would be too late.
+        local a = actor({}, { life = -30, max_life = 100, die_at = -200,
+          tmp = { EFF_HEROISM = { dur = 1, __tmpvals = { { "die_at", 1 } } } },
+          tempeffect_def = { EFF_HEROISM = { name = "HEROISM", desc = "Heroism" } },
+          compute_vals = { n = 1, [1] = -200 } })
+        local d = C.find("LIFE_LOWLIFE")
+        local ctx = ctxFor(a, { hostiles = 1 })
+        assert.is_true(d.detect(a, ctx))
+        assert.equals("0% of your life pool (57% counting Heroism, which is about to end)"
+          .. " -- below 0.5 (Low Health Ratio)", C.message(d, a, ctx))
+      end)
+
+      it("measures a big loss against the pool, not against max_life", function()
+        -- 30 off a 600-point pool is 5%, not the 30% of max_life it looks
+        -- like; the same 30 off a plain 100 fires.
+        local lich = actor({}, { life = 100, max_life = 100, die_at = -500 })
+        local d = C.find("LIFE_BIGLOSS")
+        assert.is_false(d.detect(lich, ctxFor(lich, { delta = -30 })))
+        local plain = actor({}, { life = 100, max_life = 100 })
+        assert.is_true(d.detect(plain, ctxFor(plain, { delta = -30 })))
+      end)
+
+      it("counts an adverse die_at against the character, whatever its duration", function()
+        -- magical.lua:3740 sets die_at +50: death arrives early, and a
+        -- character at 60/100 has ten points left, not sixty.
+        local cursed = actor({}, { life = 60, max_life = 100, die_at = 50,
+          tmp = { EFF_CURSE = { dur = 1, __tmpvals = { { "die_at", 1 } } } },
+          tempeffect_def = { EFF_CURSE = { name = "CURSE", desc = "Curse" } },
+          compute_vals = { n = 1, [1] = 50 } })
+        local d = C.find("LIFE_LOWLIFE")
+        assert.is_true(d.detect(cursed, ctxFor(cursed, { hostiles = 1 })))
+      end)
     end)
   end)
 

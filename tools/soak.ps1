@@ -272,7 +272,7 @@ function Parse-Status([string]$line) {
     foreach ($kv in ($head -split '\|')) {
         if ($kv -match '^([a-z_]+)=(.*)$') { $o[$Matches[1]] = $Matches[2] }
     }
-    foreach ($k in 'turn', 'level', 'zlevel', 'zmax', 'x', 'y', 'life', 'maxlife', 'ndialogs', 'downs') {
+    foreach ($k in 'turn', 'level', 'zlevel', 'zmax', 'x', 'y', 'life', 'maxlife', 'pool', 'poolmax', 'ndialogs', 'downs') {
         if ($o.ContainsKey($k) -and $o[$k] -match '^-?\d+') { $o[$k] = [int]$Matches[0] } elseif ($o.ContainsKey($k)) { $o[$k] = -1 }
     }
     [pscustomobject]$o
@@ -316,17 +316,24 @@ end
 -- trip, not two.
 function sk.status(step)
   local p = game.player
-  if not p then return "turn=-1|level=-1|zone=none|zlevel=-1|zmax=-1|x=-1|y=-1|life=-1|maxlife=-1|active=false|dead=false|killer=|ndialogs=0|dialog=|stairs=none|downs=0|explored=false|walk=|reason=no player" end
+  if not p then return "turn=-1|level=-1|zone=none|zlevel=-1|zmax=-1|x=-1|y=-1|life=-1|maxlife=-1|pool=-1|poolmax=-1|active=false|dead=false|killer=|ndialogs=0|dialog=|stairs=none|downs=0|explored=false|walk=|reason=no player" end
   local walk = ""
   if step then walk = (tostring(sk.walkStep(step == "walk-loop")):gsub("|", "/")) end
   local d = game.dialogs and game.dialogs[#game.dialogs]
   local dtitle = d and sk.dialogName(d) or ""
   local killer = ""
   if p.dead and p.killedBy then killer = tostring(p.killedBy.name or "?") end
-  return ("turn=%s|level=%s|zone=%s|zlevel=%s|zmax=%s|x=%s|y=%s|life=%d|maxlife=%d|active=%s|dead=%s|killer=%s|ndialogs=%d|dialog=%s|stairs=%s|downs=%d|explored=%s|walk=%s|reason=%s"):format(
+  -- #91: the POOL beside the raw pair. life/max_life is what the
+  -- character sheet shows; the pool is what the game kills at and what
+  -- every decision in this addon is made on, and for anything carrying
+  -- die_at the two are different numbers. A soak log that recorded only
+  -- the first could not explain a stop.
+  local el = b.effectiveLife and b.effectiveLife(p) or { safe_pool = p.life, safe_max = p.max_life }
+  return ("turn=%s|level=%s|zone=%s|zlevel=%s|zmax=%s|x=%s|y=%s|life=%d|maxlife=%d|pool=%d|poolmax=%d|active=%s|dead=%s|killer=%s|ndialogs=%d|dialog=%s|stairs=%s|downs=%d|explored=%s|walk=%s|reason=%s"):format(
     tostring(game.turn), tostring(p.level), tostring(game.zone and game.zone.short_name or "none"),
     tostring(game.level and game.level.level or -1), tostring(game.zone and game.zone.max_level or -1),
     tostring(p.x or -1), tostring(p.y or -1), math.floor(p.life or -1), math.floor(p.max_life or -1),
+    math.floor(el.safe_pool or -1), math.floor(el.safe_max or -1),
     tostring(b.active), tostring(p.dead and true or false), killer:gsub("|", "/"),
     game.dialogs and #game.dialogs or 0, dtitle:gsub("|", "/"), sk.stairs(), #sk.downs(), tostring(sk.explored()),
     walk, tostring(b.last_reason))
@@ -697,7 +704,8 @@ return "installed save_name=" .. tostring(game.save_name)
         if ($s.level -gt $peakLevel) { $peakLevel = $s.level }
         $zl = "$($s.zone):$($s.zlevel)"
         if ($zoneTrail.Count -eq 0 -or $zoneTrail[$zoneTrail.Count - 1] -ne $zl) { $zoneTrail.Add($zl) }
-        Write-Host ('  poll     turn={0} L{1} {2} life={3}/{4} active={5} dialogs={6} {7}' -f $s.turn, $s.level, $zl, $s.life, $s.maxlife, $s.active, $s.ndialogs, $(if ($s.active -eq 'true') { '' } elseif ($walking) { "walk=$($s.walk)" } else { "reason=$($s.reason)" }))
+        $lifeText = if ($s.pool -ne $s.life -or $s.poolmax -ne $s.maxlife) { "$($s.life)/$($s.maxlife) pool $($s.pool)/$($s.poolmax)" } else { "$($s.life)/$($s.maxlife)" }
+        Write-Host ('  poll     turn={0} L{1} {2} life={3} active={4} dialogs={5} {6}' -f $s.turn, $s.level, $zl, $lifeText, $s.active, $s.ndialogs, $(if ($s.active -eq 'true') { '' } elseif ($walking) { "walk=$($s.walk)" } else { "reason=$($s.reason)" }))
 
         # ----- ends -----
         if ($s.dead -eq 'true') {

@@ -76,6 +76,7 @@ local logm = dofile("/data-skoobot_reclauded/log.lua")
 local conditions = dofile("/data-skoobot_reclauded/conditions.lua")
 local score = dofile("/data-skoobot_reclauded/score.lua")
 local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
+local lifem = dofile("/data-skoobot_reclauded/life.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -1004,6 +1005,11 @@ local function impairmentEnding(p)
 end
 bot.impairmentEnding = function(p) return impairmentEnding(p or game.player) end
 
+--- The life pool as data/life.lua reads it (#91), for a scenario that needs
+--- to know what the bot decided on. Exposed rather than recomputed on the
+--- far side: which parts of die_at are trusted is this module's business.
+bot.effectiveLife = function(p) return lifem.of(p or game.player) end
+
 --- The Combat rotation as the act loop walks it (#59): a talent id for a
 --- talent or a live item, the entry itself for a built-in action, in the
 --- player's order. A Combat entry with hold = true is left out while the
@@ -1477,8 +1483,13 @@ end
 --- changes until they are hurt -- which is why this needed no migration of
 --- MAX_DIFF_POWER or MAX_COMBINED_POWER, both of which are margins ADDED to
 --- this figure.
+--- #91: over the life POOL, not life/max_life. A Lich at die_at -500
+--- and life 0 has five hundred points left and is not at nothing; the
+--- discounted pool is used, so an infusion about to lapse does not make the
+--- bot read itself as stronger than it will be next turn.
 local function ownPowerLevel(p)
-    return score.ownPower(power.level(p, p.global_speed), p.life, p.max_life)
+    local el = lifem.of(p)
+    return score.ownPower(power.level(p, p.global_speed), el.safe_pool, el.safe_max)
 end
 --- The same figure, for a scenario that needs to know what the bot compared
 --- with. Exposed rather than recomputed on the far side: the shape of the
@@ -1515,7 +1526,8 @@ local function evaluateSituation(p, hostiles, caps, damaged)
     end
     return score.evaluate({
         own      = ownPowerLevel(p),
-        life     = (p.max_life and p.max_life > 0) and (p.life / p.max_life) or 1,
+        -- #91: the discounted life POOL fraction, not life/max_life.
+        life     = lifem.of(p).safe_fraction,
         air      = (p.max_air and p.max_air > 0) and (p.air / p.max_air) or nil,
         hostiles = hostiles,
         blocks   = blocks,
@@ -1536,6 +1548,11 @@ function conditionContext(p, hostiles)
         -- #71: the option titles, so a message can name the knob the way
         -- the options tab does rather than by its key.
         title       = cfgfmt.title,
+        -- #91: life as data/life.lua decomposes it -- the pool the game
+        -- kills at, and how much of it the bot may trust. Built once per
+        -- decision, like everything else here.
+        life        = lifem.of(p),
+        describeLife = lifem.describe,
         chestInView = glowingChestInView,
         -- #77: whole turns the character never got, counted by the act
         -- wrapper against the engine's own clock rather than the bot's
@@ -1951,8 +1968,15 @@ function skoobot_act(noAction)
             local picks = { getLowestHealthEnemy(#usable > 0 and usable or targets), getNearestHostile() }
             local talents
 
+            -- #91: a quarter of the POOL, not of max_life. A character
+            -- whose die_at doubles its pool loses a smaller share of it to
+            -- the same hit, and should not burn a Damage Prevention talent
+            -- on a scratch; one with an adverse die_at loses a larger share
+            -- and should.
+            local el = lifem.of(game.player)
             if (bot.loop.delta < 0)
-               and (math.abs(bot.loop.delta) / game.player.max_life >= cfg("LOWHEALTH_RATIO") / 4) then
+               and (el.safe_max > 0)
+               and (math.abs(bot.loop.delta) / el.safe_max >= cfg("LOWHEALTH_RATIO") / 4) then
                 talents = filterFailedTalents(getPreventionTalents())
                 if #talents > 0 then
                     chan.debug("[Survival] [Sustain] using sustain, lost more than %d%% life in one turn!",
@@ -1966,7 +1990,7 @@ function skoobot_act(noAction)
                 end
             end
 
-            if (game.player.life / game.player.max_life <= 1 - cfg("LOWHEALTH_RATIO") / 4) then
+            if (el.safe_fraction <= 1 - cfg("LOWHEALTH_RATIO") / 4) then
                 talents = filterFailedTalents(getRecoveryTalents())
                 if #talents > 0 then
                     chan.debug("[Survival] [Recovery] using recovery, missing more than %d%% life...",
@@ -2368,11 +2392,15 @@ end
 --- "half": the multiplier is spelled out beside it rather than left for the
 --- reader to assume, because the number they can check is the one they will
 --- trust.
+--- #91: the life is the POOL the game kills at, discounted for
+--- anything about to lapse -- the same figure the checks used -- so a Lich
+--- reading "at 0% life" while carrying five hundred spare points is gone.
 local function countedPower(actor, raw)
     if actor == game.player then
-        local pct = (actor.max_life and actor.max_life > 0) and math.floor(100 * actor.life / actor.max_life) or 100
-        local f = score.lifeFactor(actor.life, actor.max_life)
-        return score.ownPower(raw, actor.life, actor.max_life), ("at %d%% life, x%.2f"):format(pct, f)
+        local el = lifem.of(actor)
+        local f = score.lifeFactor(el.safe_pool, el.safe_max)
+        return score.ownPower(raw, el.safe_pool, el.safe_max),
+            ("at %s, x%.2f"):format(lifem.describe(el), f)
     end
     local w = power.rankWeight(actor, rankWeights())
     return score.enemyPower(raw, w), ("x%s %s"):format(tostring(w), power.rankBand(actor.rank))

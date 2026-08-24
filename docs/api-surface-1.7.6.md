@@ -131,10 +131,44 @@ tick; `tooltip` is optional UI sugar. A collision sweep of every v1-defined name
 | `hotkey[i]` | P:391–392 | E/interface/PlayerHotkeys.lua:122–150 | ok | `{"talent", tid}` / `{"inventory", name}`; 12 × (nb_hotkey_pages or 5) slots. v1's `getHotbarTalents` (P:388–396) is never called — delete. |
 | `getInven(INVEN_MAINHAND)` / `getInven("QUIVER")` | A:41–42 | E/interface/ActorInventory.lua:92–100; T/mod/load.lua:120, :133 | ok | Both number and string forms supported; nil-safe. |
 | `inc_stats` | A:66 | E/interface/ActorStats.lua:58–75 | ok | Dense, zero-filled 1..7 on 1.7.6 (7 stats incl. luck, T/mod/load.lua:183–190) — v1's ipairs reduce sums all of them. |
-| `life` / `max_life` | P:600, :720; A:61 | E/interface/ActorLife.lua:30–33, :51, :58 | ok | `die_at` exists (default 0, can go below); prefer `(life - die_at) / (max_life - die_at)` for ratio thresholds. |
+| `life` / `max_life` | P:600, :720; A:61 | E/interface/ActorLife.lua:30–33, :51, :58 | ok | `die_at` exists (default 0, and goes both ways); the ratio is `(life - die_at) / (max_life - die_at)`, and how far each source of `die_at` can be trusted is its own problem -- see below (#91). |
 | `air` / `max_air` | P:638, :666 | T/data/resources.lua:45; E/interface/ActorResource.lua:61–62, :129–131 | ok† | Same 0–100 default, but **max_air is not constant** (Yeek 200, T/data/birth/races/yeek.lua:162; items 50/20). v1's absolute `air < 50` / `< 75` are wrong on those; the game's own thresholds are ratios (T/Player.lua:470, :837, :1219). Remediation 5. |
 | `engine.interface.PlayerRest` (require) | P:31 | E/interface/PlayerRest.lua exists | ok | Local never used — drop; rely on inheritance. |
 
+
+### `die_at`: zero is not where a character dies
+
+`life / max_life` is not a life fraction in this game. The engine's death check is
+`if self.life <= self.die_at` (E/interface/ActorLife.lua:51), `die_at` defaults to 0 and moves
+in both directions, and the game's own interface measures the bar over the pool:
+`(life - die_at) / (max_life - die_at)` (T/Player.lua:390, :465; T/uiset/Minimalist.lua:785).
+A Lich (`undeads/lich.lua:30`) sits at −500 routinely.
+
+The sources differ in how far a decision may trust them, which is the whole difficulty:
+
+| kind | where (1.7.6) | mechanism | trust |
+|---|---|---|---|
+| gear | `egos/cloak.lua:147` (−50), `world-artifacts.lua:242,8191` (−100), randarts (`generic.lua:460`) | `wielder`, so a plain part of the actor | while worn — i.e. now |
+| passive | `undeads/lich.lua:30` | `talentTemporaryValue` on the passive's params | while known |
+| sustain | Last Stand `techniques/weaponshield.lua:339`; necrosis `spells/necrosis.lua:51,130` | Last Stand: `addTemporaryValue` into `ret.dieat`; necrosis: `talentTemporaryValue` | while it is up. Dropping Last Stand sets life to 1 rather than killing (`:351`) |
+| timed | HEROISM `physical.lua:980`; ROGUE_S_BREW `:3528`; FRENZY `mental.lua:1765`; `mental.lua:2711`, `:2838` | `effectTemporaryValue`, except ROGUE_S_BREW (`eff.die`) and FRENZY (`eff.dieatid`) | for `eff.dur` more turns and **not after**. Expiry itself is survivable (life → 1); the next hit is not |
+| adverse | UNRAVEL `magical.lua:3740` (`die_at = +50`) | `effectTemporaryValue` | always — death arrives **early**, and no duration makes that discountable |
+
+**Attributing a contribution is possible, and does not need per-effect knowledge in the common
+case.** `effectTemporaryValue` and `talentTemporaryValue` both record `{prop, id}` on the
+effect's or the sustain's own `__tmpvals` (E/interface/ActorTemporaryEffects.lua:297,
+E/interface/ActorTalents.lua:1156), and `addTemporaryValue` stores the amount at
+`compute_vals[id]` (E/Entity.lua:859–866). Walking `p.tmp` and `p.sustain_talents` for
+`__tmpvals` entries keyed `die_at` therefore gives exact figures; the three sources that keep
+the id in a field of their own are named above and handled by name. Whatever is left over is
+gear and passives — permanent, and trusted.
+
+Note that `__tmpvals` is **empty** for anything using `addTemporaryValue` directly, which is
+the same trap #68 hit with `EFF_STUNNED` (see the status-attribute table below): a scan of it
+finds nothing and the code silently does the naive thing.
+
+`src/data/life.lua` (#91) is this, once; `spec/life_spec.lua` builds each source kind the way
+the game builds it.
 ## engine.Map / core.fov / engine.Astar
 
 | symbol | v1 use | 1.7.6 | status | note |

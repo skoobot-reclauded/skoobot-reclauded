@@ -583,3 +583,46 @@ removing. The engine has its own memory for it — `autoexplore_ignore`, set whe
 such a door (`PlayerExplore.lua:2454`) and honoured except when the player is standing next to
 it (`:1866`) — and the durable answer to standing next to it is the explored-level routing in
 #86, not another wrapper.
+
+### 5.7 Life is a pool, and part of it is on loan (#91)
+
+Every life judgement above — `LOWHEALTH_RATIO`, the Big Loss stop, `IGNORE_DAMAGE_HEALTH_RATIO`,
+the Damage Prevention and Recovery triggers, the life scaling on own power — was `life /
+max_life`, and the game does not kill at zero. It kills at `die_at`
+(`ActorLife.lua:51`), which is negative for anything from a cloak of protection to a Lich, and
+positive under UNRAVEL. The game's own life bar has always been drawn over the pool. So the
+fraction is `(life - die_at) / (max_life - die_at)`, and `src/data/life.lua` is that, once.
+
+**The care it needs is not the arithmetic — it is the trust.** A pool held up by an infusion
+with one turn left is not a pool. The module therefore returns two figures:
+
+| figure | counts | used by |
+|---|---|---|
+| `fraction` | every part of `die_at` | the wording, the soak's log — what the player's own life bar shows |
+| `safe_fraction` | the permanent and sustained parts, every adverse part, and a timed part only while it outlasts the look-ahead | every decision |
+
+with the decomposition (`permanent`, `sustained`, `temporary`, `expiring`) beside them. The
+mechanics of attributing a contribution to its source, and the three 1.7.6 sources that need
+naming because they bypass `__tmpvals`, are in
+[api-surface-1.7.6.md](api-surface-1.7.6.md) under *`die_at`: zero is not where a character
+dies*.
+
+**Three rules, and each is the cautious direction:**
+
+- a **timed** source is dropped once its remaining duration is inside the look-ahead, so the
+  bot hands back *before* the thing holding it up goes rather than on the turn after. Expiry
+  is itself survivable — Heroism sets life to 1 — but the next hit is not, and "the next hit"
+  is precisely what the bot would walk into;
+- an **adverse** source counts whatever its duration, because discounting it would be
+  confidence rather than caution;
+- what cannot be attributed counts as **permanent**, because the ordinary unattributable case
+  is a worn item or a passive. This is the one assumption that could over-trust — a future
+  timed source using a mechanism not listed — and it is why `permanent` is returned rather
+  than hidden.
+
+**What did NOT change**: the knobs, their defaults, and their meanings. `LOWHEALTH_RATIO` is
+still "a fraction of your life", and for the overwhelming majority of characters — anything
+with `die_at` at 0 — every figure here is arithmetically identical to what it replaced. That
+is asserted first in both `spec/life_spec.lua` and `tools/scenario-life.ps1`, because a
+change to a threshold everyone plays under has to be provably no change for everyone not
+carrying the thing it is about.

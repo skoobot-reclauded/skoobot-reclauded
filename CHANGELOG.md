@@ -82,6 +82,22 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   neither activating nor deactivating anything — are now *Talent rules — which talents the bot
   may use* and *Stop conditions — when it hands back*. With both addons installed the two menus
   no longer read alike either.
+- **Life is measured over the pool the game actually kills you at** (#91). Every life
+  judgement -- the low-life stop, the big-loss stop, the ignore-scratches threshold, when a
+  Damage Prevention or Recovery talent fires, and how strong the bot thinks you are -- used
+  life over maximum life. The game does not kill at zero: a cloak of protection, a world
+  artifact, Last Stand, a Heroism infusion or being a Lich all move the line down, and the
+  game's own life bar has always been drawn over that. So a Lich at nought life read as dead
+  on its feet with five hundred points to spend, and the bot stopped constantly for nothing.
+  It now reads the pool, exactly as the interface does.
+  **What holds the pool up matters as much as its size.** A pool that exists because of an
+  infusion with one turn left is not one you can spend, so anything about to run out is not
+  counted -- the bot hands back *before* it goes rather than the turn after, and says which
+  effect it did not count: *0% of your life pool (51% counting Heroism, which is about to
+  end)*. A worn item, a passive or a sustain that is up counts in full. An effect making you
+  die EARLY (die_at above zero) always counts, however briefly it lasts.
+  Nothing changed for a character with no such effect at all: every figure is the same one
+  it was, and the option defaults and their meanings are untouched.
 - **The stop reasons and the condition list are in words, not setting keys** (#71). A stop that
   read *an enemy's power level, 52, is above MAX_INDIVIDUAL_POWER* named something you could
   not find anywhere on screen. It now names the option as the tab titles it, and the figure it

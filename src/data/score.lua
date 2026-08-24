@@ -14,7 +14,8 @@
 -- stopping (#11). This module says both, from the inputs the four
 -- power-level conditions compared one at a time:
 --
---   * the player's own power, scaled by the life left (#62, item 3);
+--   * the player's own power, scaled by the life left (#62, item 3) --
+--     the life POOL the game kills at, since #91;
 --   * each visible hostile's power, weighted by its rank band (#62, item 2),
 --     with its rank and its distance;
 --   * how many there are;
@@ -161,9 +162,14 @@ M.LIFE_CURVE = 0.5
 ---     less.
 ---   * f(x) <= x for x in [0, 1]: the curve only ever makes a hurt
 ---     character read as weaker, never stronger.
-function M.lifeFactor(life, max_life)
-    if not (max_life and max_life > 0) then return 1 end
-    local x = life / max_life
+---
+--- #91: the two arguments are the life POOL and its maximum -- what
+--- data/life.lua returns, `life - die_at` over `max_life - die_at` -- not
+--- the raw pair. For a character with no die_at they are the same numbers;
+--- for a Lich they are not remotely.
+function M.lifeFactor(pool, max)
+    if not (max and max > 0) then return 1 end
+    local x = pool / max
     if x < 0 then x = 0 elseif x > 1 then x = 1 end
     return x * (1 - M.LIFE_CURVE * (1 - x))
 end
@@ -171,14 +177,15 @@ end
 --- The figure the player counts for: the heuristic scaled by the life left
 --- (#62), on the curve above (#79). One place, so the tooltip and the
 --- checks agree.
-function M.ownPower(raw, life, max_life)
-    return (raw or 0) * M.lifeFactor(life, max_life)
+function M.ownPower(raw, pool, max)
+    return (raw or 0) * M.lifeFactor(pool, max)
 end
 
 --- Score a situation.
 -- @param input a table:
 --   own        the player's power as ownPower gives it
---   life       life fraction, 0-1
+--   life       life fraction, 0-1 -- of the POOL the game kills at,
+--              discounted for anything about to lapse (#91)
 --   air        air fraction, 0-1 (nil when the character has no air)
 --   hostiles   list of { power = weighted, rank = n, distance = n, name = s }
 --   blocks     { move = x, act = x, target = x }, or nil: each truthy when
