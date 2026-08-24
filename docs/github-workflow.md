@@ -1,7 +1,8 @@
 # GitHub workflow
 
-**Status:** current as of 2026-08-23 · **Issues:** #17 (T-022), #20 (T-035), #22 (T-033),
-#30, #35, #41, #43, #44
+**Status:** current as of 2026-08-24, the day the repository went public ·
+**Issues:** #17 (T-022), #20 (T-035), #22 (T-033), #30, #35, #41, #43, #44 — all closed ·
+#110, #112, #113
 
 How this project is hosted, who acts on GitHub, how a change reaches `main`, and the two rules
 that must not be broken. Written to be readable by someone who has never seen this repo
@@ -19,7 +20,7 @@ carries what was decided.
 | Thing | Value |
 |---|---|
 | Organisation | `skoobot-reclauded`, owned by the `SkoobyDoo` account |
-| Repository | `skoobot-reclauded/skoobot-reclauded` (private until releasable) |
+| Repository | `skoobot-reclauded/skoobot-reclauded` — **public since 2026-08-24** (§8) |
 | Machine account | `skoobot-reclauded-bot` |
 | Contact address | project mailbox — **receive-only**, outbound is out of scope |
 
@@ -250,8 +251,9 @@ finds them.
 
 Decisions (`D-n`) are **not** issues and are not filed as such. They are reasoning, not work.
 **D-7** puts them where they are: tasks are GitHub issues; decisions and research stay in the
-maintainer's private archive until the repository is public, when their visibility is
-revisited (§8). They are cited here by ID, and every citation carries its one-line substance,
+maintainer's private archive. D-7 deferred the question of what happens to them when the
+repository goes public; that happened, and **D-15** answers it — the archive goes to a *private*
+repo in the org, unsanitised, and is not published alongside the addon. They are cited here by ID, and every citation carries its one-line substance,
 so that a reader without the record still knows what was decided and why.
 
 ---
@@ -319,18 +321,33 @@ does what the pre-commit hook does on a machine that is not the maintainer's:
 Two things are deliberate about how it installs its tools. The Lua tree is built with
 `hererocks` into `$HOME`, **outside the workspace**, because `luacheck .` descends into
 dot-directories (verified on 1.2.0) and a `.lua/` or `.luarocks/` tree in the checkout would
-be linted along with the addon. And the versions are pinned to the ones the repo is written
-against — luacheck 1.2.0, busted 2.3.0 — so a CI failure means the code changed, not the tool.
+be linted along with the addon. And every version is pinned — luacheck 1.2.0, busted 2.3.0,
+and **both interpreters, to a commit** — so a CI failure means the code changed, not the tool.
 
-It is **advisory**. Three limits, and all three are known rather than hoped around:
+That last part was false until #107. `hererocks --luajit 2.1` and `--luajit 2.0` each build the
+HEAD of a rolling branch, so the tool the whole suite is measured against was the one thing in the
+job that could change between two runs of the same commit — and did: a run went red on unchanged
+code because a newer 2.1 compiles `return 1 & 3`, which the maintainer's local build rejects. Both
+SHAs now sit in one workflow-level `env:` block, where a bump is a visible one-line diff. The 2.0
+pin is the head of `v2.0` (2.0.5 plus build fixes) rather than the game's exact 2.0.2, which does
+not build on a current runner; `check.yml` carries the reasoning.
 
-- **It cannot block a merge while the repository is private.** Required status checks are a
-  branch-protection / ruleset feature, and on GitHub's free plan those are available only on
-  public repositories. Nothing blocks `--ff-only` locally either; the hook is the gate there.
-- **It will not be made to block for history-protection reasons after the flip** (**D-9**:
-  the owner accepted the history-rewrite risk and closed the question; §5). Whether to require *these* checks as status checks — a different purpose, catching a broken
-  push rather than a rewritten one — is a separate decision, taken when the repo goes public
-  (§8).
+It is **advisory by choice**, and stays that way. Three limits, all known rather than hoped
+around:
+
+- **Nothing requires it, and nothing is likely to.** Required status checks became technically
+  possible at the flip and were not enabled. The argument against is not caution, it is that they
+  do no work here: a required check enforces against a person who is not the maintainer, and there
+  is no such person — the merge button is reachable only by the one reader who is going to look at
+  the result anyway. They also presuppose a pull-request flow, since a check cannot have passed on
+  a commit that is not on the remote yet, so switching them on would adopt §5's deferred PR flow as
+  a side effect of a checkbox. The maintainer's position is that this project will not reach the
+  scale that makes them worth it. **Not recorded as a `D-n`**, so it is a position rather than a
+  closed question.
+- **It will not be made to block for history-protection reasons** (**D-9**: the owner accepted
+  the history-rewrite risk and closed the question; §5). This is a *different* question from the
+  one above and the two read alike — that one is about catching a broken push, this one about
+  catching a rewritten history. Keep them distinguishable.
 - **It cannot run the harness.** There is no game on a runner. Everything that only a live
   game can show — the LuaJIT 2.1-versus-2.0.2 library gap (`table.new` resolves in CI and
   fails in-game), stop conditions, the talent screen — is verified by `tools/scenario-*.ps1`
@@ -339,7 +356,15 @@ It is **advisory**. Three limits, and all three are known rather than hoped arou
 
 What it adds over the hook is the second machine: a check that passes locally and fails in
 CI is a dependency on the maintainer's PATH, rocks tree or tool version, which is exactly the
-class of thing a contributor would hit first.
+class of thing a contributor would hit first. It has already earned that — the runner, not the
+maintainer's machine, found a real user-visible bug, where `%.1f` resolved an exact `.x5` tie
+differently under glibc and so printed a different threat number to Linux and Windows players.
+
+**Something has to read it, and for a while nothing did.** Advisory means a red run costs nothing
+until somebody notices, and GitHub mails a failed run to the account that pushed — which here is
+the machine account, not the maintainer, so the platform's one notification lands in a mailbox
+nobody watches. Two things close that loop: the maintainer's push script reports the run's
+conclusion before it exits (#113), and the README carries the badge for everyone else.
 
 ---
 
@@ -373,84 +398,88 @@ material is handled by external backups outside this project entirely.
 
 ---
 
-## 8. Going public
+## 8. Going public — done, 2026-08-24
 
-The repository is private until the addon is releasable. Flipping it public is an owner
-action in the repository settings — the machine account's token has no admin permission — and
-is separate from *publishing* the addon on te4.org and Steam, which has its own issue (#34).
-Everything below is checked before the flip, in this order, and the flip is done by the owner
-with the list in hand. Worked through on **2026-08-24**; `[x]` rows were verified that day.
+The repository is **public**. It was private until the addon was releasable enough to hand to
+testers; the flip was an owner action in the repository settings, because the machine account's
+token has no admin permission, and it is separate from *publishing* the addon on te4.org and
+Steam, which has not happened. The procedure for it is written (`docs/publishing.md`, #34) and
+deliberately not executed: **D-14** makes every `0.x` a GitHub-only prerelease and 1.0.0 the first
+build to reach either listing. Building and shipping one is #102.
 
-- [x] **The mechanical gates are green** — parse, `luacheck .`, `busted`, the harness
-      scenarios untainted, and the packed artifact loading standalone
-      ([release-0.1.md](release-0.1.md) §4). **The judgement gate is not a condition of the
-      flip** (**D-14**, 2026-08-24): it binds 1.0.0, the first build to reach the te4.org and
-      Steam listings. The flip makes a beta downloadable, not a listing. The long-term
-      per-class soak (#61) is not a gate; a full level 1→15 run is not a gate (owner,
-      2026-08-23).
-- [x] **`src/init.lua` `homepage` is correct.** `spec/manifest_spec.lua` checks it against the
-      `origin` remote, so this is already enforced; it reads
-      `https://github.com/skoobot-reclauded/skoobot-reclauded`.
-- [ ] **Delete the `overnight/` throwaway refs from `origin`.** They exist to be deleted
-      (§2.3 of the archive's `OPERATIONS.md`) and would otherwise become public branches on
-      the first day, advertising WIP that `main` already carries:
-      `tools/push-branch.ps1 -Prefix overnight/<date> -List` then `-Delete`. Do this only once
-      the work they insure is on `origin/main`.
-- [ ] **The repository's website URL in its settings is correct.** Owner action — the bot
-      token lacks admin. As of 2026-08-23 it points at `…/tree/master/docs`, and the branch is
-      `main`, so the link is dead from the first visitor: set it to `…/tree/main/docs` or to
-      the README.
-- [ ] **`CONTRIBUTING.md`, `.github/ISSUE_TEMPLATE/bug_report.md` and
-      `.github/PULL_REQUEST_TEMPLATE.md` are present and still true.** They were written while
-      the repo was private and describe the public state in the future tense in places; read
-      them once as a stranger would.
-- [x] **The addon's documents point at nothing local-only (#43).** Re-run 2026-08-24: the
-      `grep -rn -E '\.\./|research archive' CLAUDE.md README.md docs` hits are worktree
-      examples that stay inside the working tree and the deliberate "never the research
-      archive's clone" sentence in `first-run.md` §8. Two further sweeps were clean —
-      `git grep` for `C:\…` style absolute paths over every tracked file returned nothing, and
-      so did one for `localuser`, the maintainer's personal address, and the vault mechanics
-      (`.kdbx`, `.dpapi`, `ClaudeSecrets`) outside `.gitignore`'s own comment about excluding
-      them.
-- [x] **The README banner is replaced.** The "Unreleased. No public build." block is gone;
-      a beta banner, an **Installing** section and a pointer to Safety took its place
-      (2026-08-24).
-- [ ] **Immediately after the flip, re-check the token's effective permissions.** A
-      fine-grained token gets implicit read on anything public, which is harmless; confirm
-      that nothing newly public became *writable* by it that should not be, and that the
-      `.permissions` field is read with §7's caveat (it reports the account's role, not the
-      token's ceiling).
-- [ ] **Rulesets and branch protection are NOT enabled for history protection.** **D-9**: the
-      owner accepted the history-rewrite risk and closed the question. Whether to require the
-      CI status checks from §6 (#30) — a different purpose — becomes technically possible at
-      the flip and is a separate decision to take then, not a default to drift into.
-- [x] **Decided: the decision record is not published.** **D-15** (2026-08-24) answers what
-      D-7 deferred and takes D-8's option — the maintainer's archive goes to a *private* repo
-      in the org, **unsanitised**, and losing it is explicitly accepted. Nothing in this
-      repository depends on it: every `D-n` cited here carries its own one-line substance, so
-      the public documents stand alone. Creating that repo is unscheduled and gates nothing.
-- [ ] **Revisit the review flow (§5).** A PR-based flow for outside contributors is worth
-      having when there are outside contributors. The fast-forward rule for the maintainer's
-      own work stays unless decided otherwise.
-- [ ] **Know what the flip changes for `gh` and the token — and what it does not.** The hard
-      rules do not move: `gh` stays logged out (§2.2), automation still uses the machine
-      account's token, and the original SkooBot is still untouchable (§2.1). What changes is
-      exposure: anyone can now open issues and pull requests (so the templates and the `next`
-      label do real work from day one); a leaked token would let someone act as the bot in
-      public; and GitHub's secret scanning runs on public repositories, which is a reason to
-      confirm — not assume — that no credential has ever been committed.
-- [x] **The credential audit is done** (2026-08-24), and it covered the tracker as well as
-      the tree. Every commit in the history was scanned for token shapes, private keys and
-      vault paths: nothing. So were all 104 issue bodies and all 215 comments — **which this
-      list had never asked for**, and which is where the only findings were: an inventory of
-      what the vault holds, a machine path, and a recorded token fingerprint. No value was
-      ever committed or posted. The five items were edited, the removed text kept in the
-      maintainer's local notes, and the residue is a tool name plus two file extensions that
-      the public `.gitignore` already carries. **The rule this leaves behind: issue bodies and
-      comments are as public as code, and anything filed from now on is written that way.**
-- [x] **The PAT expiry stays 2026-11-19.** Owner's decision, 2026-08-24: it is fine as it is.
-      Shortening it was a suggestion, not a finding — **do not re-raise it**. Rotation is
-      §1.2.1 of the maintainer's operations notes and the push scripts warn from 30 days out.
+This section was a checklist. It is kept as the record of what that list found, because the
+findings outlived it — several are standing rules now, and one of them was not on the list at
+all.
+
+**What the flip did and did not do.** It made a beta downloadable; it did not make a listing.
+Every `0.x` is a GitHub-only prerelease (**D-14**), so the audience is people who were told what
+this is. The hard rules did not move: `gh` stays logged out (§2.2), automation still acts as the
+machine account, and the original SkooBot is still untouchable (§2.1). What changed is exposure —
+anyone can now open issues and pull requests, so the templates and the `next` label do real work;
+a leaked token would let someone act as the bot in public; and GitHub's secret scanning runs on
+public repositories.
+
+### What it found
+
+- **The credential audit was the item that mattered, and the tracker was the half nobody had
+  thought to check.** Every commit in the history: clean — no token shapes, no private keys, no
+  vault paths. All 104 issue bodies and all 215 comments: **five findings**, an inventory of what
+  the vault holds, a machine path, and a recorded token fingerprint. No secret *value* was ever
+  committed or posted, and the five were edited with the removed text kept in the maintainer's
+  local notes. **The standing rule this leaves: an issue body is as public as code, and everything
+  filed from now on is written that way.**
+- **The documents pointed at nothing local-only** (#43). Re-run clean, along with sweeps for
+  absolute machine paths, the maintainer's personal address and the vault mechanics.
+- **`src/init.lua`'s `homepage` was correct**, and cannot drift — `spec/manifest_spec.lua` checks
+  it against the `origin` remote.
+- **The README banner was replaced** by a beta banner, an *Installing* section leading with the
+  two traps (the `tome-` filename rule, and enabling the addon before creating the character), and
+  a pointer to Safety.
+- **`CONTRIBUTING.md` and the templates were re-read as a stranger would.** CONTRIBUTING gained a
+  *Where things go* table, and `.github/ISSUE_TEMPLATE/config.yml` routes questions, ideas and
+  playtest reports into Discussions, which is enabled. One thing this missed and a later pass
+  caught: CONTRIBUTING was still promising a second administrator that §9 had already ruled out.
+  Two public documents disagreeing about the one question this project exists to answer honestly
+  is worse than either being wrong alone.
+- **Token reach re-checked after the flip**, since a fine-grained token gets implicit read on
+  anything public. Confirmed again on 2026-08-24: the account's role here is `maintain`, not
+  admin, and on `SkoobyDoo/tome4-SkooBot` the token reads `push: false, admin: false,
+  maintain: false`. Readable, as any public repository is; **not writable**. Rule 2.1 holds
+  structurally, not merely by policy.
+- **Rulesets and branch protection: off, and `main` is unprotected.** Verified 2026-08-24 —
+  no rulesets, `protected: false`. **D-9** for history protection, and §6 for the separate
+  status-check question.
+- **The decision record is not published.** **D-15** answers what D-7 deferred: the maintainer's
+  archive goes to a *private* repo in the org, unsanitised, and losing it is explicitly accepted.
+  Nothing here depends on it — every `D-n` cited in this document carries its own one-line
+  substance.
+- **The PAT expiry stays 2026-11-19.** Owner's decision; shortening it was a suggestion, not a
+  finding. **Do not re-raise it.** Rotation is §1.2.1 of the maintainer's operations notes, and
+  the push scripts warn from 30 days out.
+- **The `overnight/` throwaway refs are deleted** (2026-08-24). They existed to insure an
+  unattended run against the VM's disk and to be deleted afterwards; left alone they would have
+  become public branches advertising WIP that `main` already carried. Checked before deleting,
+  which is the whole of the safety here: the branch tip must already be an ancestor of
+  `origin/main`. `tools/push-branch.ps1 -Prefix overnight/<date> -List`, then `-Delete`.
+  `origin` now has exactly one branch.
+- **The review flow was revisited** (§5). It waits on there being an outside contributor, not on
+  the repository being public — that happened and changed nothing, because the reviewer and the
+  pusher are still the same person.
+
+### Still open
+
+- **The repository's website URL is empty.** The dead `…/tree/master/docs` link was removed at the
+  flip and not replaced, so this is cosmetic rather than broken — but a visitor gets no link.
+  Owner action; the bot token lacks admin. Set it to the README or to `…/tree/main/docs`.
+
+### What the list got wrong, worth keeping
+
+Two of these items were ticked before they were true, and both were caught later by a sweep rather
+than by the list: CONTRIBUTING still promised the second admin, and this document went on
+describing a private repository for a day after it was public. A checklist worked through in one
+sitting records the state of an intention, not of the repository. That is the argument for the
+open-board-against-`main` sweep in §4, and it is why this section is now a record — a record can
+be wrong about the past, but it cannot quietly stay wrong about the present.
 
 ---
 
@@ -458,10 +487,11 @@ with the list in hand. Worked through on **2026-08-24**; `[x]` rows were verifie
 
 The original SkooBot did not die of technical difficulty. It died with two working
 contributor fixes unmerged while the maintainer was unavailable. This section is what is
-known today about avoiding that, stated plainly. Both issues that once tracked the gap — #17,
-the contribution path, and #41, the bus-factor interim — are closed, and closed by being
-answered rather than abandoned: the answer is the rest of this section. What is still open is
-the recovery material, which is #40.
+known today about avoiding that, stated plainly. Every issue that once tracked the gap — #17,
+the contribution path; #41, the bus-factor interim; #40, the recovery material — is closed, and
+each was closed by being answered rather than abandoned. **The answers are this section**, which
+is why nothing here points at an issue for the rest of the story: there is no rest of the story,
+only a position the maintainer has taken and its cost.
 
 - **The org owner can do everything on GitHub.** `skoobot-reclauded` is owned by the
   `SkoobyDoo` account. That account can flip the repository public, add admins, and mint a
@@ -495,7 +525,7 @@ the recovery material, which is #40.
   GPL-3.0-or-later with the attribution chain in `NOTICE`. If the repository is public and
   unmaintained, anyone can fork it, keep the headers and the chain, and carry on — which is
   exactly how this project relates to its own predecessor. A public repository is therefore
-  itself part of the answer, which is one more reason §8 matters.
+  itself part of the answer, and since 2026-08-24 it is one this project already has (§8).
 
 ---
 
