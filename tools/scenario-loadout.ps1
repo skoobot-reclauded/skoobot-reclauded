@@ -384,6 +384,11 @@ local ok, res = pcall(function()
   for _, e in ipairs(d.proposal.entries) do if e.tid == tid and not e.declined then wrote = wrote + 1 end end
   d:use(row, "left")                         -- undo it
   local set2 = skoobot_reclauded.data(d.actor).declined or {}
+  -- Leave the screen as it was found: on the RULES view. The probe after
+  -- this one takes list[1] to mean the suggest row, and in the proposal
+  -- view list[1] is the apply row -- which opened the apply menu early and
+  -- made that probe report "no apply menu".
+  d:cancelProposal()
   return ("tid=%s before=[%s] after=[%s] marked=%s inset=%s still_proposed=%d undone=%s"):format(
     tid, before, tostring(after), tostring(marked), tostring(inset), wrote,
     tostring(set2[tid] == nil))
@@ -395,7 +400,6 @@ return ok and res or ("ERR " .. tostring(res))
     Check ($decline -match 'after=\[.*\(declined\)') 'and the row says so rather than disappearing'
     Check ($decline -match 'still_proposed=0') 'a declined talent is not what the suggestion would write'
     Check ($decline -match 'undone=true') 'selecting it again takes the decline back'
-    Note "decline: $decline"
 
     $menu = Probe 'menu' @'
 local ok, res = pcall(function()

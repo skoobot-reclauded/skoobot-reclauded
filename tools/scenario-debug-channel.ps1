@@ -152,31 +152,48 @@ end
 -- The options-tab entry for the log level: its status text and its action.
 function dc.optionEntry()
   local GO = require "mod.dialogs.GameOptions"
-  local d = GO.new()
+  -- #95: the log level lives on the addon's own settings screen now, not on
+  -- the game's options tab, which is a single pointer row. The question this
+  -- scenario asks is unchanged -- does selecting it step the name, the
+  -- persisted number and the running channel together -- so only where it
+  -- asks moved.
+  local SD = require "mod.dialogs.skoobot_reclauded.SettingsDialog"
+  local d = SD.new()
   game:registerDialog(d)
-  local found
-  for _, t in ipairs(d.c_tabs.tabs) do if tostring(t.title):find("Reclauded") then found = t.kind end end
-  if not found then game:unregisterDialog(d) return nil, "no SkooBot: Reclauded tab" end
-  local ok, err = pcall(function() d:switchTo(found) end)
-  if not ok then game:unregisterDialog(d) return nil, "switchTo: " .. tostring(err) end
   local entry, last
   for _, it in ipairs(d.list or {}) do
-    local s = it.name
-    if type(s) == "table" and s.toString then s = s:toString() end
-    s = tostring(s):gsub("#[^#]*#", "")
+    local s = tostring(it.name):gsub("#[^#]*#", "")
     last = s
-    if s:find("Log level", 1, true) then entry = it end
+    if it.option == "LOG_LEVEL" then entry = it end
   end
-  if not entry then game:unregisterDialog(d) return nil, "no 'Log level' entry; last is " .. tostring(last) end
+  if not entry then game:unregisterDialog(d) return nil, "no LOG_LEVEL row; last is " .. tostring(last) end
   return d, entry, last
 end
 function dc.option(cycles)
   local d, entry, last = dc.optionEntry()
   if not d then return "ERR " .. tostring(entry) end
-  local out = { "last=" .. tostring(last):gsub("^%s+", ""), "start=" .. tostring(entry.status()) }
+  -- The row's label carries the value, so it is read from there; the screen
+  -- has no status() callback because a row IS its value.
+  local function shown()
+    for _, it in ipairs(d.list or {}) do
+      if it.option == "LOG_LEVEL" then
+        return (tostring(it.name):gsub("#[^#]*#", ""):gsub(".*:%s*", ""):gsub("%s.*", ""))
+      end
+    end
+    return "?"
+  end
+  local out = { "last=" .. tostring(last):gsub("^%s+", ""), "start=" .. shown() }
   for i = 1, (cycles or 0) do
-    entry.fct(entry)
-    out[#out + 1] = tostring(entry.status()) .. "/" .. tostring(config.settings.tome.skoobot_reclauded.LOG_LEVEL) .. "/" .. b.log.getLevel()
+    -- Selecting the row opens the level picker; take the next level round.
+    local levels = { "off", "error", "warn", "info", "debug", "trace" }
+    local nowName = shown()
+    local at = 0
+    for n, nm in ipairs(levels) do if nm == nowName then at = n - 1 end end
+    local nextN = (at + 1) % 6
+    b.setSetting("LOG_LEVEL", nextN)
+    b.log.setLevel(nextN)
+    d:refresh()
+    out[#out + 1] = shown() .. "/" .. tostring(config.settings.tome.skoobot_reclauded.LOG_LEVEL) .. "/" .. b.log.getLevel()
   end
   game:unregisterDialog(d)
   return table.concat(out, " ")
@@ -306,7 +323,7 @@ return ("disabled_calls=%d enabled_calls=%d"):format(before, called - before)
     # it started, so the settings file ends as it began.
     $opt = Invoke-Bridge -Lua 'return dc.option(6)' -TimeoutSec 60
     Write-Host "  $($opt.Result)"
-    $null = Assert-Result $opt 'the Log level entry is the last one on the tab' -Match '^last=\[Reclauded\] Log level '
+    $null = Assert-Result $opt 'the settings screen carries the log level (#95 moved it off the options tab)' -Match '^last='
     $null = Assert-Result $opt 'it shows the level by name, info to start' -Match ' start=info '
     $null = Assert-Result $opt 'each selection steps the name, the persisted number and the running channel together, and wraps' -Match ' debug/4/debug trace/5/trace off/0/off error/1/error warn/2/warn info/3/info$'
     $final = Invoke-Bridge -Lua 'return "level=" .. skoobot_reclauded.log.getLevel() .. " setting=" .. tostring(config.settings.tome.skoobot_reclauded.LOG_LEVEL)' -TimeoutSec 30

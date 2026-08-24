@@ -46,16 +46,30 @@ local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 
 module(..., package.seeall, class.inherit(engine.ui.Dialog))
 
--- #46: the log level by name, the same order data/log.lua uses. The number
--- is what is stored; the name is what a player reads.
-local LOG_LEVELS = { [0] = "off", [1] = "warn", [2] = "info", [3] = "info", [4] = "debug", [5] = "trace" }
+-- #46: the log level by name. The number is what is stored; the name is
+-- what a player reads, and data/log.lua owns the mapping -- `module.name(n)`,
+-- which is what the options tab called before #95 moved this here.
+--
+-- The literal table is a fallback for a runtime table that has not finished
+-- loading, and it cost a scenario failure to get right: it first said 1 was
+-- "warn", which is data/log.lua's 2, so the row label and the stored number
+-- disagreed and stepping through the levels skipped one. Names in one place
+-- or they drift; this copy exists only so a missing module cannot error.
+local LOG_LEVELS = { [0] = "off", [1] = "error", [2] = "warn", [3] = "info", [4] = "debug", [5] = "trace" }
+local LOG_MAX = 5
 local function logName(n)
     local log = skoobot_reclauded.log
-    if log and log.levelName then
-        local ok, name = pcall(log.levelName, n)
+    local m = log and log.module
+    if m and m.name then
+        local ok, name = pcall(m.name, n)
         if ok and name then return name end
     end
     return LOG_LEVELS[tonumber(n) or -1] or tostring(n)
+end
+local function logMax()
+    local log = skoobot_reclauded.log
+    local m = log and log.module
+    return (m and tonumber(m.MAX)) or LOG_MAX
 end
 
 local function fmtValue(name, value)
@@ -212,11 +226,7 @@ function _M:use(item)
 
     if kind == "choice" then      -- LOG_LEVEL
         local choices = {}
-        for n = 0, 5 do
-            if LOG_LEVELS[n] and (n ~= 3 or LOG_LEVELS[2] ~= LOG_LEVELS[3]) then
-                choices[#choices + 1] = { name = logName(n), value = n }
-            end
-        end
+        for n = 0, logMax() do choices[#choices + 1] = { name = logName(n), value = n } end
         game:registerDialog(PickOneDialog.new(cfgfmt.title(name) .. " -- how much should it print?",
             choices, function(n) self:write(name, n) end))
         return

@@ -461,7 +461,7 @@ return ("entries=%d unassigned=%d skipped=%d choices=%d headers=[%s] first=[%s] 
   table.concat(rows, ","))
 '@
     Check ($prop -match 'entries=[1-9]') 'the suggestion proposes at least one rule for a fresh character'
-    Check ($prop -match 'first=\[Apply this suggestion\.\.\.  \(Enter: Merge / Replace / Cancel\)\]') 'the proposal view leads with the apply row and names its three answers'
+    Check ($prop -match 'first=\[PREVIEW -- nothing is written yet\.  Apply this suggestion\.\.\.  \(Enter: Merge / Replace / Cancel\)\]') 'the proposal view leads with the apply row, says it is a preview (#85), and names its three answers'
     Note "proposal: $prop"
 
     $am = Probe 'apply-menu' @'
