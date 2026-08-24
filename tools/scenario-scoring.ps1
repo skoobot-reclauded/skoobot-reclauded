@@ -434,7 +434,7 @@ return "installed"
     if ($b.Result -match 'an enemy''s power level, ([\d.]+), is more than MAX_DIFF_POWER above yours \(([\d.]+) at current life\)') {
         $max = [double]$Matches[1]; $mine = [double]$Matches[2]
         $exp = [double]($b.Result -replace '.* mine=([\d.]+) .*', '$1')
-        Ok ([math]::Abs($mine - $exp) -lt 0.15) "own power in the reason is the heuristic on the life curve at 40% life ($mine ~ $exp)"
+        Ok ([math]::Abs($mine - $exp) -lt 0.51) "own power in the reason is the heuristic on the life curve at 40% life ($mine ~ $exp)"
         Ok ($max -gt 1.5 * $armor) "the boss figure carries the x2 rank weight ($max over $armor of armour alone)"
     }
 

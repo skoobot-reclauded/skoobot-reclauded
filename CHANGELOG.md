@@ -82,6 +82,12 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
   neither activating nor deactivating anything — are now *Talent rules — which talents the bot
   may use* and *Stop conditions — when it hands back*. With both addons installed the two menus
   no longer read alike either.
+- **Power levels read as whole numbers** (#84). *"an enemy's power level, 1080.1, is more than…"*
+  claimed a precision the figure does not have — it is a rough sum over a creature's life,
+  damage, crits, speed, defence, stats and weapons. Every power level you see is rounded now:
+  the tooltip, the stop reasons and *Ask*. The **ratios** keep their decimal, because there 1.0
+  is the limit and the tenth is the difference between over it and under it. Only the display
+  changed; the bot still compares the exact figures, so a stop fires exactly where it did.
 - **Keys.** Shift+F3 toggle, Shift+F4 stop, Shift+F5 run once, Shift+F6 ask what it would do,
   Shift+F7 menu. The original's Alt+F1 / Shift+F1 stay with the original.
 - **Talent picker fits the screen.** Long lists scroll instead of running off the top and

@@ -300,7 +300,12 @@ return "installed"
     else { Check $false 'with a zero margin the crowd stop fires and reports the weighted sum' }
     if ($c3.Result -match 'yours \(([\d.]+) at current life\)' -and $c3.Result -match 'mine_expected=([\d.]+)') {
         $got = [double]($c3.Result -replace '.*yours \(([\d.]+) at current life\).*', '$1'); $exp = [double]($c3.Result -replace '.*mine_expected=([\d.]+).*', '$1')
-        Check ([math]::Abs($got - $exp) -lt 0.15) "the own power the bot compared with is power x life/max_life at full life ($got ~ $exp)"
+        # 0.51, not 0.15: the reason prints power levels WHOLE since #84, so
+        # the figure read back can be up to half a point from the exact one.
+        # The comparison the bot made is still on the exact value -- only the
+        # rendering rounds -- which is why this compares within a rounding
+        # rather than demanding the decimal back.
+        Check ([math]::Abs($got - $exp) -lt 0.51) "the own power the bot compared with is power x life/max_life at full life ($got ~ $exp)"
     }
 
     # ----- item 2: strongest -- weighted max vs v1's --------------------------
@@ -357,7 +362,7 @@ return "installed"
     Check ($l2.Result -match 'at current life') 'the reason says the figure is at current life'
     if ($l2.Result -match 'yours \(([\d.]+) at current life\)' -and $l2.Result -match 'mine_expected=([\d.]+)') {
         $got = [double]($l2.Result -replace '.*yours \(([\d.]+) at current life\).*', '$1'); $exp = [double]($l2.Result -replace '.*mine_expected=([\d.]+).*', '$1')
-        Check ([math]::Abs($got - $exp) -lt 0.15) "the own power the bot compared with is power x life/max_life at 40% life ($got ~ $exp)"
+        Check ([math]::Abs($got - $exp) -lt 0.51) "the own power the bot compared with is power x life/max_life at 40% life ($got ~ $exp)"
     } else { Check $false 'the 40%-life reason carries the own-power figure' }
     Check ($l2.Result -match 'dturn=0') 'query advances no game turn'
 }

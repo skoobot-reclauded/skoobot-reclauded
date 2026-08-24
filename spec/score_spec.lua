@@ -201,12 +201,35 @@ describe("data/score.lua", function()
 
     it("the details carry v1's wording with the figures compared", function()
       local r = S.evaluate(situation({ own = 50, hostiles = { hostile(300, 3), hostile(251, 3) } }), knobs())
-      assert.equals("an enemy's power level, 300.0, is above MAX_INDIVIDUAL_POWER", r.details.SCOUTER_BIGENEMY)
-      assert.equals("an enemy's power level, 300.0, is more than MAX_DIFF_POWER above yours (50.0 at current life)",
+      assert.equals("an enemy's power level, 300, is above MAX_INDIVIDUAL_POWER", r.details.SCOUTER_BIGENEMY)
+      assert.equals("an enemy's power level, 300, is more than MAX_DIFF_POWER above yours (50 at current life)",
         r.details.SCOUTER_STRONGERENEMY)
-      assert.equals("the combined enemy power level, 551.0, is more than MAX_COMBINED_POWER above yours "
-        .. "(50.0 at current life)", r.details.SCOUTER_CROWDPOWER)
+      assert.equals("the combined enemy power level, 551, is more than MAX_COMBINED_POWER above yours "
+        .. "(50 at current life)", r.details.SCOUTER_CROWDPOWER)
       assert.is_nil(r.details.SCOUTER_ENEMYCOUNT)
+    end)
+
+    -- #84: the owner's playtest read "an enemy's power level, 1080.1, is
+    -- more than ...". A power level is a heuristic sum over life, damage,
+    -- crits, speed, defence, stats and weapons; its tenth is noise the
+    -- player cannot act on, and printing it claims a precision the figure
+    -- does not have.
+    it("prints power levels whole, rounded to nearest (#84)", function()
+      local r = S.evaluate(situation({ own = 50.4, hostiles = { hostile(1080.1, 3) } }), knobs())
+      assert.equals("an enemy's power level, 1080, is above MAX_INDIVIDUAL_POWER", r.details.SCOUTER_BIGENEMY)
+      assert.is_truthy(r.details.SCOUTER_STRONGERENEMY:find("(50 at current life)", 1, true))
+
+      -- Nearest, not truncated: .6 goes up.
+      local up = S.evaluate(situation({ own = 50, hostiles = { hostile(300.6, 3) } }), knobs())
+      assert.equals("an enemy's power level, 301, is above MAX_INDIVIDUAL_POWER", up.details.SCOUTER_BIGENEMY)
+    end)
+
+    -- The RATIOS keep their decimal, and must: 1.0 is the limit, so the
+    -- tenth is the difference between over and under. Rounding these would
+    -- turn "1.4x your limit" into "1x your limit", which reads as at it.
+    it("keeps the decimal on the ratios and the threat score (#84)", function()
+      local r = S.evaluate(situation({ own = 20, hostiles = { hostile(480, 3) } }), knobs())
+      assert.is_truthy(r.suffix:find("threat 16.0", 1, true))
     end)
   end)
 
@@ -236,8 +259,8 @@ describe("data/score.lua", function()
       assert.equals(S.HANDBACK, r.posture)
       assert.is_true(r.flags.SCOUTER_BIGENEMY)
       assert.is_true(r.flags.SCOUTER_STRONGERENEMY)
-      assert.equals("an enemy's power level, 480.0, is above MAX_INDIVIDUAL_POWER -- threat 16.0", r.reasons[1])
-      assert.equals("an enemy's power level, 480.0, is more than MAX_DIFF_POWER above yours (20.0 at current life)"
+      assert.equals("an enemy's power level, 480, is above MAX_INDIVIDUAL_POWER -- threat 16.0", r.reasons[1])
+      assert.equals("an enemy's power level, 480, is more than MAX_DIFF_POWER above yours (20 at current life)"
         .. " -- threat 16.0", r.reasons[2])
       assert.is_near(16, r.score, 1e-9)                 -- 480 / (20 + 10)
     end)

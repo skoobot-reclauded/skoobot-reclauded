@@ -98,8 +98,28 @@ local function term(value, limit)
     return value > 0 and math.huge or 0
 end
 
+--- A ratio, to one decimal: "1.5x your limit", the threat score. The tenth
+--- carries meaning here -- 1.0 IS the limit, and 1.4 against 0.9 is the
+--- difference between over and under.
 local function fmt1(x)
     return ("%.1f"):format(x)
+end
+
+--- A POWER LEVEL, whole (#84). These are three- and four-figure numbers
+--- built from a heuristic over a creature's life, damage, crits, speed,
+--- defence, stats and weapons; the tenth of one is noise the player cannot
+--- act on and cannot check, and "1080.1" reads as a precision the figure
+--- does not have. Owner's call from the 2026-08-23 playtest.
+---
+--- Only the RENDERING rounds. Every comparison stays on the unrounded value,
+--- so a stop still fires exactly where the knob says it does -- which does
+--- mean a figure can read equal to a limit it is a fraction over. That is
+--- the right way round: the alternative is rounding the comparison, and a
+--- threshold that moves by half a point depending on how it is printed.
+---
+--- Power levels are sums of non-negative parts, so nearest is floor(x + 0.5).
+local function fmt0(x)
+    return ("%d"):format(math.floor((tonumber(x) or 0) + 0.5))
 end
 
 --- A block's name in parentheses when the caller gave one (the act loop
@@ -225,19 +245,22 @@ function M.evaluate(input, knobs)
         if v > score then score = v end
     end
 
-    -- v1's wording for each set flag, with the figures it compared -- to
-    -- one decimal, where v1 printed the float whole.
+    -- v1's wording for each set flag, with the figures it compared. The
+    -- POWER LEVELS are whole (#84): they are three- and four-figure
+    -- heuristic sums and the tenth of one is noise. The ratios below --
+    -- "1.5x your limit", the threat score -- keep their decimal, where 1.0
+    -- is the limit and the tenth is the whole point.
     local details = {}
     if flags.SCOUTER_BIGENEMY then
-        details.SCOUTER_BIGENEMY = "an enemy's power level, " .. fmt1(f.max) .. ", is above MAX_INDIVIDUAL_POWER"
+        details.SCOUTER_BIGENEMY = "an enemy's power level, " .. fmt0(f.max) .. ", is above MAX_INDIVIDUAL_POWER"
     end
     if flags.SCOUTER_STRONGERENEMY then
-        details.SCOUTER_STRONGERENEMY = "an enemy's power level, " .. fmt1(f.max)
-            .. ", is more than MAX_DIFF_POWER above yours (" .. fmt1(own) .. " at current life)"
+        details.SCOUTER_STRONGERENEMY = "an enemy's power level, " .. fmt0(f.max)
+            .. ", is more than MAX_DIFF_POWER above yours (" .. fmt0(own) .. " at current life)"
     end
     if flags.SCOUTER_CROWDPOWER then
-        details.SCOUTER_CROWDPOWER = "the combined enemy power level, " .. fmt1(f.sum)
-            .. ", is more than MAX_COMBINED_POWER above yours (" .. fmt1(own) .. " at current life)"
+        details.SCOUTER_CROWDPOWER = "the combined enemy power level, " .. fmt0(f.sum)
+            .. ", is more than MAX_COMBINED_POWER above yours (" .. fmt0(own) .. " at current life)"
     end
     if flags.SCOUTER_ENEMYCOUNT then
         details.SCOUTER_ENEMYCOUNT = f.count .. " enemies in sight, above MAX_ENEMY_COUNT"
