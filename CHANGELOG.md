@@ -9,6 +9,11 @@ Nothing has been released yet. The first release will be **0.1.0**; the baseline
 against is the original SkooBot's last public version, **0.0.12**, and this section lists what is
 different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
 
+**Every `0.x.y` is a beta prerelease** (**D-14**, 2026-08-24), published as a GitHub Release
+and distributed nowhere else. **`1.0.0`** is the first version to reach the te4.org listing and
+the Steam Workshop. There is no `0.0.x` in this series — those numbers belong to the original
+SkooBot, and no number is ever shared between the two projects.
+
 ## [Unreleased]
 
 ### Added

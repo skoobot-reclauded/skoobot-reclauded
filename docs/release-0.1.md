@@ -4,19 +4,33 @@
 
 The owner's decisions, recorded so the gate list is not re-derived: **D-11** (2026-08-21,
 *0.1 is v1's feature set working on 1.7.6, and a meaningful improvement on the last public
-SkooBot*) and the 2026-08-23 rulings on presets, the 1→15 run and the release flow. How the
-release is then cut is [releasing.md](releasing.md).
+SkooBot*), the 2026-08-23 rulings on presets, the 1→15 run and the release flow, and
+**D-14** (2026-08-24, *`0.x` is a GitHub-only beta prerelease; `1.0.0` is the first te4.org /
+Steam publish, and D-11's judgement bar moves to it*). How the release is then cut is
+[releasing.md](releasing.md).
+
+> **What D-14 changed about this document.** It was written when 0.1 was *the* release. It no
+> longer is: 0.1.0 is a beta, published only as a GitHub prerelease, for testers who were
+> pointed at it. **The floor, the feature set and the mechanical gates below still bind
+> 0.1.0.** **The judgement gate in §4 does not — it binds 1.0.0**, the first version that
+> appears in the game's own Addons browser. Nothing else here moves.
 
 ---
 
 ## 1. The bar
 
-- **Floor:** SkooBot 0.0.12's feature set working on ToME 1.7.6 — rest, explore and fight for
-  levels 1–15, the talent-section screen, the stop conditions with WARN / STOP / IGNORE.
-- **Bar:** *a meaningful improvement over SkooBot 0.0.12 at its best.* The comparison point is
-  the original as it played in 2019–2020, not as it was abandoned; "it loads on 1.7.6" is
-  necessary and not sufficient. This is a **judgement the owner makes at release time against
-  the complaint record**. It is not automatable and nothing below pretends it is.
+- **Floor — binds 0.1.0.** SkooBot 0.0.12's feature set working on ToME 1.7.6 — rest, explore
+  and fight for levels 1–15, the talent-section screen, the stop conditions with
+  WARN / STOP / IGNORE.
+- **Bar — binds 1.0.0** (D-14). *A meaningful improvement over SkooBot 0.0.12 at its best.*
+  The comparison point is the original as it played in 2019–2020, not as it was abandoned;
+  "it loads on 1.7.6" is necessary and not sufficient. This is a **judgement the owner makes
+  against the complaint record**. It is not automatable and nothing below pretends it is —
+  and it is deliberately arbitrary, because the thing it is protecting is a stranger's first
+  impression from the in-game banner.
+
+**So 0.1.0 ships on the floor plus §4's mechanical gates, and 1.0.0 adds the bar.** A beta is
+allowed to be rough in ways a listing is not.
 
 ## 2. The three non-negotiables, honestly
 
@@ -53,7 +67,8 @@ M4 is not gates only: the open rows are work.
 
 ## 4. Gates
 
-All green on the release commit, in this order; a tainted harness result is void.
+All green on the release commit, in this order; a tainted harness result is void. Every row
+except the last binds **both** 0.1.0 and 1.0.0; the last binds 1.0.0 only (D-14).
 
 | Gate | How |
 |---|---|
@@ -63,7 +78,7 @@ All green on the release commit, in this order; a tainted harness result is void
 | Harness scenarios pass, untainted | `scenario-surface.ps1` (every entry point, parity with the port) · `scenario-talent-screen.ps1` (#56, #55) · `scenario-stop-notices.ps1` (#57, #58) · `scenario-t011-trivial-damage.ps1` (#6) · `scenario-t012-freeze.ps1` (#7) · `scenario-t013-glowing-chest.ps1` (#8) · `scenario-t015-drowning.ps1` (#10) · `scenario-t016-label-accumulation.ps1` (#51) · `scenario-t019-stale-conditions.ps1` (#52). `scenario-baseline-v1.ps1` measures the *original* and is not a gate on this addon. Added 2026-08-23 and part of the gate: `scenario-t010-marked-target.ps1` (#5, real combat) · `scenario-keybinds.ps1` (#50) · `scenario-loadout.ps1` (#18) · `scenario-salvage-power.ps1` and `scenario-salvage-entrance.ps1` (#62) · `scenario-first-run.ps1` (#54) · `scenario-debug-channel.ps1` (#46) · `scenario-liveness.ps1` (#13) · `scenario-flee.ps1` (#59) · `scenario-hold.ps1` (#15) · `scenario-conditions.ps1` (#12) · `scenario-scoring.ps1` (#11) · `scenario-hooks.ps1` (#14) · `scenario-settings.ps1` (#90 -- the only scenario that RESTARTS the game, because a setting that does not survive a restart is invisible to every other one) · `scenario-greeting.ps1` (#72) · `scenario-life.ps1` (#91). **Run the whole set with `tools/run-scenarios.ps1`**, which records one JSON line per scenario under `build/results/` and re-runs a tainted one once; `scenario-walking-skeleton.ps1` is excluded as superseded. |
 | The packed artifact loads standalone | `tools/pack.ps1 -Release`, then `tools/clean-build.ps1 -SkipPack` |
 | #54 first-run pass done, #50 done, #18 done | #50 and #18 closed; #54's pass is done and all three of its findings (#71 #72 #73) are built, awaiting the owner's play check before they are closed |
-| **The judgement gate** | The owner plays the release candidate against 0.0.12 with the complaint themes in hand — marked-target talents stalling the rotation, stops on trivial damage, the pin / dominate / sleep freeze, glowing chests walked past, the talent menu overflowing, drowning while resting, configuration nobody could discover — and records the verdict on #32. |
+| **The judgement gate — 1.0.0 only** (D-14) | The owner plays the release candidate against 0.0.12 with the complaint themes in hand — marked-target talents stalling the rotation, stops on trivial damage, the pin / dominate / sleep freeze, glowing chests walked past, the talent menu overflowing, drowning while resting, configuration nobody could discover — and records the verdict. **Not a gate on 0.1.0 or any other `0.x`**, which is a beta handed to testers who were told what it is; it gates the first build that appears in the game's Addons browser, where the audience did not consent to being a tester. |
 
 ## 5. Explicitly not a gate
 

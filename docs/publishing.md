@@ -12,7 +12,16 @@
 > reading this: the step you can take is to confirm the release in [releasing.md](releasing.md)
 > is complete and stop.
 
-Publishing comes **after** a release exists — tag `v0.x.y`, packed artifact, GitHub Release
+> ## Not before 1.0.0
+>
+> **D-14** (2026-08-24): every `0.x.y` is a beta prerelease distributed as a GitHub Release
+> and nowhere else, and **`1.0.0` is the first version published to either listing.** So this
+> document is not executed at 0.1.0, or at any other `0.x`. A `0.x` release stops at step 9
+> of [releasing.md](releasing.md) §3. The reason is the audience: a tester who was handed a
+> link knows what a beta is, and someone browsing the in-game Addons banner did not agree to
+> be one.
+
+Publishing comes **after** a release exists — tag `v1.x.y`, packed artifact, GitHub Release
 ([releasing.md](releasing.md) §3). The listings show the `addon_version` from `init.lua`, and a
 listing version with no tag behind it cannot be rebuilt. Treat an upload as immutable: a
 mistake is a new patch version, never a re-upload under the same number.

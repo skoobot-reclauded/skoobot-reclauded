@@ -8,6 +8,8 @@ author = { "SkoobyDoo (skoobot.reclauded@proton.me)" }
 homepage = "https://github.com/skoobot-reclauded/skoobot-reclauded"
 description = [[An autopilot for levelling: hand your character to a bot that rests, explores and fights for you, and hands control back whenever it judges the situation needs you.
 
+BETA. Every 0.x version is an early build published on GitHub only -- not on te4.org and not on the Steam Workshop, and not there until 1.0.0. If you are running this, you were pointed at it. Expect rough edges, and please report them: https://github.com/skoobot-reclauded/skoobot-reclauded/issues
+
 ENABLE THIS ADDON BEFORE CREATING THE CHARACTER YOU WANT TO USE IT ON. A savefile records the addons it was made with, and the game silently ignores any addon a save does not list -- no error, it is simply not there -- so it cannot attach to a character that already exists.
 
 Getting started, in game: Shift+F7 opens the menu. Set which talents the bot may use (or let it suggest a loadout from the talents you know), then Shift+F3 starts it, and stops it again. Shift+F6 asks what it would do next without doing it. All five keys can be changed under Key Bindings.

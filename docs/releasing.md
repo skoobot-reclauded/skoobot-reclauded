@@ -16,12 +16,26 @@ artifact. Publishing the artifact to te4.org and Steam is a separate, human-only
 **`addon_version = {0,1,0}`** is ours. It is bumped **every release**, and only there. It
 appears in the archive name (`tome-skoobot_reclauded-0.1.0.teaa`), in the Addons menu, on the
 te4.org listing, in the engine log's `Binding addon` line, and so in every bug report. The
-series is `0.x.y`: `y` for a release that only fixes, `x` for one that adds; `1.0.0` is a
-decision for later and not a goal.
+series is `0.x.y`: `y` for a release that only fixes, `x` for one that adds.
 
 **The series starts at 0.1.0.** The manifest has said `{0,1,0}` since the scaffold, nothing
 has shipped before it, and the original's `0.0.x` numbers belong to the original. That closes
 the question #33 left open: there is no `0.0.13`, and no release number is ever reused.
+
+**Every `0.x.y` is a beta prerelease, and `1.0.0` is the first publish** (**D-14**,
+2026-08-24 — `0.x` is a GitHub-only beta; `1.0.0` is the first te4.org / Steam publish, and
+D-11's judgement bar moves to it). Concretely:
+
+| | `0.x.y` | `1.0.0` |
+|---|---|---|
+| Where it goes | a GitHub Release marked **prerelease**, and nowhere else | te4.org and the Steam Workshop as well |
+| Who it is for | testers who were pointed at it | anyone browsing the in-game Addons banner |
+| The bar | §4 of [release-0.1.md](release-0.1.md) — the mechanical gates | the mechanical gates **and** the judgement gate |
+| [publishing.md](publishing.md) | not executed | executed, by hand, by the maintainer |
+
+So `1.0.0` is a goal with a definition rather than a number that arrives eventually, and it is
+the one release where "does this feel good to a stranger" is a gate. Which build earns it is
+the owner's call and is deliberately not reducible to a checklist.
 
 **`version = {1,7,6}`** is the ToME version the addon is built against. The engine's rule for
 whether an addon loads is `engine.version_nearly_same(game, addon)` (`engine/version.lua:90`):
@@ -87,10 +101,19 @@ are already on `main`; if one is not, it is not in this release.
 8. **Push with the tag:** `git push --follow-tags origin main`.
 9. **GitHub Release** on `v0.x.y`: title `SkooBot: Reclauded 0.x.y`, body the CHANGELOG
    section verbatim, and the artifact attached **inside a zip** —
-   `tome-skoobot_reclauded-0.x.y.zip` containing the `.teaa`. The machine account may create
-   it (`gh release create v0.x.y dist/tome-skoobot_reclauded-0.x.y.zip --title … --notes-file …`,
-   under the rules in [github-workflow.md](github-workflow.md) §2.2).
-10. **Publish** to te4.org and Steam: [publishing.md](publishing.md). Human only.
+   `tome-skoobot_reclauded-0.x.y.zip` containing the `.teaa`. **Every `0.x` release is marked
+   prerelease** (D-14), which keeps it out of the *Latest release* slot and off the repository
+   sidebar's headline:
+
+   ```
+   gh release create v0.x.y dist/tome-skoobot_reclauded-0.x.y.zip \
+     --title 'SkooBot: Reclauded 0.x.y' --notes-file notes.md --prerelease
+   ```
+
+   The machine account may create it, under the rules in
+   [github-workflow.md](github-workflow.md) §2.2. Drop `--prerelease` only at 1.0.0.
+10. **Publish** to te4.org and Steam: [publishing.md](publishing.md). Human only, and **only
+    at 1.0.0** (D-14). A `0.x` release stops at step 9.
 
 ## 4. Builds reach people zipped, never as a bare `.teaa`
 
