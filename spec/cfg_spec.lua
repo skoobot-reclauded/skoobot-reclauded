@@ -113,4 +113,73 @@ describe("data/cfg.lua", function()
       assert.is_nil(C.parse("tome.skoobot_reclauded.AXB = 77", "A.B"))
     end)
   end)
+
+  -- #95: the settings screen and the runtime reader both walk these, so a
+  -- setting that is in one and not the other is a setting that either never
+  -- appears or never resolves. Held as an invariant rather than as a list,
+  -- so adding the thirteenth option cannot half-land.
+  describe("the per-character split (#95)", function()
+    it("ORDER is exactly the options that have titles, once each", function()
+      local seen = {}
+      for _, name in ipairs(C.ORDER) do
+        assert.is_nil(seen[name], "listed twice: " .. name)
+        seen[name] = true
+        assert.is_not_nil(C.TITLE[name], "no title for " .. name)
+      end
+      for name in pairs(C.TITLE) do
+        assert.is_true(seen[name] == true, "titled but not in ORDER: " .. name)
+      end
+    end)
+
+    -- The settings screen shows a description beside every row. A row
+    -- with none is a row a player cannot act on.
+    it("every option has a description, and no description is orphaned", function()
+      for _, name in ipairs(C.ORDER) do
+        assert.is_string(C.DESC[name], "no description for " .. name)
+        assert.is_true(#C.DESC[name] > 40, "description too short to help: " .. name)
+      end
+      for name in pairs(C.DESC) do
+        assert.is_not_nil(C.TITLE[name], "described but not an option: " .. name)
+      end
+    end)
+
+    it("a range is only given where it is not the default, and is ordered", function()
+      for name, r in pairs(C.RANGE) do
+        assert.is_not_nil(C.TITLE[name], "ranged but not an option: " .. name)
+        assert.is_true(r[1] < r[2], "range is inverted: " .. name)
+      end
+    end)
+
+    it("every option wants a control the screen knows how to draw", function()
+      for _, name in ipairs(C.ORDER) do
+        local k = C.kind(name)
+        assert.is_true(k == "number" or k == "boolean" or k == "choice", name .. " -> " .. tostring(k))
+      end
+    end)
+
+    it("every per-character setting is a real option", function()
+      for name in pairs(C.PER_CHARACTER) do
+        assert.is_not_nil(C.TITLE[name], "per-character but not an option: " .. name)
+      end
+    end)
+
+    -- The split itself, stated once. A threshold answers "how dangerous is
+    -- this character's situation"; a preference answers "how do I like this
+    -- addon to behave". Copying the second onto every new character would
+    -- be an irritation, not a feature.
+    it("the three preferences are the account's, not the character's", function()
+      assert.is_nil(C.PER_CHARACTER.ACTION_DELAY)
+      assert.is_nil(C.PER_CHARACTER.STOP_POPUP)
+      assert.is_nil(C.PER_CHARACTER.LOG_LEVEL)
+    end)
+
+    it("every safety threshold is the character's", function()
+      for _, name in ipairs({ "LOWHEALTH_RATIO", "IGNORE_DAMAGE_HEALTH_RATIO",
+                              "MAX_INDIVIDUAL_POWER", "MAX_DIFF_POWER",
+                              "MAX_COMBINED_POWER", "MAX_ENEMY_COUNT",
+                              "NORMAL_POWER_RATIO", "ELITES_POWER_RATIO", "BOSS_POWER_RATIO" }) do
+        assert.is_true(C.PER_CHARACTER[name] == true, name .. " should be per character")
+      end
+    end)
+  end)
 end)

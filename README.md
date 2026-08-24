@@ -56,9 +56,19 @@ The menu (`Shift+F7`) holds the two things you configure per character:
 - **Stop conditions** — each one set to `STOP` (stops every time), `WARN` (stops once, then
   lets you restart through it until the condition clears) or `IGNORE`.
 
-The thresholds behind the stop conditions (low-life ratio, maximum enemy power, enemy count,
-action delay, whether a stop also opens a popup) are on the **[SkooBot: Reclauded]** tab of
-Game Options.
+The thresholds behind the stop conditions are on the addon's own **Settings** screen, reached
+from its menu (`Shift+F7`). They come in two kinds, and the screen says which each one is:
+
+- **safety thresholds** -- the low-life ratio, the power limits, the enemy count -- belong to
+  the **character you are playing**, because a level 3 Alchemist and a level 30 Bulwark do not
+  want the same answer to "how dangerous is this". A character that has not changed one simply
+  uses the default;
+- **preferences** -- the action delay, whether a stop opens a popup, how much is logged --
+  are yours and apply to every character.
+
+One action on that screen copies a character's thresholds onto the defaults new characters
+start with, so the global settings can be set from a character you have just tuned. The
+**[SkooBot: Reclauded]** tab in Game Options is still there and points at it.
 
 > **Runs entirely offline.** No language model, no network requests, no API key, no telemetry.
 > *Reclauded* is a play on *rebooted*: this is built with the help of Claude, an AI assistant,
@@ -133,7 +143,7 @@ Read this before ever running an autoplay addon, including this one:
 | `src/` | The addon. This tree, and only this tree, is what gets packed into a `.teaa` |
 | `src/init.lua` | Addon manifest |
 | `src/data/` | Pure modules with no game dependency — power scoring, talent rules, stop notices, key names, settings defaults |
-| `src/hooks/`, `src/overload/`, `src/superload/` | The game-facing half: keybinds and the options tab, the dialogs, and the act loop wrapped onto the player |
+| `src/hooks/`, `src/overload/`, `src/superload/` | The game-facing half: keybinds and the options-tab pointer, the dialogs (menu, talents, stop conditions, settings), and the act loop wrapped onto the player |
 | `spec/` | [busted](https://lunarmodules.github.io/busted/) tests for the logic that runs outside the game |
 | `tools/` | Development tooling: the test harness, its scenarios, the packer and the release gate. **Never packaged into a release** |
 | `docs/` | Design notes and records |

@@ -77,6 +77,21 @@ different from it. How a release is cut: [docs/releasing.md](docs/releasing.md).
 - **Stops are one kind of message.** Every stop is a `[SkooBot]` line in the message log in
   one colour per severity, repeated on the big-news banner, so it is not lost among combat
   lines. Messages that mention a key name the key you actually have bound (#57, #58).
+- **One settings screen, and the thresholds now belong to the character** (#95, #90). The
+  addon's configuration was in three places: the game's options tab, its own menu, and nothing
+  saying how they related. There is now a **Settings** screen on the SkooBot menu holding all
+  of it, and the options tab is one row pointing at it -- kept, because an addon with no
+  presence in Options is one you would conclude has no settings.
+  **The split is the point.** A safety threshold -- the low-life ratio, the power limits, the
+  enemy count -- belongs to the character you are playing, because a level 3 Alchemist and a
+  level 30 Bulwark do not want the same answer to "how dangerous is this"; the screen marks
+  each row *(this character)* or *(default)*, and a character that has not touched one just
+  uses the default. The delay, the stop popup and the log level are yours and say *(all
+  characters)*. Nothing needs migrating: every existing character has no thresholds of its own
+  and carries on with the values it had.
+  One row copies **this character's thresholds onto the defaults future characters start
+  with**, so the global settings can be set from a character you have just tuned rather than in
+  the abstract; another clears a character's own values and puts it back on the defaults.
 - **The menu says what its choices do** (#73). *Set Skill Usage* and *Activate/Deactivate Bot
   Stop Conditions* — v1's wording, where the first is the talent-rules screen and the second is
   neither activating nor deactivating anything — are now *Talent rules — which talents the bot

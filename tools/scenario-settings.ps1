@@ -108,6 +108,50 @@ try {
     Write-Host '  --- 3b. a second setting, and a boolean at that'
     $b = Say (Invoke-Bridge -Lua "return tostring(config.settings.tome.skoobot_reclauded.STOP_POPUP)" -TimeoutSec 30)
     Check ($b -eq 'true' -or $b -eq 'false') "STOP_POPUP reads as a boolean ($b)"
+
+    # ----- 4: the per-character layer (#95) ---------------------------------
+    #
+    # A safety threshold belongs to the CHARACTER; the account value is what
+    # a character with no opinion falls back to. The two must not leak into
+    # each other, which is the whole risk of a two-layer store, and the leak
+    # would be invisible on a machine with one character.
+    Write-Host ''
+    Write-Host '  --- 4. a threshold on the character, the account default underneath'
+    $c1 = Say (Invoke-Bridge -TimeoutSec 30 -Lua @'
+local b = skoobot_reclauded
+b.clearCharSetting("MAX_ENEMY_COUNT")
+local acct = config.settings.tome.skoobot_reclauded.MAX_ENEMY_COUNT
+b.setCharSetting("MAX_ENEMY_COUNT", 3)
+local src, val = b.settingSource("MAX_ENEMY_COUNT")
+return ("acct_before=%s src=%s val=%s acct_now=%s reader=%s"):format(
+  tostring(acct), tostring(src), tostring(val),
+  tostring(config.settings.tome.skoobot_reclauded.MAX_ENEMY_COUNT),
+  tostring(b.setting("MAX_ENEMY_COUNT")))
+'@)
+    Check ($c1 -match 'src=character val=3 ') 'the character''s own value is what applies'
+    Check ($c1 -match 'reader=3') 'and it is what the bot itself reads, not just what the screen shows'
+    if ($c1 -match 'acct_before=(\S+) src=.* acct_now=(\S+)') {
+        Check ($Matches[1] -eq $Matches[2]) "the account default is untouched by it ($($Matches[1]))"
+    } else { Check $false 'the account default is untouched by it' }
+
+    # An account preference has no per-character value, and asking for one is
+    # refused rather than written somewhere that will never be read.
+    $c2 = Say (Invoke-Bridge -TimeoutSec 30 -Lua 'return tostring(skoobot_reclauded.setCharSetting("STOP_POPUP", true))')
+    Check ($c2 -eq 'false') 'an account preference refuses a per-character value'
+
+    Write-Host ''
+    Write-Host '  --- 4b. save as default for future characters, then clear'
+    $c3 = Say (Invoke-Bridge -TimeoutSec 30 -Lua @'
+local b = skoobot_reclauded
+local names = b.saveAsDefaults()
+local acct = config.settings.tome.skoobot_reclauded.MAX_ENEMY_COUNT
+b.clearCharSetting("MAX_ENEMY_COUNT")
+local src, val = b.settingSource("MAX_ENEMY_COUNT")
+return ("copied=%d acct=%s after_clear_src=%s val=%s"):format(
+  #names, tostring(acct), tostring(src), tostring(val))
+'@)
+    Check ($c3 -match 'acct=3 ') 'saving as default copied the character''s value onto the account'
+    Check ($c3 -match 'after_clear_src=account val=3') 'and clearing the character falls back to it'
 }
 finally {
     # Put the machine back: the live value, and the file exactly as it was.

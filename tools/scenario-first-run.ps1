@@ -24,10 +24,11 @@
          Cancel wording;
       6. the stop-conditions dialogs: the labels and the WARN / STOP / IGNORE
          choice;
-      7. the options tab: every title and description, read back, with the
-         two power titles that read backwards retitled and no shouting; and
-         the range each numerical entry opens with, down to what a player
-         typing 50 into it ends up with (#74);
+      7. the settings screen (#95): every row and its description, the
+         per-character / account marking each one carries, and the range a
+         numerical row opens with -- down to what a player typing 50 into it
+         ends up with (#74). Then 7b: the game's own options tab, which is
+         now a single row saying where the settings went;
       8. the first real stop with a suggested loadout applied: the notice
          line, the banner and the popup text;
       9. COEXISTENCE with the original SkooBot, only when game/addons/
@@ -365,11 +366,16 @@ return ("title=[%s] rows=[%s] w=%d h=%d game=%dx%d help_has_toggle=%s help_has_m
   tostring(m.title), table.concat(rows, " | "), m.w, m.h, game.w, game.h,
   tostring(help:find(toggle, 1, true) ~= nil), tostring(help:find(menukey, 1, true) ~= nil), help)
 '@
-    Check ($menu -match 'rows=\[a\) Talent rules -- which talents the bot may use \| b\) Stop conditions -- when it hands back \| c\) Cancel \| Keybinds: OK\]') 'the menu lists its three choices and the keybind status'
+    Check ($menu -match 'rows=\[a\) Talent rules -- which talents the bot may use \| b\) Stop conditions -- when it hands back \| c\) Settings -- thresholds, delay, popup, logging \| d\) Cancel \| Keybinds: OK\]') 'the menu lists its four choices and the keybind status (#95 added Settings)'
     Check ($menu -match 'help=\[How to start: ') 'the help text under the choices starts with how to start'
     Check ($menu -match 'help_has_toggle=true help_has_menu=true') 'the help text names the bound toggle and menu keys'
     Check ($menu -match 'Keys: ') 'the help text lists the keys'
-    Check ($menu -match 'Escape > Key Bindings' -and $menu -match 'Escape > Options') 'the help text says where keys and thresholds are changed'
+    # #95: the thresholds are no longer under Escape > Options, so the help
+    # must point at the Settings row instead. Pointing at the old place would
+    # be worse than saying nothing.
+    Check ($menu -match 'Escape > Key Bindings') 'the help text says where the keys are changed'
+    Check ($menu -match 'thresholds and the rest are under Settings') 'and that the settings are on the menu''s own row'
+    Check ($menu -notmatch 'Escape > Options') 'and does not send the player to the options tab any more'
     if ($menu -match 'w=(\d+) h=(\d+) game=(\d+)x(\d+)') { Check (([int]$Matches[1] -le [int]$Matches[3]) -and ([int]$Matches[2] -le [int]$Matches[4])) "the menu fits the screen ($($Matches[1])x$($Matches[2]) in $($Matches[3])x$($Matches[4]))" }
     Note "menu: $menu"
 
@@ -487,87 +493,98 @@ return out
     Check ($sc -match 'after=WARN top=none') 'the choice is applied and every dialog closes'
     Note "stop conditions: $sc"
 
-    # ----- 7. the options tab ----------------------------------------------
+    # ----- 7. the settings screen, and the pointer left behind (#95) --------
+    #
+    # This part used to audit the game's Options tab, which held eleven
+    # numeric entries, a toggle and the log level. #95 moved all of it to a
+    # screen of the addon's own, so the audit moves with it -- the questions
+    # are the same ones, and they are the questions that matter about any
+    # screen a player reads: does every row explain itself, does anything
+    # shout, and does a description fit the pane it is drawn in.
     Write-Host ''
-    Write-Host '  --- 7. the options tab'
+    Write-Host '  --- 7. the settings screen'
+    $st = Probe 'settings-screen' @'
+local SD = require "mod.dialogs.skoobot_reclauded.SettingsDialog"
+local d = SD.new()
+game:registerDialog(d)
+local out, empty, shouting = {}, 0, 0
+for _, it in ipairs(d.list or {}) do
+  local title = fr.plain(it.name)
+  local desc = tostring(it.desc or ""):gsub("%s+", " ")
+  if desc == "" then empty = empty + 1 end
+  if desc:find("%u%u%u%u%u%u") then shouting = shouting + 1 end
+  out[#out+1] = title .. " :: " .. desc
+end
+local rows = #(d.list or {})
+-- The description pane is a TextzoneList WITH a scrollbar, so a long
+-- description scrolls rather than being silently cut (the trap the options
+-- tab had). Prove the scrollbar is really there rather than assuming it.
+local bar = d.c_desc and d.c_desc.scrollbar and true or false
+game:unregisterDialog(d)
+return ("rows=%d empty=%d shouting=%d scrollbar=%s ;; %s"):format(
+  rows, empty, shouting, tostring(bar), table.concat(out, " ;; "))
+'@
+    Check ($st -match 'rows=14 ') 'the screen lists all twelve options and the two actions'
+    Check ($st -match 'empty=0 ') 'every row explains itself'
+    Check ($st -match 'shouting=0 ') 'no description shouts in capitals'
+    Check ($st -match 'scrollbar=true') 'the description pane scrolls, so nothing is silently clipped'
+
+    # The split is the point of the screen, so it must be legible ON the rows
+    # rather than only in the help text.
+    Check ($st -match 'Maximum Enemy Power: \d+\s+\(default\)') 'a threshold the character has not touched reads as the default'
+    Check ($st -match 'Popup when the bot stops: (yes|no)\s+\(all characters\)') 'an account preference says it applies to every character'
+    Check ($st -match 'Save this character.s thresholds as the default for future characters') 'the save-as-default action is offered, in the owner''s words'
+    Check ($st -match 'Clear this character.s own thresholds') 'and the way back to the defaults'
+
+    # The wording work from #54, #82 and #91 came with the descriptions and
+    # must not have been dropped in the move.
+    Check ($st -match 'Power level is the addon.s rough threat score') 'power level is still explained in one clause'
+    Check ($st -match 'These five limits are also a scale') 'the threat scale is still explained once'
+    Check ($st -match 'Low Health Ratio: [\d.]+.*:: A fraction of your life pool') 'the life ratios still say they are fractions of the life pool (#91)'
+    Check ($st -notmatch 'Max enemy power level|Maximum Individual Enemy Power') 'the two titles that read backwards are still gone'
+    foreach ($line in ($st -split ' ;; ' | Select-Object -Skip 1)) { Note "setting: $line" }
+
+    # The options tab keeps ONE row, and its job is to say where to go. An
+    # addon with no presence in Options is one a player concludes has no
+    # settings, which is why the row exists at all.
+    Write-Host ''
+    Write-Host '  --- 7b. the options tab is a pointer'
     $op = Probe 'options' @'
 local GO = require "mod.dialogs.GameOptions"
 local d = GO.new()
 game:registerDialog(d)
 local found
-for i, t in ipairs(d.c_tabs.tabs) do if tostring(t.title):find("Reclauded") then found = t.title end end
+for _, t in ipairs(d.c_tabs.tabs) do if tostring(t.title):find("Reclauded") then found = t.title end end
 if not found then game:unregisterDialog(d) return "ERR no SkooBot: Reclauded tab" end
-for i, t in ipairs(d.c_tabs.tabs) do if t.title == found then d:switchTo(t.kind) end end
+for _, t in ipairs(d.c_tabs.tabs) do if t.title == found then d:switchTo(t.kind) end end
 local out = {}
-local shouting, empty, clipped = 0, 0, {}
 for _, it in ipairs(d.list or {}) do
-  local title = fr.plain(it.name)
   local zone = it.zone and fr.plain(it.zone.text) or ""
-  -- No scrollbar is passed to these Textzones, so a description longer than
-  -- the pane is silently CLIPPED -- the player simply never sees the tail.
-  -- Textzone:generate() leaves the height it needs in max_display and the
-  -- height it has in h, so the question is answerable (#82).
-  local z = it.zone
-  if z and z.max_display and z.h and z.max_display > z.h then
-    -- gsub returns TWO values; without the parentheses the match count
-    -- becomes format's second argument and every field shifts along one.
-    local short = (title:gsub("^%s*%[Reclauded%]%s*", ""))
-    clipped[#clipped+1] = ("%s(%d>%d)"):format(short, z.max_display, z.h)
-  end
-  -- the pane text is the addon title, a blank line, then the description;
-  -- plain() has turned the line breaks into " / "
   zone = zone:gsub("^SkooBot: Reclauded[%s/]*", ""):gsub("%s+", " ")
-  if zone == "" then empty = empty + 1 end
-  if zone:find("%u%u%u%u%u%u") then shouting = shouting + 1 end
-  out[#out+1] = title .. " = " .. tostring(it.status and it.status()) .. " :: " .. zone
+  out[#out+1] = fr.plain(it.name) .. " :: " .. zone
 end
 game:unregisterDialog(d)
-return ("tab=[%s] entries=%d empty=%d shouting=%d clipped=%d [%s] ;; %s"):format(
-  found, #out, empty, shouting, #clipped, table.concat(clipped, " "), table.concat(out, " ;; "))
+return ("tab=[%s] entries=%d ;; %s"):format(found, #out, table.concat(out, " ;; "))
 '@
-    Check ($op -match 'tab=\[\[SkooBot: Reclauded\]\] entries=(\d+) empty=0 ') 'every entry on the tab has a description'
-    $entries = if ($op -match 'entries=(\d+)') { [int]$Matches[1] } else { 0 }
-    Check ($entries -ge 11) "the tab lists the settings ($entries)"
-    Check ($op -match 'shouting=0') 'no description shouts in capitals'
-    Check ($op -match '\[Reclauded\] Maximum Enemy Power = \d+ :: Stop when any enemy in view has a power level above this figure') 'MAX_INDIVIDUAL_POWER is titled Maximum Enemy Power and explained'
-    Check ($op -match '\[Reclauded\] Maximum Enemy Power Above Yours = \d+ :: Stop when any enemy in view has a power level more than this much above your own') 'MAX_DIFF_POWER is titled Maximum Enemy Power Above Yours'
-    Check ($op -notmatch 'Max enemy power level|Maximum Individual Enemy Power') 'the two titles that read backwards are gone'
-    Check ($op -match 'Power level is the addon.s rough threat score') 'power level is explained in one clause'
-    Check ($op -match 'Maximum Combined Enemy Power = \d+ :: Stop when the power levels of every enemy in view, added together, are more than this much above your own') 'MAX_COMBINED_POWER says it is a margin above yours'
-    Check ($op -match 'Normal Enemy Power Ratio = [\d.]+ :: .*multiple of their power level' -and $op -match 'Elite Enemy Power Ratio = [\d.]+ :: .*multiple' -and $op -match 'Boss Enemy Power Ratio = [\d.]+ :: .*multiple') 'each rank ratio says it is a multiple of the power level'
-    Check ($op -match 'Low Health Ratio = [\d.]+ :: A fraction of your life pool') 'the life ratios say they are fractions of the life pool (#91)'
-    # #82: since #11 these five are terms of one threat score, not
-    # independent switches, and every power stop already ends " -- threat N".
-    # The tab has to say what N is measured against.
-    Check ($op -match 'Maximum Enemy Power = \d+ :: .*These five limits are also a scale: every stop for one of them ends "-- threat N", where the limit you set counts as 1') 'Maximum Enemy Power explains the threat scale once'
-    Check ($op -match 'Maximum Enemy Power Above Yours = \d+ :: .*On the threat scale, 1 is an enemy exactly this far above you') 'MAX_DIFF_POWER says what 1 on the scale is'
-    Check ($op -match 'Maximum Combined Enemy Power = \d+ :: .*On the threat scale, 1 is a room exactly this far above you') 'MAX_COMBINED_POWER says what 1 on the scale is'
-    Check ($op -match 'Maximum Enemy Count = \d+ :: .*On the threat scale, 1 is exactly this many in view') 'MAX_ENEMY_COUNT says what 1 on the scale is'
-    Check ($op -match 'Ignore Damage Above Life Ratio = [\d.]+ :: .*life exactly at this ratio is threat 1') 'the explore-damage ratio says what 1 on the scale is'
-    # These Textzones get no scrollbar, so an over-long description is
-    # clipped and the player never sees the tail -- which is how a wording
-    # change quietly loses its last sentence.
-    Check ($op -match 'clipped=0 \[\]') 'no description is longer than the pane it is drawn in'
-    foreach ($line in ($op -split ' ;; ' | Select-Object -Skip 1)) { Note "option: $line" }
+    Check ($op -match 'tab=\[\[SkooBot: Reclauded\]\] entries=1 ') 'the tab is one row now, not thirteen'
+    Check ($op -match 'Settings are in the SkooBot menu') 'and it says where the settings went'
+    Check ($op -match 'belong to the character you are playing') 'it explains why they are not here'
+    Note "options tab: $op"
 
-    # #74: the range each numerical entry actually opens with, and what a
-    # player typing "50" into it ends up with. Reading the prompt is not
-    # enough -- the prompt was only ever cosmetic; the bound is c_box.min /
-    # c_box.max, and before #74 the minimum was never passed at all.
+    # #74's finding, re-asked of the new screen: the range a numerical row
+    # opens with, and what a player typing "50" into it ends up with.
+    # Reading the prompt is not enough -- the prompt was only ever cosmetic;
+    # the bound is c_box.min / c_box.max, and the minimum is GetQuantity's
+    # SIXTH argument, which is exactly the mistake that made every entry
+    # 0..1000000 the first time.
     #
     # The engine clamps on ACCEPT, not while typing: __TEXTINPUT calls
     # updateText(nil, true) -- no_limits -- so the box holds 50 until Enter
-    # calls updateText(0), which bounds it. Both steps are done here, so the
-    # record shows the value the player sees typed and the value they get.
-    $rg = Probe 'option-ranges' @'
-local GO = require "mod.dialogs.GameOptions"
-local d = GO.new()
+    # calls updateText(0), which bounds it.
+    $rg = Probe 'setting-ranges' @'
+local SD = require "mod.dialogs.skoobot_reclauded.SettingsDialog"
+local d = SD.new()
 game:registerDialog(d)
-local tab
-for _, t in ipairs(d.c_tabs.tabs) do if tostring(t.title):find("Reclauded") then tab = t end end
-if not tab then game:unregisterDialog(d) return "ERR no SkooBot: Reclauded tab" end
-d:switchTo(tab.kind)
-
 local want = { "Low Health Ratio", "Ignore Damage Above Life Ratio",
                "Normal Enemy Power Ratio", "Maximum Enemy Power Above Yours", "Action Delay" }
 local out = {}
@@ -579,38 +596,37 @@ for _, title in ipairs(want) do
   if not item then
     out[#out+1] = title .. " MISSING"
   else
-    item.fct(item)
+    d:use(item)
     local dlg = game.dialogs[#game.dialogs]
     local box = dlg and dlg.c_box
     if not box then
       out[#out+1] = title .. " NODIALOG"
     else
       local prompt = fr.plain(box.title or ""):gsub(":%s*$", "")
+      -- Typing is not onTextInput here: the Numberbox holds its digits in
+      -- `tmp` and updateText reads them. updateText(nil, true) is the
+      -- no_limits form the engine uses WHILE typing; updateText(0) is what
+      -- Enter calls, and is where the bound is applied.
       box.first = false
       box.tmp = { "5", "0" }
-      box:updateText(nil, true)     -- typing: unclamped, as the engine does it
+      box:updateText(nil, true)
       local typed = box.number
-      box:updateText(0)             -- Enter: bounds it
-      out[#out+1] = ("%s prompt=[%s] min=%s max=%s typed=%s accepted=%s"):format(
-        title, prompt, tostring(box.min), tostring(box.max), tostring(typed), tostring(box.number))
+      box:updateText(0)
+      out[#out+1] = ("%s min=%s max=%s prompt=[%s] typed=%s becomes=%s"):format(
+        title, tostring(box.min), tostring(box.max), prompt, tostring(typed), tostring(box.number))
       game:unregisterDialog(dlg)
     end
   end
 end
 game:unregisterDialog(d)
-fr.closeAll()
 return table.concat(out, " ;; ")
 '@
-    Check ($rg -match 'Low Health Ratio prompt=\[From 0 to 1\] min=0 max=1 ') 'Low Health Ratio offers 0 to 1, and means it'
-    Check ($rg -match 'Low Health Ratio .* typed=50 accepted=1\b') '...so 50 typed for "50%" becomes 1, not fifty times maximum life'
-    Check ($rg -match 'Ignore Damage Above Life Ratio prompt=\[From 0 to 1\] min=0 max=1 ') 'Ignore Damage Above Life Ratio offers 0 to 1'
-    Check ($rg -match 'Normal Enemy Power Ratio prompt=\[From 0 to 10\] min=0 max=10 ') 'the rank ratios offer 0 to 10'
-    Check ($rg -match 'Normal Enemy Power Ratio .* typed=50 accepted=10\b') '...and clamp to 10'
-    Check ($rg -match 'Maximum Enemy Power Above Yours prompt=\[From 0 to 1000000\].* accepted=50\b') 'the power figures keep the open range, having no natural ceiling'
-    Check ($rg -match 'Action Delay prompt=\[From 0 to 1000000\].* accepted=50\b') 'so does the delay'
-    Check ($rg -notmatch 'MISSING|NODIALOG') 'every probed entry opened its quantity dialog'
+    Check ($rg -notmatch 'MISSING|NODIALOG') 'every numerical row opens a quantity box'
+    Check ($rg -match 'Low Health Ratio min=0 max=1 ') 'a life fraction is bounded 0 to 1, not 0 to a million'
+    Check ($rg -match 'Low Health Ratio .*typed=50 becomes=1\b') 'and typing 50 into it lands on 1, not fifty times maximum life'
+    Check ($rg -match 'Normal Enemy Power Ratio min=0 max=10 ') 'a rank ratio is bounded 0 to 10'
+    Check ($rg -match 'Action Delay min=0 max=1000000 ') 'a setting with no range of its own keeps the default one'
     foreach ($line in ($rg -split ' ;; ')) { Note "range: $line" }
-
     # ----- 8. the first real stop ------------------------------------------
     Write-Host ''
     Write-Host '  --- 8. the first stop with the suggested loadout'

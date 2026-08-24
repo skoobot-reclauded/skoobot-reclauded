@@ -139,12 +139,31 @@ _G.skoobot_reclauded = bot
 -- Forward declarations for the mutually recursive core.
 local skoobot_act, checkForAdditionalAction, stop
 
+--- One setting, as it applies RIGHT NOW (#95).
+---
+--- The character's own value wins, then the account default. Only the
+--- safety thresholds are per character (data/cfg.lua's PER_CHARACTER says
+--- which, and why); the preferences are the player's and have one value.
+---
+--- Reads `p.skoobot_reclauded` directly rather than through data(), which
+--- is declared below this and creates the table as a side effect. This runs
+--- on every decision and must not write anything.
 local function cfg(key)
+    if cfgfmt.PER_CHARACTER[key] then
+        local p = game.player
+        local d = p and p.skoobot_reclauded
+        local own = d and d.settings and d.settings[key]
+        if own ~= nil then return own end
+    end
     local s = config.settings.tome.skoobot_reclauded
     return s and s[key]
 end
 
 --- The rank-band weights as set (#62), in power.rankWeight's shape.
+--- The value one setting resolves to right now, for a probe: the reader
+--- the bot itself uses, not a parallel one (#95).
+bot.setting = cfg
+
 local function rankWeights()
     return {
         normal = cfg("NORMAL_POWER_RATIO"),
@@ -316,6 +335,60 @@ function bot.setSetting(option, value)
         return
     end
     game:saveSettings(cfgfmt.file(option), text)
+end
+
+--- #95: the same three operations for a CHARACTER's own value.
+---
+--- Kept in the character's own table, so the engine saves it with them and
+--- nothing account-wide changes. Setting one is how a player says "this
+--- character is different"; clearing it is how they take it back.
+function bot.setCharSetting(option, value)
+    if not cfgfmt.PER_CHARACTER[option] then
+        chan.warn("[Settings] %s is an account setting and has no per-character value",
+            tostring(option))
+        return false
+    end
+    local d = data()
+    d.settings = d.settings or {}
+    d.settings[option] = value
+    return true
+end
+
+function bot.clearCharSetting(option)
+    local d = data()
+    if d.settings then d.settings[option] = nil end
+    return true
+end
+
+--- Is this character using its own value, and what is the account's?
+function bot.settingSource(option)
+    local d = game.player and game.player.skoobot_reclauded
+    local own = cfgfmt.PER_CHARACTER[option] and d and d.settings and d.settings[option]
+    local s = config.settings.tome.skoobot_reclauded
+    local acct = s and s[option]
+    if own ~= nil then return "character", own, acct end
+    return "account", acct, acct
+end
+
+--- "Save as default for future characters" (#95): copy every per-character
+--- value this character has onto the account, so the next character starts
+--- where this one ended up. The owner's way of configuring the global
+--- settings FROM a character they have just tuned.
+---
+--- Only values the character actually set are copied. A threshold the
+--- character never overrode is already the account's, and writing it back
+--- would be a no-op that still rewrote the file.
+function bot.saveAsDefaults()
+    local d = game.player and game.player.skoobot_reclauded
+    local own = d and d.settings
+    local names = {}
+    for _, name in ipairs(cfgfmt.ORDER) do
+        if own and own[name] ~= nil then
+            bot.setSetting(name, own[name])
+            names[#names + 1] = cfgfmt.title(name)
+        end
+    end
+    return names
 end
 
 bot.notice = notice

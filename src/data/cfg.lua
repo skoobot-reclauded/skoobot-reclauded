@@ -127,4 +127,131 @@ M.TITLE = {
 function M.title(name)
     return M.TITLE[name] or tostring(name)
 end
+
+--- Which settings belong to the CHARACTER, and which to the account (#95).
+---
+--- The split is not arbitrary. A threshold answers "how dangerous is this
+--- character's situation" -- and a level 3 Alchemist and a level 30 Bulwark
+--- do not want the same answer, which is the whole reason #90's title calls
+--- these safety settings per character. The three left out answer "how do I
+--- like this addon to behave": how fast it steps, whether it opens a popup,
+--- how much it prints. Those are the player's, not the character's, and
+--- copying them onto every new character would be an irritation rather than
+--- a feature.
+---
+--- A character with no value of its own uses the account default, which is
+--- what every existing save has and why this needs no migration.
+M.PER_CHARACTER = {
+    LOWHEALTH_RATIO            = true,
+    IGNORE_DAMAGE_HEALTH_RATIO = true,
+    MAX_INDIVIDUAL_POWER       = true,
+    MAX_DIFF_POWER             = true,
+    MAX_COMBINED_POWER         = true,
+    MAX_ENEMY_COUNT            = true,
+    NORMAL_POWER_RATIO         = true,
+    ELITES_POWER_RATIO         = true,
+    BOSS_POWER_RATIO           = true,
+}
+
+--- Every option this addon has, in the order the settings screen shows them:
+--- the character's safety thresholds first, because they are what a player
+--- comes to change, then the account preferences.
+M.ORDER = {
+    "LOWHEALTH_RATIO", "IGNORE_DAMAGE_HEALTH_RATIO",
+    "MAX_INDIVIDUAL_POWER", "MAX_DIFF_POWER", "MAX_COMBINED_POWER", "MAX_ENEMY_COUNT",
+    "NORMAL_POWER_RATIO", "ELITES_POWER_RATIO", "BOSS_POWER_RATIO",
+    "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL",
+}
+
+--- What each option does, in the words the stops use (#54, #82, #95).
+---
+--- These lived as literals at the options-tab call sites in hooks/load.lua,
+--- which was fine while the tab was the only place they appeared. #95 gives
+--- them a second reader -- the settings screen -- and two copies of a
+--- paragraph is two paragraphs that drift. One map, both readers.
+M.DESC = {
+    LOWHEALTH_RATIO =
+        "A fraction of your life pool (0.5 is half) -- your maximum life, plus whatever " ..
+        "keeps you alive below zero, which is what the game itself measures. While " ..
+        "enemies are in view, the bot " ..
+        "stops when life is below it. The other life thresholds follow from it: losing half " ..
+        "of this fraction in one turn is the Big Loss stop; in a fight, losing a quarter of " ..
+        "it in one turn uses a Damage Prevention talent, and missing a quarter of it uses a " ..
+        "Recovery talent.",
+    IGNORE_DAMAGE_HEALTH_RATIO =
+        "A fraction of your life pool (0.9 is nine tenths); see Low Health Ratio for what " ..
+        "the pool is. While exploring with nothing " ..
+        "in view, damage is ignored as long as life stays above it, so a single poison tick " ..
+        "does not stop the bot; once life is below it, any damage taken while exploring hands " ..
+        "back. It is also the scale that stop is measured on: life exactly at this ratio is " ..
+        "threat 1, and twice as far below it is threat 2. See Maximum Enemy Power.",
+    -- #82: since #11 these five are not independent switches -- each is the
+    -- denominator of one term of the threat score, and the score is the
+    -- largest term (data/score.lua). Every power stop ends " -- threat N",
+    -- so the scale has to be said somewhere or the number is noise.
+    MAX_INDIVIDUAL_POWER =
+        "Stop when any enemy in view has a power level above this figure, whatever yours is. " ..
+        "Power level is the addon's rough threat score for a creature -- its life, damage, " ..
+        "crits, speed, defence, stats and weapons summed -- and is shown as \"Power Level\" " ..
+        "in every creature's tooltip; hold Ctrl over a creature to see the parts.\n\n" ..
+        "These five limits are also a scale: every stop for one of them ends \"-- threat N\", " ..
+        "where the limit you set counts as 1, so threat 3 is three times past it. The stop " ..
+        "says how far over the room is, not only that it is.",
+    MAX_DIFF_POWER =
+        "Stop when any enemy in view has a power level more than this much above your own. " ..
+        "Your own power level is scaled by the life you have left, so the same enemy stops " ..
+        "the bot sooner when you are hurt. On the threat scale, 1 is an enemy exactly this " ..
+        "far above you. Power level and the threat figure: see Maximum Enemy Power.",
+    MAX_COMBINED_POWER =
+        "Stop when the power levels of every enemy in view, added together, are more than " ..
+        "this much above your own (again scaled by the life you have left). A margin above " ..
+        "yours, not an absolute figure. On the threat scale, 1 is a room exactly this far " ..
+        "above you. Power level and the threat figure: see Maximum Enemy Power.",
+    MAX_ENEMY_COUNT =
+        "Stop when more than this many enemies are in view at once, whatever their power. On " ..
+        "the threat scale, 1 is exactly this many in view -- twelve of them against a limit " ..
+        "of twelve. The threat figure: see Maximum Enemy Power.",
+    -- #62: the rank weights. data/power.lua says which ToME rank is which band.
+    NORMAL_POWER_RATIO =
+        "Critters and normal-rank enemies count for this multiple of their power level in " ..
+        "the three power checks above: 0.4 means a common counts for less than half, so a " ..
+        "pack of them does not read as a threat; 1 is face value.",
+    ELITES_POWER_RATIO =
+        "Elite, rare and unique enemies count for this multiple of their power level in the " ..
+        "three power checks above: 1 is face value; 2 would count each as double.",
+    BOSS_POWER_RATIO =
+        "Bosses, elite bosses and anything stronger count for this multiple of their power " ..
+        "level in the three power checks above: 2 counts each as double; 1 is face value.",
+    ACTION_DELAY =
+        "Seconds the bot waits between its actions, so you can watch what it does. 0 acts " ..
+        "at full speed. Known to be rough: with a delay set, the bot also takes its next " ..
+        "action when you press a key or move the mouse.",
+    STOP_POPUP =
+        "Also open a popup with the reason whenever the bot stops for something you should " ..
+        "look at: low life, a debuff, being stuck. The message-log line and the banner are " ..
+        "always shown. The popup's own checkbox turns this off again.",
+    LOG_LEVEL =
+        "How much the bot prints. 'off' says nothing; 'warn' only what went wrong; 'info' " ..
+        "one line per action; 'debug' the reasoning behind each decision; 'trace' the " ..
+        "talent-by-talent checks. The last two grow the log file quickly. Warnings and " ..
+        "errors are also shown in the message log.",
+}
+
+--- The range a numeric option may be set to, where it is not the default
+--- 0..1000000. #74: an option whose real range is 0..1 prompting "From 0 to
+--- 1000000" is a prompt that teaches nothing.
+M.RANGE = {
+    LOWHEALTH_RATIO            = { 0, 1 },
+    IGNORE_DAMAGE_HEALTH_RATIO = { 0, 1 },
+    NORMAL_POWER_RATIO         = { 0, 10 },
+    ELITES_POWER_RATIO         = { 0, 10 },
+    BOSS_POWER_RATIO           = { 0, 10 },
+}
+
+--- What kind of control an option wants: a number, a yes/no, or a choice.
+M.KIND = {
+    STOP_POPUP = "boolean",
+    LOG_LEVEL  = "choice",
+}
+function M.kind(name) return M.KIND[name] or "number" end
 return M

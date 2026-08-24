@@ -43,7 +43,7 @@ local function helpText()
 		.. k("RUNONCE_SKOOBOT_RECLAUDED") .. " one action, "
 		.. k("ASK_SKOOBOT_RECLAUDED") .. " say what it would do next, "
 		.. k("MENU_SKOOBOT_RECLAUDED") .. " this menu. Change them under Escape > Key Bindings; "
-		.. "the thresholds are under Escape > Options > [SkooBot: Reclauded]."
+		.. "the thresholds and the rest are under #GOLD#Settings#WHITE# above."
 end
 
 function _M:init()
@@ -93,6 +93,11 @@ function _M:on_register()
 end
 
 local menuActions = {
+	settings = function()
+		print("[SKOOBOT] [Menu] settings menu action chosen.")
+		local d = require("mod.dialogs.skoobot_reclauded.SettingsDialog").new()
+		game:registerDialog(d)
+	end,
 	skillconfig = function()
 		print("[SKOOBOT] [Menu] skillconfig menu action chosen.")
 		local d = require("mod.dialogs.skoobot_reclauded.TalentDialog").new(game.player)
@@ -176,6 +181,10 @@ function _M:generateList()
 	local raw = {
 		{1,   name="Talent rules -- which talents the bot may use", order="skillconfig"},
 		{2,   name="Stop conditions -- when it hands back",         order="botstopconditions"},
+		-- #95: the third place configuration used to live -- the game's
+		-- Options tab -- is now a pointer at this row, so there is one
+		-- answer to "where are the settings".
+		{3,   name="Settings -- thresholds, delay, popup, logging",  order="settings"},
 		{999, name="Cancel",                                        order="donothing"},
 	}
 	-- The status rows go last, so the choices keep their letters and their
