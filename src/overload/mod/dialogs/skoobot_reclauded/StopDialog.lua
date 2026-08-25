@@ -7,18 +7,12 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- ---------------------------------------------------------------------------
+-- #58. Shown for a STOPPED notice, and only while STOP_POPUP is on -- off by
+-- default. Its own checkbox turns it off, so nobody has to go looking for the
+-- option.
 --
--- #58. Shown for a STOPPED notice only, and only while STOP_POPUP is on -- off
--- by default, because the log line and the big-news banner carry the stop on
--- their own. The checkbox turns it off from here, so nobody has to go looking
--- for the option; the option stays in the tab so it can be turned back on, the
--- way the game's own quest popup is (tome.quest_popup).
---
--- Dialog:simplePopup (engine/ui/Dialog.lua:110) has no checkbox slot, hence a
--- small dialog of its own with the same layout plus a Checkbox between the
--- text and the button. Enter closes (the button has focus), Escape closes, Tab
--- reaches the checkbox and Space ticks it.
+-- A dialog of its own because Dialog:simplePopup has no slot for a checkbox
+-- (docs/api-surface-1.7.6.md); the layout is otherwise the same.
 
 require "engine.class"
 require "engine.ui.Dialog"

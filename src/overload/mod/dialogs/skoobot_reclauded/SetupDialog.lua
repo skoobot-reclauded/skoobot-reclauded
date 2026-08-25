@@ -10,17 +10,13 @@
 -- ---------------------------------------------------------------------------
 --
 -- The dead end a brand new installation hits on its first toggle: a hostile in
--- view and no Combat talent configured. #71 made the message say which case it
--- is; this offers the way out instead of describing it. The first-run audit
--- measured six keypresses from that message to a working bot
--- (docs/first-run.md section 3); the first button makes it one.
+-- view and no Combat talent configured. Offers the way out rather than
+-- describing it -- six keypresses to a working bot became one (#96,
+-- docs/first-run.md section 3).
 --
--- It IGNORES the STOP_POPUP setting, deliberately. That setting answers "do
--- you want a dialog every time the bot stops" -- noise during play. This is
--- the moment a fresh installation cannot start at all, on a run where the
--- player has almost certainly never seen the setting. The price is paid on
--- this dialog itself: "Not now" silences it for the session, "Don't ask again"
--- for this character for good, each one keypress.
+-- It IGNORES STOP_POPUP deliberately: that setting is about noise during play,
+-- and this is the one moment a fresh installation cannot start at all. The
+-- price is paid on this dialog, which carries its own two ways of silencing it.
 
 require "engine.class"
 require "engine.ui.Dialog"

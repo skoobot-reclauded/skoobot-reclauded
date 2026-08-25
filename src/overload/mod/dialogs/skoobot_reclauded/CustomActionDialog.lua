@@ -9,7 +9,7 @@
 -- any later version. See LICENSE.
 --
 -- PORTED FROM SkooBot 0.0.12 (D-12), under the addon's own dialog namespace.
--- Same content-sized, unscrolled list as PickOneDialog (T-014).
+-- Bounded and scrolled like PickOneDialog (T-014).
 
 require "engine.class"
 require "engine.ui.Dialog"

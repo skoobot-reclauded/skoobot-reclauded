@@ -21,14 +21,10 @@ RUNS ENTIRELY OFFLINE. No language model, no network requests, no API key, no te
 A successor to the original SkooBot, not an update to it: everything the original did, on ToME 1.7.6, with the defects its users reported fixed -- marked-target talents stalling the rotation, stops on a scratch, the freeze when pinned or put to sleep, glowing chests walked past, drowning while resting, the talent list overflowing the screen. The original remains published and unchanged, and installing this one will not touch it.]]
 tags = { 'bot', 'ai', 'auto', 'autoplay', 'skoobot' }
 
--- Directories this addon contributes.
---
--- Not cosmetic: `hooks = true` makes the engine loadfile()
--- <addon>/hooks/load.lua and error(err) on failure, outside any pcall
--- (engine/Module.lua:697-698), so declaring a directory that holds no load.lua
--- aborts module load the first time the addon is enabled. Flip each one on in
--- the same commit that gives its tree real content; spec/manifest_spec.lua
--- enforces that.
+-- Directories this addon contributes. Declaring one whose tree is empty aborts
+-- module load the first time the addon is enabled -- the hooks loadfile is not
+-- wrapped in a pcall. spec/manifest_spec.lua enforces that a flag is true only
+-- when its directory holds real content.
 hooks = true
 overload = true
 superload = true

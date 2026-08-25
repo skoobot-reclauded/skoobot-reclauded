@@ -80,9 +80,8 @@ M.ACTIONS = {
           .. "as a second choice. " .. M.CORNERED_LABEL },
 }
 
--- What the hold flag means, for the row that carries it (#15). The act loop
--- reads `entry.hold` on Combat entries only; this is the prose the talent
--- screen shows beside the toggle.
+-- The prose the talent screen shows beside the toggle (#15). The act loop
+-- reads `entry.hold` on Combat entries only.
 M.HOLD_LABEL = "hold while impaired"
 M.HOLD_DESCRIPTION = "Hold while impaired: while the character is stunned, dazed, confused or frozen this entry is "
     .. "skipped as if it were on cooldown and the rotation falls through to the next one -- so a long-cooldown hit "
@@ -128,9 +127,8 @@ function M.key(entry)
     if type(entry.tid) == "string" and entry.tid ~= "" then return "tid:" .. entry.tid end
     if type(entry.object) == "string" and entry.object ~= "" then return "object:" .. entry.object end
     -- #69: keep_los is part of the IDENTITY, unlike `hold` (#15), which is a
-    -- flag on a placement. "Flee but keep sight" is its own row in Available
-    -- and may sit in the rotation alongside the plain flee -- keep sight
-    -- first, break it as a second choice -- so the two must not key alike.
+    -- flag on a placement -- both flee rows may sit in one rotation, so the
+    -- two must not key alike.
     if M.isAction(entry) then
         return "action:" .. entry.action .. ":" .. entry.from .. (entry.keep_los and ":los" or "")
     end
@@ -167,11 +165,9 @@ function M.new()
     return r
 end
 
---- May an entry of this kind live in this section?
--- @param kind "sustained" for a sustained talent; "action" for a built-in
---   action (#59), which is a move in the rotation and so Combat only;
---   anything else ("activated", "object") for one that is fired
--- @return true, or false and the reason in words
+--- May an entry of this kind live in this section? `kind` is "sustained",
+--- "action" (a move in the rotation, so Combat only), or anything else.
+--- Returns true, or false and the reason in words.
 function M.allowed(kind, section)
     if not SECTION_SET[section] then return false, "No such section." end
     if kind == "sustained" then
@@ -210,17 +206,13 @@ function M.where(t, entry)
     return out
 end
 
---- Bring a saved table to the current shape, IN PLACE, so that anything
---- already holding it sees the result. Idempotent.
---
--- Handles nil or a non-table, a fresh or current table, a v1 flat list, and a
--- current table with v1-shaped entries pushed into its array part (what a
--- scenario predating #56 does). v1 entries are placed by their usetype,
--- highest priority first, ties keeping their saved order, minus usetype and
--- priority. Within a section a rule is kept once -- the first occurrence --
--- and may land in several sections. Entries with no identity, an unknown
--- usetype, or the add chain's `usetype=""` placeholder are dropped.
--- @return the table, and {migrated = n, dropped = n}
+--- Bring a saved table to the current shape, IN PLACE, so anything already
+--- holding it sees the result. Idempotent. Handles nil, a fresh or current
+--- table, a v1 flat list, and a current table with v1-shaped entries in its
+--- array part. v1 entries are placed by usetype, highest priority first, ties
+--- keeping their saved order; a rule is kept once per section and may land in
+--- several; anything unidentifiable is dropped.
+--- @return the table, and {migrated, dropped}
 function M.normalize(t)
     local report = { migrated = 0, dropped = 0 }
     if type(t) ~= "table" then t = {} end
@@ -303,15 +295,12 @@ local function copyEntry(entry)
     return e
 end
 
---- Put a rule in `section`: before `before` (an entry of that section), or at
---- the end. If `from` names a section the rule leaves it -- a move; without
---- `from` it keeps its other placements -- an add. Within `section` a rule is
---- placed once: already there with no position asked for, it stays; with
---- `before`, it is repositioned. The stored table is what moves, so extra
---- fields survive a move, and an add stores a COPY so two placements never
---- share a table -- the talent screen's "Also add to" hands over another
---- section's stored entry, and a field set in one must not appear in the other.
--- @return the index it is at; or nil and a reason
+--- Put a rule in `section`, before `before` or at the end. `from` makes it a
+--- move (the rule leaves that section); without it, an add. The stored table
+--- is what moves, so extra fields survive; an add stores a COPY, so two
+--- placements never share a table -- the talent screen's "Also add to" hands
+--- over another section's stored entry, and a field set in one must not appear
+--- in the other. Returns the index, or nil and a reason.
 function M.place(t, entry, section, before, from)
     if not SECTION_SET[section] then return nil, "No such section." end
     local k = M.key(entry)

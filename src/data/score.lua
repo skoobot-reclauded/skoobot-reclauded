@@ -27,11 +27,8 @@ M.FIGHT, M.HOLD, M.RETREAT, M.HANDBACK = "fight", "hold", "retreat", "handback"
 -- 0.5, so this is the last line, for a fight the other two never saw.
 M.LOW_AIR = 0.25
 
--- How many retreat steps in a row are worth taking from one threat. A step
--- buys a turn only if the enemy is slower or the step breaks its line of
--- sight; against something as fast as the player the chase holds its distance
--- for ever. Five is enough for the first case to show, cheap enough to waste
--- in the second.
+-- Retreat steps in a row worth taking from one threat. A step buys a turn only
+-- if the enemy is slower or the step breaks line of sight.
 M.RETREAT_LIMIT = 5
 
 -- The flags, in the order their reasons are given.
@@ -44,24 +41,18 @@ local function term(value, limit)
     return value > 0 and math.huge or 0
 end
 
---- A ratio, to one decimal: "1.5x your limit", the threat score. The tenth
---- carries meaning here -- 1.0 IS the limit.
---- Rounds before formatting: `%.1f` resolves an exact .x5 tie in the C
---- library, and glibc gives "0.2" for 0.25 where the MSVC runtime gives "0.3",
---- so the same fight read differently on Linux and Windows. See #30.
+--- A ratio to one decimal, where 1.0 IS the limit. Rounds BEFORE formatting:
+--- `%.1f` breaks an exact .x5 tie differently under glibc and MSVC, so the
+--- same fight read differently on Linux and Windows. See #30.
 local function fmt1(x)
     if x ~= x or x == math.huge or x == -math.huge then return ("%.1f"):format(x) end
     local tenths = x >= 0 and math.floor(x * 10 + 0.5) or -math.floor(-x * 10 + 0.5)
     return ("%.1f"):format(tenths / 10)
 end
 
---- A POWER LEVEL, whole (#84). Only the RENDERING rounds: every comparison
---- stays on the unrounded value, so a stop fires exactly where the knob says
---- it does, which does mean a figure can read equal to a limit it is a
---- fraction over. That is the right way round -- rounding the comparison
---- instead gives a threshold that moves by half a point depending on how it is
---- printed. Power levels are sums of non-negative parts, so nearest is
---- floor(x + 0.5).
+--- A POWER LEVEL, whole (#84). Only the RENDERING rounds -- rounding the
+--- comparison instead gives a threshold that moves by half a point depending
+--- on how it is printed.
 local function fmt0(x)
     return ("%d"):format(math.floor((tonumber(x) or 0) + 0.5))
 end
@@ -79,27 +70,17 @@ function M.enemyPower(raw, weight)
     return (raw or 0) * (tonumber(weight) or 1)
 end
 
---- How much of the life scaling is quadratic (#79). 0 is the linear form #62
---- shipped, `raw * life/max_life`; 1 makes it `raw * (life/max_life)^2`, so
---- half life counts for a quarter; in between it interpolates.
----
---- 0.5, deliberately mild: the linear form is wrong (design-stop-conditions.md
---- 5.5), but this figure is the denominator of the `stronger` and `crowd`
---- terms, so a steep curve would make the bot markedly more cautious at every
---- wound, under every player, at once.
+--- How much of the life scaling is quadratic (#79): 0 is linear, 1 is squared.
+--- 0.5 is deliberately mild, because this figure is the denominator of the
+--- `stronger` and `crowd` terms and a steep curve moves every player at once.
 M.LIFE_CURVE = 0.5
 
---- The fraction of its power a character at this much life counts for.
+--- The fraction of its power a character at this much life counts for:
+--- f(x) = x * (1 - LIFE_CURVE * (1 - x)). f(1) = 1 EXACTLY whatever the curve,
+--- which is why #79 needed no migration of MAX_DIFF_POWER or
+--- MAX_COMBINED_POWER. spec/score_spec asserts that and two more.
 ---
---- f(x) = x * (1 - LIFE_CURVE * (1 - x)), which is x at LIFE_CURVE 0 and x^2
---- at 1. Three properties the spec asserts: f(1) = 1 EXACTLY whatever the
---- curve, so nothing the player tuned changes until they are hurt -- which is
---- why #79 needed no migration of MAX_DIFF_POWER or MAX_COMBINED_POWER; f(0)
---- = 0 and monotonic between, so more life is never worth less; and f(x) <= x,
---- so the curve only ever makes a hurt character read weaker.
----
---- #91: the arguments are the life POOL and its maximum -- `life - die_at`
---- over `max_life - die_at`, what data/life.lua returns -- not the raw pair.
+--- #91: the arguments are the life POOL and its maximum, not the raw pair.
 function M.lifeFactor(pool, max)
     if not (max and max > 0) then return 1 end
     local x = pool / max
@@ -115,29 +96,13 @@ function M.ownPower(raw, pool, max)
 end
 
 --- Score a situation.
--- @param input a table:
---   own        the player's power as ownPower gives it
---   life       life fraction, 0-1 -- of the POOL the game kills at,
---              discounted for anything about to lapse (#91)
---   air        air fraction, 0-1 (nil when the character has no air)
---   hostiles   list of { power = weighted, rank = n, distance = n, name = s }
---   blocks     { move = x, act = x, target = x }, or nil: each truthy when
---              blocked, and a string naming what blocks it when known
---   damaged    true when life fell this turn
---   accepted   { SCOUTER_BIGENEMY = true, ... }: the flags the player has
---              told the bot to live with (IGNORE, or an acknowledged WARN)
---   retreats   how many retreat steps in a row the bot has already taken
--- @param knobs the settings: MAX_INDIVIDUAL_POWER, MAX_DIFF_POWER,
---   MAX_COMBINED_POWER, MAX_ENEMY_COUNT, IGNORE_DAMAGE_HEALTH_RATIO
--- @return a table:
---   score     the largest term
---   terms     individual, stronger, crowd, count, unseen
---   flags     the five flags, true or false
---   details   for each set flag, v1's wording of it with the figures
---   figures   own, count, max, sum, strongest, nearest
---   posture   M.FIGHT, M.HOLD, M.RETREAT or M.HANDBACK
---   reasons   strings, in the order they were weighed
---   suffix    the score as a message suffix, " -- threat 2.3"
+-- @param input own (ownPower's figure), life and air as 0-1 fractions of the
+--   POOL, hostiles {power = weighted, rank, distance, name}, blocks
+--   {move, act, target} (truthy, or a string naming the blocker), damaged,
+--   accepted (flags the player lives with), retreats.
+-- @param knobs MAX_INDIVIDUAL_POWER, MAX_DIFF_POWER, MAX_COMBINED_POWER,
+--   MAX_ENEMY_COUNT, IGNORE_DAMAGE_HEALTH_RATIO, and `titles`.
+-- @return score, terms, flags, details, figures, posture, reasons, suffix.
 function M.evaluate(input, knobs)
     local own = input.own or 0
     local blocks = input.blocks or {}

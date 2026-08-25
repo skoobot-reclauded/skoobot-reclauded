@@ -9,9 +9,8 @@
 -- any later version. See LICENSE.
 --
 -- PORTED FROM SkooBot 0.0.12 (D-12), under the addon's own dialog namespace so
--- it cannot shadow the original's mod/dialogs/PickOneDialog.lua when both
--- addons are enabled. v1 sized the list to its content with no scrollbar, so a
--- long talent list ran off the screen -- the overflow users reported (T-014).
+-- it cannot shadow the original's when both addons are enabled. v1's list was
+-- content-sized with no scrollbar and ran off the screen (T-014).
 
 require "engine.class"
 require "engine.ui.Dialog"
@@ -29,10 +28,8 @@ function _M:init(title, optionlist, action)
 
 	engine.ui.Dialog.init(self, title, 1, 1)
 
-	-- T-014: bound the visible rows and scroll the rest. Rows are sized to ~80%%
-	-- of the screen height from a safe over-estimate of the row height, so the
-	-- dialog never exceeds the screen whatever the font, and the full list stays
-	-- reachable by wheel and arrows.
+	-- T-014: bound the visible rows and scroll the rest -- ~80%% of the screen
+	-- height, from a safe over-estimate of the row height.
 	local maxRows = math.max(6, math.floor(game.h * 0.8 / 25))
 	local list = List.new{width=400, nb_items=math.min(#self.list, maxRows),
 		scrollbar=#self.list > maxRows, list=self.list, fct=function(item) self:use(item) end}
@@ -63,10 +60,8 @@ function _M:use(item)
 end
 
 function _M:generateList()
-	-- Build a fresh display list; never mutate the caller's optionlist. The
-	-- key-char prefix used to be written back into each option's `name`, so a
-	-- shared option table -- TalentDialog's USE_TYPES, reused for every rule --
-	-- accumulated "a) a) a) ..." across opens (T-016). Copy, then prefix the copy.
+	-- Never mutate the caller's optionlist: prefixing `name` in place made a
+	-- shared option table accumulate "a) a) a) ..." across opens (T-016).
 	local list = {}
 	local chars = {}
 	for i, v in ipairs(self.optionlist) do

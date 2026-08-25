@@ -23,23 +23,10 @@ local KeyBind = require "engine.KeyBind"
 -- ---------------------------------------------------------------------------
 -- Keybind collisions (#50)
 --
--- Another addon, or the player's own remap, can put a second action on one of
--- this addon's keys; the engine then fires whichever of the two pairs() yields
--- first (engine/KeyBind.lua:228-233) and says nothing. This detects that and
--- tells the player, and never rebinds anything.
---
--- Three engine facts decide WHERE it can run:
---   * every defineAction lands in the class-level KeyBind.binds_def and every
---     remap in KeyBind.binds_remap, so the check reads those two and never
---     game.key.binds, which is stale until UserChat's bindKeys() after run();
---   * ToME:run hooks fire in addon weight order, so an addon that loads its
---     keybinds in its own ToME:run hook -- the original SkooBot does, at the
---     same weight -- may not have done so when ours runs. All have by
---     ToME:runDone;
---   * game.log is a no-op (engine/Game.lua:56) until uiset:activate() inside
---     runReal, so a message-log line from ToME:run is silently dropped.
--- Hence the notice comes from ToME:runDone, and the menu's status line
--- recomputes on every open so a mid-game rebind shows at once.
+-- Detect only, never rebind. Raised from ToME:runDone rather than ToME:run,
+-- because that is the first point at which every addon's binds are loaded AND
+-- game.log is no longer a no-op; the menu's status line recomputes on every
+-- open so a mid-game rebind shows. Mechanics: docs/api-surface-1.7.6.md.
 -- ---------------------------------------------------------------------------
 
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
@@ -158,14 +145,11 @@ end)
 -- ---------------------------------------------------------------------------
 -- The power level in every creature's tooltip (#14)
 --
--- No Actor superload needed for this: the engine fires "Actor:tooltip" from
--- inside Actor:tooltip with the very tstring it is about to return
--- (mod/class/Actor.lua:2133), for every actor including the player
--- (Player:tooltip reaches Actor.tooltip by explicit class reference,
--- mod/class/Player.lua:442), and not at all for an actor the viewer cannot see
--- -- which is exactly when a wrapper returned nil. The wording and the figure
--- are the runtime table's (bot.tooltip, beside bot.power in the Player
--- superload), so the tooltip's number and the stop conditions' are one file.
+-- An engine hook, not an Actor superload: "Actor:tooltip" fires from inside
+-- Actor:tooltip with the tstring it is about to return, for every actor the
+-- viewer can see -- see docs/api-surface-1.7.6.md. The wording and the figure
+-- are bot.tooltip's, beside bot.power, so the tooltip's number and the stop
+-- conditions' come from one place.
 -- ---------------------------------------------------------------------------
 class:bindHook("Actor:tooltip", function(self, data)
     skoobot_reclauded.tooltip(self, data.ts)
@@ -184,13 +168,10 @@ end)
 local addonTitle = "SkooBot: Reclauded"
 local addonShort = "Reclauded"
 -- list=self.list, kind=kind
--- #95: the tab is a pointer, not a control panel. Everything that used to live
--- here is on the addon's own settings screen, which can say what this dialog
--- cannot -- that a threshold belongs to THIS CHARACTER and a preference to the
--- player. The row is kept deliberately: a player looking for an addon's
--- settings looks in Options, and an addon with no presence there is one they
--- conclude has none. Titles, descriptions, ranges and the per-character split
--- live in data/cfg.lua, so nothing about an option is written here.
+-- #95: a pointer, not a control panel -- the addon's own settings screen holds
+-- the options. The row is kept deliberately: a player looking for an addon's
+-- settings looks in Options, and one with no presence there is presumed to
+-- have none. data/cfg.lua owns everything about an option.
 class:bindHook("GameOptions:generateList", function(self, data)
     if data.list.skoobot_reclauded_options then
         local list = data.list

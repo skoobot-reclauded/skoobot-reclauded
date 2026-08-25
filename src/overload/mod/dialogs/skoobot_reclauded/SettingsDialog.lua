@@ -9,27 +9,14 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- One dialog of the addon's own, reached from the menu, with the game's
--- Options tab reduced to a pointer at it (#95). The tab could hold the
--- numbers; it cannot express what this screen is about -- that a threshold
--- belongs to THIS CHARACTER and a preference to the player.
+-- One settings screen of the addon's own, with the game's Options tab reduced
+-- to a pointer at it (#95). Two kinds of row: a SAFETY THRESHOLD belongs to
+-- THIS CHARACTER, a PREFERENCE to the player, and each row says which. A
+-- character with no value of its own uses the account default, so nothing
+-- needs migrating.
 --
--- Two kinds of row, and the difference is stated on every one:
---
---   * a SAFETY THRESHOLD is the character's, and editing one writes it on the
---     character where the engine saves it. Until then the character uses the
---     default, which is what every existing save does and why none of this
---     needs migrating.
---   * a PREFERENCE -- the delay, the popup, the log level -- is the player's,
---     has one value, and is written to the settings files.
---
--- "Save as default for future characters" copies this character's thresholds
--- onto the account, so the globals can be set FROM a character just tuned
--- rather than in the abstract.
---
--- data/cfg.lua owns which is which, the titles, the descriptions, the ranges
--- and the control kinds; this file draws them. A thirteenth option is added
--- there and nowhere else.
+-- data/cfg.lua owns which is which, the titles, descriptions, ranges and
+-- control kinds; this file only draws them.
 
 require "engine.class"
 require "engine.ui.Dialog"
@@ -42,14 +29,10 @@ local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 
 module(..., package.seeall, class.inherit(engine.ui.Dialog))
 
--- #46: the log level by name. The number is what is stored, the name is what a
--- player reads, and data/log.lua owns the mapping (`module.name(n)`).
---
--- The literal table is a fallback for a runtime table that has not finished
--- loading, and it cost a scenario failure to get right: it first called 1
--- "warn", which is data/log.lua's 2, so the row label and the stored number
--- disagreed and stepping through the levels skipped one. This copy exists only
--- so a missing module cannot error.
+-- #46: the log level by name; data/log.lua owns the mapping. The literal table
+-- is only a fallback for a module that has not finished loading, and it must
+-- agree with data/log.lua's numbering -- it did not once, and stepping through
+-- the levels skipped one.
 local LOG_LEVELS = { [0] = "off", [1] = "error", [2] = "warn", [3] = "info", [4] = "debug", [5] = "trace" }
 local LOG_MAX = 5
 local function logName(n)
@@ -76,11 +59,9 @@ local function fmtValue(name, value)
     return tostring(value)
 end
 
---- One row's label: the title, the value in force, and where it came from.
----
---- The source is spelled on every row rather than only on the overridden
---- ones, because "this character" means nothing to a player who has never
---- seen "all characters" beside it.
+--- One row's label: the title, the value in force, and where it came from --
+--- spelled on every row, because "this character" means nothing to a player
+--- who has never seen "all characters" beside it.
 local function rowName(name)
     local bot = skoobot_reclauded
     local source, value, acct = bot.settingSource(name)
@@ -129,12 +110,8 @@ function _M:init()
     end
     width = math.min(width, math.floor(game.w * 0.9))
 
-    -- The description of whatever is selected, under the list.
-    --
-    -- TextzoneList, not Textzone: it is the widget with switchItem, the way
-    -- ToME's own Birther swaps a description as the selection moves, and it
-    -- takes a scrollbar. The scrollbar is not decoration -- a Textzone without
-    -- one CLIPS silently (#54).
+    -- TextzoneList, not Textzone: it has switchItem and takes a scrollbar, and
+    -- a Textzone without one CLIPS silently (#54).
     self.c_desc = TextzoneList.new{width=width, height=math.max(90, math.floor(game.h * 0.20)),
         scrollbar=true, no_color_bleed=true}
 
@@ -159,12 +136,9 @@ function _M:describe(item)
     self.c_desc:switchItem(item, item.desc or "")
 end
 
---- Redraw in place: a value changed, so every label may have -- saving
---- as defaults moves the grey "(default)" figure on every threshold row.
----
---- List has no setList; the list table is read at generate() time, so the
---- way to rebuild is to swap it and regenerate, then put the selection back
---- where the player left it (generate resets it to the first row).
+--- Redraw in place. List has no setList and reads its table at generate()
+--- time, so rebuild means swap and regenerate, then put the selection back
+--- (generate resets it to the first row).
 function _M:refresh()
     local sel = self.c_list and self.c_list.sel or 1
     self:generateList()

@@ -9,9 +9,8 @@
 -- any later version. See LICENSE.
 --
 -- PORTED FROM SkooBot 0.0.12 (D-12), under the addon's own dialog namespace.
--- Talks to the bot through the `skoobot_reclauded` runtime table rather than
--- through methods on the player class, which the original and this addon
--- would otherwise both define.
+-- Talks to the bot through the `skoobot_reclauded` runtime table, never
+-- through methods on the player class, which both addons would define.
 
 require "engine.class"
 require "engine.ui.Dialog"
@@ -23,11 +22,9 @@ local keys = dofile("/data-skoobot_reclauded/keys.lua")
 
 module(..., package.seeall, class.inherit(engine.ui.Dialog))
 
--- #54: what a player who has never read anything sees first. One short
--- paragraph under the choices, with every key looked up from the live binding
--- (#57) so a remap shows here too. A text zone, not list rows, so the choices
--- keep their letters and the keybind status rows (#50) stay where the harness
--- expects them.
+-- #54: what a player who has never read anything sees first. A text zone, not
+-- list rows, so the choices keep their letters and the keybind status rows
+-- stay where the harness expects them. Keys are looked up live (#57).
 local function helpText()
 	local bot = skoobot_reclauded
 	local function k(virtual)
@@ -107,9 +104,7 @@ local menuActions = {
 			dialoglist[#dialoglist + 1] = {name=v.label .. " - " .. v.stoptype, value=v.code}
 		end
 
-		-- #54: the three answers say what they do, in v1's order, and the second
-		-- dialog names the condition by its label rather than its code. The
-		-- semantics are checkStop's (Player superload): WARN stops once and is
+		-- The semantics are checkStop's (Player superload): WARN stops once and is
 		-- remembered until the condition clears, STOP stops on every decision it
 		-- holds for, IGNORE never stops.
 		local d = PickOneDialog.new("Stop conditions: pick one to change", dialoglist,
@@ -142,10 +137,8 @@ function _M:use(item)
 	if menuActions[item.order] then menuActions[item.order]() end
 end
 
--- #50: the keybind status, recomputed on every open so a rebind made mid-game
--- shows at once. One line -- "Keybinds: OK", or how many collisions -- then one
--- line per collision naming the key and both actions; orange when there is
--- something to look at. The check lives on the runtime table (hooks/load.lua).
+-- #50: the keybind status, recomputed on every open so a mid-game rebind
+-- shows. The check lives on the runtime table (hooks/load.lua).
 local OK_COLOUR        = {160, 160, 160}
 local COLLISION_COLOUR = {255, 153, 0}
 
@@ -162,11 +155,9 @@ local function keybindRows()
 end
 
 function _M:generateList()
-	-- #73: named by what they do. v1's "Set Skill Usage" and
-	-- "Activate/Deactivate Bot Stop Conditions" named neither the talent rules
-	-- screen nor a WARN / STOP / IGNORE choice, and read alike to a player
-	-- migrating from the original (first-run.md section 8). Scenarios assert
-	-- these names verbatim, so they move with them.
+	-- #73: named by what they do, not v1's "Set Skill Usage" and
+	-- "Activate/Deactivate Bot Stop Conditions". Scenarios assert these names
+	-- verbatim, so they move with them.
 	local raw = {
 		{1,   name="Talent rules -- which talents the bot may use", order="skillconfig"},
 		{2,   name="Stop conditions -- when it hands back",         order="botstopconditions"},

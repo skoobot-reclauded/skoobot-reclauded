@@ -12,38 +12,23 @@
 -- ---------------------------------------------------------------------------
 --
 -- REBUILT for #56 on the skeleton of the game's own Use Talents screen
--- (mod/dialogs/UseTalents.lua, Nicolas Casalini, GPL-3.0): a sectioned list on
--- the left, the selected talent's description on the right. The four bucket
--- sections hold the rules in priority order; the Available section below them
--- lists everything the character can use -- items, and the three built-in flee
--- actions taken generically from data/rules.lua's ACTIONS so a fourth needs
--- nothing here (#59, #69) -- with an "In" column naming the sections each is
--- already in. A rule may be in several sections, once per section. Every edit
--- is a move or an add: a drag from Available adds, a drag from a section
--- moves. The list logic is data/rules.lua, reached through
--- skoobot_reclauded.rules; this file only draws the rules and turns input into
--- calls on them.
+-- (mod/dialogs/UseTalents.lua, Nicolas Casalini, GPL-3.0). The four bucket
+-- sections hold the rules in priority order; Available lists everything the
+-- character can use, including the built-in flee actions taken generically
+-- from data/rules.lua so a fourth needs nothing here (#59, #69). The list
+-- logic is data/rules.lua -- this file only draws it and turns input into
+-- calls on it.
 --
--- Keys: Enter or a row's letter opens the action menu; 1-4 add (from
--- Available) or move (from a section) the selected rule to that section; 0,
--- Delete or Backspace remove it from its section, or from every section on an
--- Available row; Shift+Up and Shift+Down reorder it; Space toggles "hold while
--- impaired" on a Combat row (#15). Hold is Space rather than a letter because
--- the rows take a-z and A-Z, and Ctrl+Up/Down belong to the list widget, which
+-- Keys: Enter or a row's letter opens the action menu; 1-4 add or move; 0,
+-- Delete or Backspace remove; Shift+Up/Down reorder; Space toggles "hold while
+-- impaired" on a Combat row (#15). Hold is Space and not a letter because the
+-- rows take a-z and A-Z, and Ctrl+Up/Down belong to the list widget, which
 -- sees every key before this dialog does (engine/ui/Dialog.lua keyEvent).
 --
--- A placement is its own table (rules.place copies on an add), so `hold`
--- belongs to the Combat placement alone and an add into another section does
--- not carry it.
---
--- SUGGESTED LOADOUTS (#18). The first row swaps the list for a PROPOSAL built
--- by data/loadout.lua: the four sections with the suggested rows and the
--- reason for each, then what it would not place and why, then the mutually
--- exclusive sustain groups it leaves to the player. Nothing is written while
--- the proposal is shown; Enter offers Merge (add what is new, keep every hand
--- row), Replace (confirmed when the list is not empty) or Cancel. Rows the
--- suggestion writes carry `suggested = true`, and any hand edit here clears
--- the mark, so a later Merge never moves a row the player touched.
+-- SUGGESTED LOADOUTS (#18): the first row swaps the list for a PROPOSAL from
+-- data/loadout.lua. Nothing is written while it is shown. Rows the suggestion
+-- writes carry `suggested = true`, and any hand edit here clears the mark, so
+-- a later Merge never moves a row the player touched.
 
 require "engine.class"
 local Dialog = require "engine.ui.Dialog"
@@ -366,16 +351,12 @@ function _M:proposalRow(e, placed, rules)
 		desc = desc .. "\n\nAlready in a section you filled: Merge leaves it where it is; Replace moves it here."
 	end
 
-	-- #85 items 1 and 2. EVERY row carries a mark, because three states are
-	-- three different answers to "what will Merge do with this row", and an
-	-- unmarked row cannot be told from one nothing has noticed:
+	-- #85: EVERY row carries a mark, because an unmarked row cannot be told from
+	-- one nothing has noticed. NEW would be added; `declined` was said no to
+	-- before, and is SHOWN rather than hidden so the player can change their
+	-- mind; `placed` is already where they put it and Merge leaves it.
 	--
-	--   NEW       -- would be added. What the suggestion is for.
-	--   declined  -- said no to before, on this character. SHOWN, not hidden:
-	--                hiding it leaves no way to change one's mind.
-	--   placed    -- already somewhere the player put it; Merge leaves it.
-	--
-	-- `inS` is keyed by SECTION NAME, so #inS is always 0; `next()` is the
+	-- `inS` is keyed by SECTION NAME, so #inS is always 0 -- `next()` is the
 	-- emptiness test. `e.section` is nil for the Not-placed group.
 	local state
 	if e.declined then state = "declined"
@@ -447,12 +428,8 @@ function _M:toggleDeclined(tid)
 		or "#LIGHT_GREEN#Back in the suggestion.#WHITE#")
 end
 
---- #85: one row for a rule the proposal would TAKE AWAY.
----
---- Merge prunes the rows this addon wrote before (suggested = true) that the
---- suggestion no longer makes, and keeps every row the player placed by hand.
---- Without this row a suggestion that quietly dropped a talent looked exactly
---- like one that changed nothing.
+--- #85: the rows Merge would prune -- the ones this addon wrote before that
+--- the suggestion no longer makes. Hand-placed rows are never touched.
 function _M:removalRow(entry, section, rules)
 	local info = self.R.describe(self.actor, entry)
 	local plain = (tostring(info.name):gsub("#[^#]*#", ""))
@@ -475,12 +452,9 @@ function _M:generateProposalList()
 	local P, rm, rules = self.proposal, self.rm, self.R.get(self.actor)
 	local tree, chars = {}, {}
 
-	-- Talents the player has placed by hand anywhere: Merge leaves those alone.
-	-- #98: keyed with rm.key, not e.tid. A proposal can carry an ACTION row,
-	-- which has no tid, and `proposed[e.tid] = true` is a write with a nil key --
-	-- not nil-safe like a read -- which threw "table index is nil" out of
-	-- generateList and left the screen half rebuilt. rm.key answers for every
-	-- entry shape there is.
+--- #85: one row for a rule the proposal would TAKE AWAY. Without it a
+--- suggestion that quietly dropped a talent looked exactly like one that
+--- changed nothing.
 	local hand = {}
 	for _, s in ipairs(rm.SECTIONS) do
 		for _, e in ipairs(rules[s]) do
@@ -489,10 +463,9 @@ function _M:generateProposalList()
 		end
 	end
 
-	-- #85 item 3: say it is a preview at the top and in the apply row. Short on
-	-- purpose -- this column is half of half the dialog, and the long version
-	-- clipped to "PREVIEW -- nothing is written yet. App" at 1440p and worse
-	-- below it. The guide panel has the room to say it properly.
+	-- #98: keyed with rm.key, not e.tid. An ACTION row has no tid, and
+	-- `proposed[e.tid] = true` is a write with a nil key -- not nil-safe like a
+	-- read -- which threw out of generateList and left the screen half rebuilt.
 	tree[#tree + 1] = actionRow("apply", "Apply or cancel...  (Enter)", PROPOSAL_INTRO)
 
 	for i, section in ipairs(rm.SECTIONS) do
@@ -930,10 +903,9 @@ function _M:use(item, button)
 	game:registerDialog(CustomActionDialog.new(item.cname, list))
 end
 
---- The list widget reports every motion with the left button held; the engine
---- turns the first one that travels far enough into a drag (engine/Mouse.lua
---- startDrag) and ignores the rest. The payload remembers where the drag
---- started: a section (so the drop is a move) or Available (an add).
+	-- #85 item 3: short on purpose. This column is half of half the dialog, and
+	-- the long version clipped to "PREVIEW -- nothing is written yet. App" at
+	-- 1440p; the guide panel has the room to say it properly.
 function _M:onDrag(item)
 	if self.proposal or not item or not item.entry then return end
 	local cursor
@@ -946,10 +918,10 @@ function _M:onDrag(item)
 	game.mouse:startDrag(x, y, cursor, {kind=DRAG_KIND, entry=item.entry, from=item.section})
 end
 
---- Release delivers "drag-end" to the row under the cursor. On a section
---- header the rule goes to the end of that section; on a row it goes before
---- that row, in that row's section. On Available, either way, a rule dragged
---- out of a section leaves that section.
+--- Drag: the payload remembers where it started -- a section (a move) or
+--- Available (an add) -- and release delivers "drag-end" to the row under the
+--- cursor. On a section header the rule goes to the end of that section; on a
+--- row, before it. Mechanics: docs/api-surface-1.7.6.md, Mouse:startDrag.
 function _M:drop(item)
 	local drag = game.mouse.dragged
 	local payload = drag and drag.payload
