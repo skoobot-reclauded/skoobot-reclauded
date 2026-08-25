@@ -102,6 +102,7 @@ tick; `tooltip` is optional UI sugar. A collision sweep of every v1-defined name
 | `tooltip(x, y, seen_by)` — **wrapped** | A:76–93 | T/mod/class/Actor.lua:2008–2294; T/mod/class/Player.lua:441–446 | ok | Player delegates by explicit class reference, so the Actor wrap reaches the player. Returns nil when unseen (v1 guards it); `tstring:add` varargs unchanged (E/utils.lua:1566–1571). |
 | `getTalentFullDescription(t)` | BTD:150 | T/mod/class/Actor.lua:6717–6859 | ok | One-arg call fine; returns a tstring; nil-safe (:6718). |
 | `attr("can_offshoot")` / `attr("psi_focus_combat")` | A:49–50 | T/mod/class/Actor.lua:1965; T/Archery.lua:771, :784 | ok† | Both fine as API (`can_offshoot` has **no setter** in base 1.7.6 — DLC unverified). v1 bug: `type ~= "offhand"` references the Lua builtin `type` (no such parameter in A), so both clauses are vacuously true and neither attr call ever runs. Harmless; delete the clauses or call `getCombatStats` (T/Actor.lua:1951). luacheck will **not** flag this — needs a review note (T-023). |
+| `rank` default | P:670 (#62) | T/mod/class/Actor.lua:206 `t.rank = t.rank or 2` | ok | An actor with no rank of its own is rank 2, "normal" — so a rank-band weighting needs no nil case of its own beyond matching that default. Bands used by `src/data/power.lua` `rankBand`: `< 3` normal, `< 4` elite, else boss. |
 
 ## engine.Actor / engine.Entity
 
@@ -153,6 +154,7 @@ The sources differ in how far a decision may trust them, which is the whole diff
 | sustain | Last Stand `techniques/weaponshield.lua:339`; necrosis `spells/necrosis.lua:51,130` | Last Stand: `addTemporaryValue` into `ret.dieat`; necrosis: `talentTemporaryValue` | while it is up. Dropping Last Stand sets life to 1 rather than killing (`:351`) |
 | timed | HEROISM `physical.lua:980`; ROGUE_S_BREW `:3528`; FRENZY `mental.lua:1765`; `mental.lua:2711`, `:2838` | `effectTemporaryValue`, except ROGUE_S_BREW (`eff.die`) and FRENZY (`eff.dieatid`) | for `eff.dur` more turns and **not after**. Expiry itself is survivable (life → 1); the next hit is not |
 | adverse | UNRAVEL `magical.lua:3740` (`die_at = +50`) | `effectTemporaryValue` | always — death arrives **early**, and no duration makes that discountable |
+| `t.tactical` keys are LOWERCASED on load | — (#18) | T/data/talents.lua:26 `Talents.aiLowerTacticals`, applied at :73 | **trap** | A talent definition file writes `ATTACK`, `HEAL`, `DEFEND`; the loaded definition carries `attack`, `heal`, `defend`. Anything reading `tactical` at runtime and matching the data file's spelling silently matches nothing. `src/data/loadout.lua` accepts both. |
 
 **Attributing a contribution is possible, and does not need per-effect knowledge in the common
 case.** `effectTemporaryValue` and `talentTemporaryValue` both record `{prop, id}` on the
@@ -186,6 +188,33 @@ the game builds it.
 | bare `abs()` / `MAX_INT` in getPathToAir | P:344, :341 | **no definition anywhere** in E/ or T/ | **missing** | Latent crash, masked only by the dead drowning guard (v1-latent-bugs Bug 1); the moment T-015 fixes the guard, `attempt to call global 'abs'` fires. mishander had to hack both in locally (fork src/superload/mod/class/Player.lua:3–16). Use `math.abs` / `math.huge`. |
 | `Astar.new(map, actor)` / `a:calc(sx, sy, tx, ty)` | P:28, :352–353, :747–748 | E/Astar.lua:30–33, :113–192, :90–100 | ok | nil for unreachable, out-of-bounds, start==target, or exhausted open set; path excludes the start tile, `path[1]` is the first step. Passability is **terrain-only** — actors/traps are not obstacles. Both failure branches print to stdout on every call. Remediation 13. |
 | `engine.Map` global via `module()` | P:670 (`engine.Map.TERRAIN`) | E/Map.lua:29 | ok | Use the local `Map` at the call site instead; luacheck flags the unused local either way. |
+| `door_player_check` / `door_player_stop` | — (#64) | T/mod/class/Grid.lua:65–67 (yes/no popup), :77–79 (message popup) | **trap** | Neither sets `block_move`, so the engine's passability says yes and Astar routes straight through a sealed vault door, a locked door or a loose rock — and arriving opens a dialog. For a bot that hands back on any dialog this is a loop: the first long soak (#61) measured 65 of 66 stops in ten minutes as exactly this. Pass an `add_check` that refuses such grids (`src/superload/mod/class/Player.lua` `needsConsent`). |
+
+### Fleeing: the engine's own "least seen, then farthest" rule
+
+The step a flee takes is not "the neighbour farthest away". ToME's own flee AIs are
+`flee_dmap` with `flee_simple` as its fallback (E/ai/simple.lua:107 and :68; the fallback is
+taken at :127), and they read the hostile's **distance map** — every actor keeps one
+(E/interface/ActorFOV.lua), holding at each grid it has seen `game.turn + radius - distance` as
+of the last time it looked. So the value is **higher** where the hostile looked more recently and
+from closer, and **nil** where it never looked.
+
+Among the eight neighbours the fleeing actor can move to, the **lowest** value wins — nil lowest
+of all, so a grid out of the hostile's view beats one merely farther away — and only a grid
+scoring below where the actor stands counts as a step away at all. When the hostile's map has no
+value for the actor's own grid (a fresh spawn, or one that has not acted since arriving), plain
+distance decides instead: the neighbour farthest from it, and only one farther than here. Ties
+go to the farther grid, then to the first in the engine's direction order.
+
+`aiCanFleeDmapKeepLos` (T/mod/class/interface/ActorAI.lua:821) is the variant that keeps line of
+sight: the LOS test is a **filter on the candidates**, not a different preference, so the same
+"least seen, then farthest" rule picks among the grids that qualify. The engine's version skips
+its own `canMove` check for a grid the hostile has never looked at; a bot should not, because a
+grid the player cannot enter is not a step whoever has seen it.
+
+`src/superload/mod/class/Player.lua` `fleeStep` is this, for the player, with `keep_los` as the
+variant (#59, #69). A character with `never_move` has no step at all — attempting the impossible
+is the liveness bug T-012 fixed.
 
 ## engine.Game / mod.class.Game
 
@@ -202,6 +231,7 @@ the game builds it.
 | `game.zone.wilderness` | P:792, :807, :822, :849 | T/data/zones/wilderness/zone.lua:32 (sole setter); gated at T/mod/class/Game.lua:1238, :2062, :2664; T/Player.lua:351 | ok | Truthiness test correct. 1.7.6 itself nil-guards `game.zone` in equivalent positions (T/Player.lua:1362, :1367, :1506) — adopt `not game.zone or game.zone.wilderness`. Addon keybinds are not wrapped in `not_wild`, so the explicit checks stay necessary. |
 | `game.log(msg)` | P:98, :183, :190, :208, :586, :594; H:11, :17, :23, :28, :33 | installed by uiset (T/uiset/Minimalist.lua:492); E/LogDisplay.lua:122–126; E/I18N.lua:72–93 | ok† | The first argument is a **format string and a translation key**: `tformat` always runs `_t` then `:format(...)`, with no pcall. A bare `%` in concatenated dialog titles (P:586, :594) or talent names (P:190) raises at runtime. Use `game.log("%s", msg)`. Remediation 12. |
 | `game:onTickEnd(f)` | BTD:61–63; CAD:29–30; POD:30–31; SM:25–26 | E/Game.lua:342–353 | ok | Optional `name` param added — backward compatible. |
+| `game.log` before the UI exists | — (#72) | E/Game.lua:56 `function _M.log(style, ...) end` | **trap** | The base definition is an **empty function**. It stays empty until the module's uiset replaces it during `runReal`, so anything logged from a `ToME:run` hook is silently discarded — no error, no output. Raise player-visible lines from `ToME:runDone` instead. |
 
 ## engine.ui / engine.dialogs / mod.dialogs
 
@@ -220,6 +250,8 @@ the game builds it.
 | GameOptions `self.c_list:drawItem(item)` / `self.c_desc.w/.h` | H:64, :80; :70, :87 | T/mod/dialogs/GameOptions.lua:40, :84–90; E/ui/TreeList.lua:96–111, :305–310 | ok | `c_list` is recreated per tab switch — v1's closures look it up at call time, so they always hit the live widget. |
 | lore popup detection | P:584, :591 | T/mod/dialogs/LorePopup.lua:37, :98–108 | **changed** | See game.dialogs row: match by `__CLASSNAME == "mod.dialogs.LorePopup"` (E/class.lua:76 stamps it on every instance), dismiss via the EXIT virtual only (restores `game.tooltip.inhibited`, :98–104 vs :127). Do not detect by `after_learn_cb` presence — nil for ShowLore-spawned popups. |
 | `require "mod.dialogs.<X>"` via overload mount | BTD:9–10; SM:5, :32 | E/Module.lua:519–523; T/mod/dialogs/ listing (36 files, none named like v1's) | ok | No shadowing in either direction. The mount at "/" is one shared namespace — namespace the port's dialogs (`mod/dialogs/skoobot/`). |
+| `Dialog:simplePopup(title, text, fct, no_leave, any_leave)` | — (#58) | E/ui/Dialog.lua:110 | ok | Text and one button; there is **no slot for a checkbox or any other widget**. A popup that needs one has to be a Dialog subclass laying out the same shape by hand (`src/overload/.../StopDialog.lua`). |
+| `Mouse:startDrag(x, y, cursor, payload, on_done, on_move, no_prestart)` | — (#56) | E/Mouse.lua:178 | ok | The list widget reports every motion with the button held; the engine promotes the first that travels far enough into a drag and ignores the rest. Release delivers `drag-end` to the widget under the cursor, carrying `payload`. |
 
 ## KeyBind / hooks / config
 
