@@ -7,18 +7,10 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- ---------------------------------------------------------------------------
---
--- The engine stores a binding as "sym:_F7:false:true:false:false"
--- (engine/KeyBind.lua:146; the order is sym:ctrl:shift:alt:meta), and its own
--- formatter, KeyBind:formatKeyString (:158), renders that as "SF7". A message
--- to the player reads better as "Shift+F7", so since #57 they look the binding
--- up through describe() instead of repeating the default by hand.
---
--- Pure: the symbol's display name comes from the caller (core.key.symName in
--- the game, a table under busted), so spec/keys_spec.lua covers it without a
--- running game. Mouse and gesture bindings are not expanded -- describe()
--- returns nil for them and the caller falls back to the engine's formatter.
+-- Expands the engine's binding strings into "Shift+F7" for messages (#57), and
+-- finds this addon's actions that share a key with another (#50) -- advisory
+-- only; nothing here rebinds. Engine mechanics, including the silent
+-- first-wins dispatch #50 exists for: docs/api-surface-1.7.6.md, KeyBind.
 
 local M = {}
 
@@ -30,11 +22,8 @@ local MODIFIERS = {
     { flag = "meta",  label = "Meta"  },
 }
 
---- Expand an engine key string into "Ctrl+Shift+F7" form.
--- @param ks       the binding string, e.g. "sym:_F7:false:true:false:false"
--- @param symname  function(sym) -> the display name of a symbol such as "_F7"
---                 or "64", or nil when it does not know it
--- @return the description, or nil when `ks` is not a keyboard binding
+--- Expand an engine key string into "Ctrl+Shift+F7", or nil when it is not a
+--- keyboard binding. `symname` is core.key.symName: sym -> display name, or nil.
 function M.describe(ks, symname)
     if type(ks) ~= "string" then return nil end
 
@@ -66,18 +55,7 @@ function M.describe(ks, symname)
     return table.concat(parts, "+")
 end
 
--- ---------------------------------------------------------------------------
--- Collisions (#50)
---
--- Every addon's defineAction lands in the one class-level table,
--- KeyBind.binds_def, with the player's remaps in KeyBind.binds_remap;
--- KeyBind:bindKeys rebuilds a handler's `binds` from both, remap over default
--- (engine/KeyBind.lua:127-136). When two actions share a key string,
--- KeyBind:receiveKey (:228-233) fires whichever one pairs() happens to yield
--- first and returns -- the other never sees the key, and nothing says so.
--- Read-only and advisory: the addon never rebinds anything, and both tables
--- come in as plain data so the check runs under busted too.
--- ---------------------------------------------------------------------------
+-- Collisions (#50).
 
 -- What an action is bound to, the way bindKeys() decides it.
 local function boundKeys(defs, remap, t)
@@ -86,15 +64,9 @@ local function boundKeys(defs, remap, t)
     return remap[t] or def.default or {}
 end
 
---- The addon's actions that share a key string with another action.
--- @param defs   KeyBind.binds_def: type -> { default = {ks, ...}, name = ... }
--- @param remap  KeyBind.binds_remap: type -> {ks, ...}, replacing the default
---               for that type; nil when there are no remaps
--- @param ours   the addon's action types, in the order to report them
--- @return a list, possibly empty, of { type=, keystring=, others={type, ...} }:
---         one entry per (our action, key string) pair that another action is
---         also bound to, others sorted by name. An action with no binding,
---         or one that is not defined at all, collides with nothing.
+--- The addon's actions that share a key string with another: a list of
+--- { type, keystring, others }, others sorted by name. `defs` and `remap` are
+--- KeyBind.binds_def and .binds_remap; `ours` is our types, in report order.
 function M.collisions(defs, remap, ours)
     remap = remap or {}
     local byKey = {}
@@ -125,20 +97,15 @@ function M.collisions(defs, remap, ours)
     return out
 end
 
---- The menu's status line for `n` collisions: "Keybinds: OK", or
---- "Keybinds: N collision(s) (see log)".
+--- The menu's status line for `n` collisions.
 function M.summary(n)
     n = tonumber(n) or 0
     if n <= 0 then return "Keybinds: OK" end
     return ("Keybinds: %d collision%s (see log)"):format(n, n == 1 and "" or "s")
 end
 
---- One collision as the player reads it: the key, then every action bound
---- to it with ours first -- `Shift+F3: "Toggle SkooBot: Reclauded" and
---- "Switch control to character 3"`.
--- @param c       an entry from collisions()
--- @param keyname the key, rendered (describe(), or the engine's formatter)
--- @param nameOf  function(type) -> the action's display name
+--- One collision as the player reads it: the key, then every action bound to
+--- it with ours first. `nameOf` is type -> display name.
 function M.collisionText(c, keyname, nameOf)
     local names = { '"' .. tostring(nameOf(c.type)) .. '"' }
     for _, o in ipairs(c.others) do names[#names + 1] = '"' .. tostring(nameOf(o)) .. '"' end
