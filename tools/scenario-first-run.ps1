@@ -347,7 +347,7 @@ return ("dialog=[%s] buttons=[%s] never=%s body=[%s] left_open=%d"):format(
                 Check ($offer -match 'dialog=\[SkooBot: Reclauded\]') 'the dead end opens a dialog of its own'
                 Check ($offer -match 'Set up talents') 'with a button straight to the talent screen'
                 Check ($offer -match 'Not now') 'a way to dismiss it for this session'
-                Check ($offer -match "Don't ask again") 'and a way to never see it again on this character'
+                Check ($offer -match 'Never ask') 'and a way to never see it again on this character'
                 Check ($offer -match 'nothing to fight with') 'the body says what is wrong in one sentence'
                 # Escape and dismissal must not be the same as "never": a
                 # dialog that turns itself off when dismissed does it by

@@ -423,12 +423,10 @@ function offerSetup()
     SetupDialog = SetupDialog or require("mod.dialogs.skoobot_reclauded.SetupDialog")
     game:registerDialog(SetupDialog.new(
         "#GOLD#SkooBot has nothing to fight with.#WHITE#\n\n"
-        .. "No talent is in its Combat list, so it stopped at the first thing it saw. "
-        .. "The talent screen can suggest a set from the talents this character already "
-        .. "knows -- you can change any of it afterwards, and nothing is written until "
-        .. "you accept it.\n\n"
-        .. "You can also reach it any time with "
-        .. bot.keyFor("MENU_SKOOBOT_RECLAUDED") .. ".",
+        .. "Its Combat list is empty, so it stopped at the first enemy it saw.\n\n"
+        .. "The talent screen can suggest a set from what this character knows. "
+        .. "Nothing is saved until you accept it, and you can change any of it.\n\n"
+        .. "Menu: " .. bot.keyFor("MENU_SKOOBOT_RECLAUDED"),
         function(choice)
             if choice == "setup" then
                 game:registerDialog(require("mod.dialogs.skoobot_reclauded.TalentDialog").new(game.player))

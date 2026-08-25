@@ -35,12 +35,18 @@ function _M:init(text, on_pick)
 	self.on_pick = on_pick
 	engine.ui.Dialog.init(self, "SkooBot: Reclauded", 1, 1)
 
-	local _, w = tostring(text):toTString():splitLines(game.w * 0.6, self.font)
-	local zone = Textzone.new{width=math.max(w, 360) + 10, auto_height=true, text=text}
+	-- #109: the wrap width is what sets the dialog's width, and `game.w * 0.6`
+	-- alone made it grow with the screen -- at 1440p it wrapped at ~1536px, so
+	-- the body ran as two enormous lines and the box was far wider than it
+	-- needed to be. Capped at a readable measure, so it is the same size on any
+	-- monitor and only narrows on a small one.
+	local MEASURE = 520
+	local _, w = tostring(text):toTString():splitLines(math.min(game.w * 0.6, MEASURE), self.font)
+	local zone = Textzone.new{width=math.min(math.max(w, 360), MEASURE) + 10, auto_height=true, text=text}
 
 	local setup = Button.new{text="Set up talents", fct=function() self:pick("setup") end}
 	local later = Button.new{text="Not now",        fct=function() self:pick("later") end}
-	local never = Button.new{text="Don't ask again", fct=function() self:pick("never") end}
+	local never = Button.new{text="Never ask",      fct=function() self:pick("never") end}
 
 	self:loadUI{
 		{left=3, top=3, ui=zone},
