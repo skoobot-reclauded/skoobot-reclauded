@@ -8,14 +8,23 @@
     the expected result and not a failure of the run; 100% would mean the
     bound was too loose to find anything.
 
-    WHAT "CLEARED" MEANS HERE. The character got off its FIRST floor: the zone
-    trail shows a second real floor. The bot does the clearing -- survive the
-    floor and explore it to exhaustion -- and tools/soak.ps1's descend rung
-    does the stair-taking once the level reports itself explored. That
-    division is deliberate and is recorded per class as `descents`: we are
-    measuring whether a class can survive and finish a floor, not whether it
-    is willing to press '>'. Scoring by FLOOR rather than by zone is the
-    owner's call for a faster first pass (2026-08-25).
+    WHAT "CLEARED" MEANS HERE. The character reached a DEEPER FLOOR OF ITS
+    STARTING ZONE. Reaching a different zone does not count: the two ways that
+    happens are both the harness moving the character rather than the
+    character earning it -- the soak's next-zone rung teleporting out of a
+    finished zone, and a death with lives left being rescued to the Eidolon
+    plane and dropped somewhere new.
+
+    The bot does the clearing -- survive the floor and explore it to
+    exhaustion -- and the harness presses '>'. That division is deliberate and
+    is counted per class in `descents`, so a CLEARED never over-claims. Note
+    the counter is the soak's `stairs-down` RESUME, not `rungs.descend`: the
+    descend rung only fires when the harness had to walk to the stairs, and
+    auto-explore usually walks there itself (#121), so reading descend alone
+    reports zero injected descents on a run that was entirely injected.
+
+    Scoring by FLOOR rather than by zone is the owner's call for a faster
+    first pass (2026-08-25).
 
     -Minutes IS A CAP, NOT A TARGET. A class that clears floor one in thirty
     seconds keeps going until the budget is spent, so the trail routinely runs
@@ -237,7 +246,24 @@ try {
         $eidolon   = @($trail | Where-Object { $_ -like 'eidolon-plane*' }).Count
         $realTrail = @($trail | Where-Object { $_ -notlike 'eidolon-plane*' })
         $firstReal = $(if ($realTrail.Count -gt 0) { $realTrail[0] } else { '?' })
-        $cleared   = @($realTrail | Where-Object { $_ -ne $firstReal }).Count -gt 0
+        $startZone = ($firstReal -split ':')[0]
+
+        # A DEEPER FLOOR OF THE STARTING ZONE, and nothing else. Reaching a
+        # different zone does not count, because the two ways that happens are
+        # both the harness moving the character rather than the character
+        # earning it: the soak's next-zone rung teleports out of a finished
+        # zone, and a death with lives left is rescued to the Eidolon plane and
+        # then dropped somewhere new. The first pass had both, and both read as
+        # CLEARED: Doomed died on trollmire:1 and was scored a pass because the
+        # rescue put it in ruins-kor-pul.
+        $cleared = @($realTrail | Where-Object {
+            $_ -ne $firstReal -and ($_ -split ':')[0] -eq $startZone
+        }).Count -gt 0
+
+        # Whether this run is comparable with the rest. A class that begins in
+        # a DLC zone cleared *a* first floor, but not the same one, so its row
+        # is reported and left out of the headline.
+        $comparable = ($startZone -eq 'trollmire')
 
         # CLEARED outranks DIED, because the question this sweep answers is
         # "did this class get off its FIRST floor" and the run keeps going for
@@ -269,7 +295,15 @@ try {
             DiedAfter= ($cleared -and ($s.deaths -gt 0 -or $eidolon -gt 0))
             Killer   = $s.killer
             LuaErrors= $s.lua_errors.count
-            Descents = $s.rungs.descend.taken
+            # The stairs the HARNESS took, which is rungs.descend only when it
+            # had to walk there first. Auto-explore usually walks there itself
+            # (#121), and the soak then fires CHANGE_LEVEL as its 
+            # resume -- so reading descend.taken alone reports 0 injected
+            # descents on a run that was entirely injected.
+            Descents = ((@($s.resumes.by_action) | Where-Object { $_.action -eq 'stairs-down' } | ForEach-Object { $_.count }) + 0)[0] + $s.rungs.descend.taken
+            NextZone = $s.rungs.next_zone.taken
+            StartZone= $startZone
+            Comparable = $comparable
             Stops    = $s.stop_total
             TopStop  = $top
             EndReason= $s.end_reason
@@ -286,14 +320,23 @@ finally {
 }
 
 # ---- the table the morning is read from ---------------------------------
-$cleared = @($results | Where-Object { $_.Outcome -eq 'CLEARED' }).Count
-$ran     = @($results | Where-Object { $_.Outcome -in @('CLEARED','DIED','STUCK','ERROR') }).Count
+# The headline counts COMPARABLE runs only: a class that starts in a DLC zone
+# cleared a first floor, but not the same one, so its row is printed and left
+# out of the percentage rather than quietly averaged into it.
+$judged  = @($results | Where-Object { $_.Outcome -in @('CLEARED','DIED','STUCK','ERROR') -and $_.Comparable })
+$cleared = @($judged | Where-Object { $_.Outcome -eq 'CLEARED' }).Count
+$ran     = $judged.Count
+$offZone = @($results | Where-Object { $_.Outcome -in @('CLEARED','DIED','STUCK','ERROR') -and -not $_.Comparable })
 $pct     = $(if ($ran -gt 0) { [math]::Round(100 * $cleared / $ran) } else { 0 })
 
 $md = New-Object System.Collections.Generic.List[string]
 $md.Add("# Class baseline sweep -- $Race, $Minutes min per class")
 $md.Add('')
-$md.Add("**$cleared of $ran cleared their first floor ($pct%).** Stair-taking is the harness's descend rung once the level reports itself explored; the clearing is the bot's.")
+$md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in Trollmire. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
+if ($offZone.Count -gt 0) {
+    $md.Add('')
+    $md.Add("Reported but NOT in that percentage, because they do not start in Trollmire and so did not clear the same floor: " + (($offZone | ForEach-Object { "$($_.Class) ($($_.StartZone))" }) -join ', ') + '.')
+}
 $md.Add('')
 $md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | Most common stops |')
 $md.Add('|---|---|---|---|---|---|---|---|---|---|')
@@ -301,7 +344,7 @@ foreach ($r in ($results | Sort-Object @{e={$_.Outcome}}, @{e={$_.Class}})) {
     $md.Add("| $($r.Class) | $($r.Tree) | $($r.Race) | **$($r.Outcome)** | $($r.Trail) | $($r.CharLevel) | $($r.Turns) | $($r.Stops) | $($r.Descents) | $($r.TopStop) |")
 }
 $md.Add('')
-$md.Add('`Descents` counts stairs taken by the harness''s descend rung, not by the bot: it is how much of a `CLEARED` was injected. A `STUCK` row is not necessarily a class problem -- read the stop column first, because a known bug (a sealed door, #64) eating the whole budget looks exactly like a class that cannot cope.')
+$md.Add('`Descents` counts stairs the HARNESS took, so it says how much of a `CLEARED` was injected; the clearing itself is the bot''s. A `STUCK` row is not necessarily a class problem -- read the stop column first, because a known bug eating the whole budget (a sealed door, #64; a talent that opens a dialog every turn) looks exactly like a class that cannot cope.')
 $md.Add('')
 $md.Add('Skipped: town-start classes (#123) -- ' + ($TOWN_STARTS -join ', ') + '. Steamtech classes are campaign-gated and never appear in a Maj''Eyal roster.')
 
