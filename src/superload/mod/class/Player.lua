@@ -1664,12 +1664,17 @@ local function atLevelChange(grid)
         ("#GOLD#This level is explored.#WHITE#\n\nYou are standing on %s. Shall I take %s?\n\n")
             :format(zoneExit and "the way out of this zone" or "a staircase", zoneExit and "it" or "them")
         .. "\"Always\" and \"Never ask\" set the "
-        .. cfgfmt.title("TAKE_STAIRS") .. " option, which you can change back on the settings screen.",
+        .. cfgfmt.title("TAKE_STAIRS") .. " option for this character, which you can change "
+        .. "back on the settings screen.",
         function(choice)
-            if choice == "always" then bot.setSetting("TAKE_STAIRS", cfgfmt.STAIRS_ALWAYS) end
+            -- Per-character, not account-wide: how willing this character is
+            -- to be walked down the stairs is a play-style choice, and a
+            -- button on a mid-run prompt should not rewrite the default every
+            -- future character starts with.
+            if choice == "always" then bot.setCharSetting("TAKE_STAIRS", cfgfmt.STAIRS_ALWAYS) end
             if choice == "never" then
-                bot.setSetting("TAKE_STAIRS", cfgfmt.STAIRS_NEVER)
-                game.log("#GOLD#[SkooBot] It will not offer again. The %s option turns it back on.",
+                bot.setCharSetting("TAKE_STAIRS", cfgfmt.STAIRS_NEVER)
+                game.log("#GOLD#[SkooBot] It will not offer again for this character. The %s option turns it back on.",
                     cfgfmt.title("TAKE_STAIRS"))
             end
             if choice == "take" or choice == "always" then takeLevelChange(what) end

@@ -99,6 +99,10 @@ M.PER_CHARACTER = {
     NORMAL_POWER_RATIO         = true,
     ELITES_POWER_RATIO         = true,
     BOSS_POWER_RATIO           = true,
+    -- #86: how willing THIS character is to be walked down the stairs is a
+    -- play-style choice like the thresholds, not an account-wide one. It also
+    -- keeps the offer's own buttons out of the account settings file.
+    TAKE_STAIRS                = true,
 }
 
 M.ORDER = {

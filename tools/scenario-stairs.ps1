@@ -131,7 +131,7 @@ end
 -- One decision on the stairs, from an activation that began beside them.
 function st.decide(mode)
   st.reset()
-  st.b.setSetting("TAKE_STAIRS", mode)
+  st.b.setCharSetting("TAKE_STAIRS", mode)
   local p = game.player
   p:move(st.offx, st.offy, true)
   st.b.state = 11
@@ -223,7 +223,7 @@ return ("title=%s uis=%d open=%d"):format(tostring(st.d.title), n, #game.dialogs
     $silence = Probe @'
 local D = require("mod.dialogs.skoobot_reclauded.StairsDialog")
 game:registerDialog(D.new("test body", function(c)
-  if c == "never" then st.b.setSetting("TAKE_STAIRS", 2) end
+  if c == "never" then st.b.setCharSetting("TAKE_STAIRS", 2) end
 end))
 local d = game.dialogs[#game.dialogs]
 d:pick("never")
@@ -270,13 +270,14 @@ return ("zone=%s->%s level=%s->%s"):format(zone0, tostring(game.zone and game.zo
     Ok ($errs.Count -eq 0) 'no Lua Error in the run' ($errs -join ' | ')
 }
 finally {
-    # In the finally, not the body: TAKE_STAIRS is an ACCOUNT setting and is
-    # written to disk, so a run that fails half way would otherwise leave the
-    # machine's default wherever the last probe put it -- which is exactly what
-    # happened while this scenario was being written.
+    # In the finally rather than the body, and clearing the CHARACTER value
+    # rather than restoring an account one: TAKE_STAIRS is per-character (#86),
+    # so nothing here can reach the account settings file. It was account-wide
+    # for one commit, and a run that died half way duly left this machine set
+    # to "always" -- which is how the per-character decision got made.
     $clean = Invoke-Bridge -TimeoutSec 30 -Lua @'
 if not _G.st or not st.b then return "nothing to restore" end
-st.b.setSetting("TAKE_STAIRS", st.saved or 0)
+st.b.clearCharSetting("TAKE_STAIRS")
 local restored = st.unpacify()
 st.reset()
 return ("setting=%s restored=%s"):format(st.setting(), tostring(restored))
