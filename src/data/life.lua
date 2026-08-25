@@ -7,37 +7,24 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- ---------------------------------------------------------------------------
+-- `life / max_life` is not a life fraction in this game: a character dies at
+-- `die_at`, which moves both ways. Every source of it and how far each can be
+-- trusted is docs/api-surface-1.7.6.md, "die_at: zero is not where a character
+-- dies"; the decision is #91.
 --
--- `life / max_life` is not a life fraction in this game. A character dies at
--- `die_at` (engine/interface/ActorLife.lua:51), which moves both ways, and the
--- game's own bar measures over `max_life - die_at` (mod/class/Player.lua:390,
--- :465; uiset/Minimalist.lua:785) -- so a Lich at -500 read as 0% with five
--- hundred points still to spend. Every source of die_at and how far each can
--- be trusted is docs/api-surface-1.7.6.md, "die_at: zero is not where a
--- character dies"; the decision is #91.
+-- `fraction` is the game's own arithmetic; `safe_fraction` is what the bot
+-- decides on, counting a temporary part only while it outlasts the look-ahead
+-- -- so a character held up by an infusion about to lapse reads as empty, and
+-- the bot hands back BEFORE it ends rather than after.
 --
--- Two figures come out. `fraction` is the game's own arithmetic -- what the
--- life bar shows. `safe_fraction` is what the bot decides on: the permanent
--- and sustained parts in full, every adverse part in full, and a temporary
--- part only while it lasts longer than the look-ahead. A character held above
--- death by an infusion about to lapse reads as empty, which is the point: the
--- bot hands back BEFORE the effect ends, not after.
---
--- Adverse is decided by the SIGN, never by the effect's `status` field. The
+-- Adverse is decided by the SIGN, never by the effect's `status` field: the
 -- one adverse source in 1.7.6, UNRAVEL, is declared `status = "beneficial"`
--- and is -- it grants invulnerability -- so a reading that trusted `status`
--- would discount it.
+-- and truthfully so.
 --
--- What cannot be attributed lands in `permanent` and is trusted. That is
--- deliberate: the ordinary case -- a cloak, an artifact, a Lich -- is
--- unattributable and permanent, and treating it as untrustworthy would make
--- every such character read as nearly dead. The cost is that a future
--- temporary source using a mechanism not listed here would be over-trusted, so
--- `permanent` is returned for a probe to say what was assumed.
---
--- Pure: plain field reads over the actor, no engine calls and no globals, so
--- busted can hold it to its shape over a fake.
+-- What cannot be attributed lands in `permanent` and is TRUSTED, deliberately:
+-- the ordinary case -- a cloak, an artifact, a Lich -- is unattributable and
+-- permanent, and distrusting it would make every such character read as nearly
+-- dead. `permanent` is returned so a probe can say what was assumed.
 
 local M = {}
 
@@ -86,26 +73,13 @@ local function recorded(p, params)
     return nil
 end
 
---- The life a character actually has, decomposed by how far it can be
---- trusted. See the header for what each part means.
----
---- @param p the actor: life, max_life, die_at, tmp, tempeffect_def,
----          sustain_talents, compute_vals. Plain fields, all optional.
---- @param lookahead turns; M.LOOKAHEAD when nil.
---- @return a table (every field always present):
----   life, max_life               as they are
----   die_at, safe_die_at          the total, and the total discounted
----   pool, max, fraction          the game's own figures: life - die_at
----                                over max_life - die_at
----   safe_pool, safe_max,
----   safe_fraction                the same over safe_die_at -- what a
----                                decision should use
----   permanent, sustained,
----   temporary                    the decomposition, summing to die_at
----   expiring                     the temporary parts NOT counted in safe,
----                                each { amount, dur, name, id }
----   trusted                      true when nothing was discounted, i.e.
----                                the two fractions agree
+--- The life a character actually has, decomposed by how far it can be trusted.
+--- `p` is the actor (life, max_life, die_at, tmp, tempeffect_def,
+--- sustain_talents, compute_vals; all optional). Returns life, max_life,
+--- die_at, safe_die_at, pool/max/fraction (the game's own arithmetic),
+--- safe_pool/safe_max/safe_fraction (what a decision should use),
+--- permanent/sustained/temporary, `expiring` (the parts not counted in safe)
+--- and `trusted` (nothing was discounted). Every field is always present.
 function M.of(p, lookahead)
     p = p or {}
     lookahead = tonumber(lookahead) or M.LOOKAHEAD

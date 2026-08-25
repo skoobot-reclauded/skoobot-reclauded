@@ -8,30 +8,13 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- ---------------------------------------------------------------------------
+-- One option, one file of Lua under the engine's settings directory, which the
+-- engine runs at startup LONG BEFORE any addon is loaded -- so an unguarded
+-- `tome.skoobot_reclauded.X = v` indexes a table that does not exist yet, dies,
+-- and is swallowed. It looks like it works until a restart. #90.
 --
--- One option, one file under the engine's settings directory, holding Lua the
--- engine runs at startup. That is ToME's own mechanism (Game:saveSettings
--- writes /settings/<file>.cfg) and v1 used it under `tome.SkooBot`.
---
--- THE TRAP this module exists for (#90): the engine runs every one of those
--- files LONG BEFORE any addon is loaded, because the config is read to decide
--- what to load. So a file saying
---
---     tome.skoobot_reclauded.MAX_ENEMY_COUNT = 77
---
--- indexes a field that does not exist yet, dies, and is swallowed. It looks
--- like it works: the file on disk is right and the live table is right for the
--- rest of the session, and only a restart shows the loss.
---
--- Two halves to the repair, and this module is the shared half: `line()`
--- writes a form that creates the table first, so the engine's own startup load
--- works from now on, and `parse()` reads a value back out of a file's text, so
--- values written by an older build -- which is all of them -- are recovered.
--- data/settings.lua does that before it seeds any default.
---
--- Pure: no engine, no filesystem, no globals. The file IO is the caller's,
--- which is what lets busted hold this to its shape.
+-- `line()` writes the guarded form; `parse()` reads a value back out of a file
+-- an older build wrote, which data/settings.lua does before seeding defaults.
 
 local M = {}
 
@@ -47,16 +30,10 @@ function M.file(name)
     return M.NAMESPACE .. "." .. name
 end
 
---- The contents to write for one option.
----
---- Two lines, and the first is the whole point: `= x or {}` creates the
---- namespace table, which at config-load time the engine has never got round
---- to. Without it the second line is a nil index and the value is lost on the
---- next start.
----
---- Numbers and booleans only, which is every setting this addon has; anything
---- else is refused rather than written badly (LOG_LEVEL is a number for
---- exactly this reason).
+--- The contents to write for one option: two lines, and the first is the whole
+--- point -- `= x or {}` creates the namespace table, which at config-load time
+--- the engine has never got round to. Numbers and booleans only; anything else
+--- is refused rather than written in a form that will not load.
 function M.line(name, value)
     local t = type(value)
     if t ~= "number" and t ~= "boolean" then
@@ -66,16 +43,12 @@ function M.line(name, value)
         M.NAMESPACE, M.NAMESPACE, M.NAMESPACE, name, tostring(value))
 end
 
---- The value one option's file sets, or nil if the text does not set it.
+--- The value one option's file sets, or nil.
 ---
---- Reads the assignment rather than executing the file: the file is on the
---- player's disk, and running it would be running whatever is in it. Numbers
---- and booleans only, matching `line()`.
----
---- Tolerates what real files contain -- the guarded two-line form and the old
---- one-line form, a UTF-8 BOM, CRLF, whitespace anywhere reasonable. The
---- pattern is anchored on the option's own name, so the guard line, which
---- assigns the NAMESPACE and not a name under it, cannot be read as a value.
+--- READS the assignment, never executes the file -- it is on the player's
+--- disk. Tolerates what real files contain: both forms, a BOM, CRLF, loose
+--- whitespace. Anchored on the option's own name, so the guard line cannot be
+--- read as a value.
 function M.parse(text, name)
     if type(text) ~= "string" or type(name) ~= "string" or name == "" then return nil end
     local ns  = M.NAMESPACE:gsub("%.", "%%.")
@@ -89,10 +62,8 @@ function M.parse(text, name)
 end
 
 
---- What each setting is CALLED where the player meets it (#71). One table,
---- read by the tab that draws the titles and by the reasons that quote them,
---- so the two cannot name the same knob differently. A stop that named the
---- setting key instead left the player nothing on screen to match it to.
+--- What each setting is CALLED where the player meets it (#71). One table, so
+--- the options tab and the stop reasons cannot name a knob differently.
 M.TITLE = {
     LOWHEALTH_RATIO            = "Low Health Ratio",
     IGNORE_DAMAGE_HEALTH_RATIO = "Ignore Damage Above Life Ratio",
@@ -108,21 +79,13 @@ M.TITLE = {
     LOG_LEVEL                  = "Log level",
 }
 
---- The title, or the key itself when something asks for a name this does not
---- have. A reason that says "MAX_ENEMY_COUNT" is poor; one that errors is
---- worse.
+--- The title, or the key itself: a reason that says "MAX_ENEMY_COUNT" is poor,
+--- one that errors is worse.
 function M.title(name)
     return M.TITLE[name] or tostring(name)
 end
 
 --- Which settings belong to the CHARACTER, and which to the account (#95).
----
---- A threshold answers "how dangerous is this character's situation", and a
---- level 3 Alchemist and a level 30 Bulwark do not want the same answer. The
---- three left out answer "how do I like this addon to behave" -- how fast it
---- steps, whether it opens a popup, how much it prints -- which is the
---- player's, not the character's.
----
 --- A character with no value of its own uses the account default, which is
 --- what every existing save has and why this needs no migration.
 M.PER_CHARACTER = {
@@ -137,9 +100,6 @@ M.PER_CHARACTER = {
     BOSS_POWER_RATIO           = true,
 }
 
---- Every option this addon has, in the order the settings screen shows them:
---- the character's safety thresholds first, because they are what a player
---- comes to change, then the account preferences.
 M.ORDER = {
     "LOWHEALTH_RATIO", "IGNORE_DAMAGE_HEALTH_RATIO",
     "MAX_INDIVIDUAL_POWER", "MAX_DIFF_POWER", "MAX_COMBINED_POWER", "MAX_ENEMY_COUNT",
@@ -147,9 +107,7 @@ M.ORDER = {
     "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL",
 }
 
---- What each option does, in the words the stops use (#54, #82, #95). One map,
---- read by the options tab and by the settings screen, so two copies of a
---- paragraph cannot drift into two paragraphs.
+--- Every option, in the order the settings screen shows them.
 M.DESC = {
     LOWHEALTH_RATIO =
         "A fraction of your life pool (0.5 is half) -- your maximum life, plus whatever " ..
@@ -166,10 +124,8 @@ M.DESC = {
         "does not stop the bot; once life is below it, any damage taken while exploring hands " ..
         "back. It is also the scale that stop is measured on: life exactly at this ratio is " ..
         "threat 1, and twice as far below it is threat 2. See Maximum Enemy Power.",
-    -- #82: since #11 these five are not independent switches -- each is the
-    -- denominator of one term of the threat score, and the score is the
-    -- largest term (data/score.lua). Every power stop ends " -- threat N",
-    -- so the scale has to be said somewhere or the number is noise.
+--- What each option does, in the words the stops use (#54, #82, #95). One map,
+--- read by both the options tab and the settings screen.
     MAX_INDIVIDUAL_POWER =
         "Stop when any enemy in view has a power level above this figure, whatever yours is. " ..
         "Power level is the addon's rough threat score for a creature -- its life, damage, " ..
@@ -218,9 +174,7 @@ M.DESC = {
         "errors are also shown in the message log.",
 }
 
---- The range a numeric option may be set to, where it is not the default
---- 0..1000000. #74: an option whose real range is 0..1 prompting "From 0 to
---- 1000000" is a prompt that teaches nothing.
+--- The range a numeric option may be set to, where it is not 0..1000000 (#74).
 M.RANGE = {
     LOWHEALTH_RATIO            = { 0, 1 },
     IGNORE_DAMAGE_HEALTH_RATIO = { 0, 1 },

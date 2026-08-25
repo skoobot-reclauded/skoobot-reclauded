@@ -10,32 +10,23 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- A PURE MODULE (#56): no globals, no ToME API. Every function takes the rules
--- table -- the saved `player.skoobot_reclauded.autotalents` -- and plain
--- values, so spec/rules_spec.lua can test it without a running game. Anything
--- that needs the actor arrives as a value or a function.
---
--- Shape:
+-- A PURE MODULE (#56): every function takes the rules table -- the saved
+-- `player.skoobot_reclauded.autotalents` -- and plain values.
 --
 --   { Combat = { entry, ... }, DamagePrevention = { ... },
 --     Recovery = { ... },      Sustain = { ... } }
 --
--- An entry is {tid = "T_..."} for a talent, {object = "<item name>"} for an
--- activatable item -- keyed by NAME, the way ToME's own inventory hotkeys are,
--- because the talent id is a rotating slot (#55) -- or {action = "flee",
--- from = "nearest" | "strongest", keep_los = true?} for a built-in action
--- (#59, #69). The kind is discriminated by which field is set, so a later
--- built-in action needs no migration either.
+-- An entry is {tid} for a talent, {object} for an activatable item -- keyed by
+-- NAME, as ToME's own inventory hotkeys are, because the talent id is a
+-- rotating slot (#55) -- or {action, from, keep_los} for a built-in action
+-- (#59, #69). The kind is which field is set, so a later action needs no
+-- migration.
 --
--- Order within a section IS priority: the first entry is tried first. A rule
--- appears at most once in a section, but may be in several -- a healing
--- infusion as both Damage Prevention and Recovery, as v1 allowed. Each
--- placement is its own table, since place() copies on an add, so extra fields
--- stay with that placement: `hold = true` (#15, "hold while impaired") is such
--- a field and means something only in Combat.
+-- Order within a section IS priority. A rule appears at most once per section
+-- but may be in several, and each placement is its own table (place() copies
+-- on an add), so `hold` (#15) stays with the Combat placement alone.
 --
--- v1, and the port until #56, saved a flat list of {tid=, usetype=, priority=}
--- in the same field. normalize() migrates that in place, once.
+-- normalize() migrates v1's flat {tid, usetype, priority} list in place, once.
 
 local M = {}
 

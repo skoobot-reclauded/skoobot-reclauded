@@ -7,25 +7,16 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- ---------------------------------------------------------------------------
---
 -- How bad the situation is, and what to do about it short of stopping (#11).
 --
 -- Each of the player's knobs is the DENOMINATOR of one term, so a term of 1 is
--- exactly that knob's limit, 0.5 is half-way to it and 3 is three times over;
--- the score is the largest term. The list stays the input, the score is the
--- evaluation (design-stop-conditions.md 5).
+-- exactly that knob's limit and the score is the largest term. The flags are
+-- the same comparisons v1 made, so a knob means what it says.
 --
--- The flags are the same comparisons v1 made, so a knob means exactly what it
--- says, and WARN / STOP / IGNORE still decides whether one stops the bot.
--- Distance changes no term: a boss at the edge of view is the same boss two
--- turns later with less room, and the stop should come at the edge.
---
--- Stunned and confused are deliberately NOT inputs (design 2.1): the model does
--- not know what they cost, so they stay a stop, not a term.
---
--- Pure: no globals, no ToME API. spec/score_spec.lua pins every term, flag and
--- posture without a running game.
+-- Distance changes no term, deliberately: a boss at the edge of view is the
+-- same boss two turns later with less room, so the stop comes at the edge.
+-- Stunned and confused are deliberately not inputs either (design 2.1) -- the
+-- model does not know what they cost, so they stay a stop.
 
 local M = {}
 

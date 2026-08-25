@@ -10,32 +10,23 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- PORTED FROM SkooBot 0.0.12 (D-12): the threat heuristic that the stop
--- conditions and the tooltip both read. A plain module taking the actor as an
--- argument, not v1's two methods on mod.class.Actor -- the original is still
--- installed by real people, and two addons defining the same method on one
--- class means the one loaded last silently wins.
+-- PORTED FROM SkooBot 0.0.12 (D-12): the threat heuristic the stop conditions
+-- and the tooltip both read. A plain module, not v1's two methods on
+-- mod.class.Actor -- the original is still installed by real people, and two
+-- addons defining one method on one class means the last loaded silently wins.
 --
--- PURE function of the actor it is given: no globals, and no ToME API beyond
--- the methods it calls on the actor. That is what lets spec/power_spec.lua
--- check the formulas with no running game; keep it that way when #100 changes
--- them.
+-- PURE function of the actor it is given, which is what lets spec/power_spec
+-- check the formulas with no running game. Keep it that way when #100 comes.
 --
--- The formulas are the original's apart from the offence terms, which #115
--- corrected: v1's arithmetic left all three pinned near 1.0, so a power level
--- was life, defence, stats and weapon damage with offence absent. That change
--- raised every power level by roughly five times and the four MAX_* defaults
--- did NOT move with it (maintainer's ruling, 2026-08-24) -- they are v1's
--- numbers against a formula that now has offence in it, and #101 is where
--- measured ones come from.
+-- #115 corrected the offence terms and raised every power level about
+-- fivefold; the four MAX_* defaults did NOT move with it (maintainer's ruling,
+-- 2026-08-24), so they are v1's numbers against a formula that now has offence
+-- in it. Measured replacements are #101.
 --
--- Two of the original's oddities are kept on purpose so the rest still
--- matches. Both belong to #100, not to the port:
---
--- * global_speed is a parameter because the original read
---   game.player.global_speed for EVERY actor scored, enemies included.
--- * In weaponPowerLevels, `type` is the Lua builtin compared with a string,
---   so both `(type ~= "offhand" or ...)` terms are always true. Harmless.
+-- Two of v1's oddities are kept so the rest still matches, and belong to #100:
+-- global_speed is a parameter because the original read the PLAYER's for every
+-- actor scored, and in weaponPowerLevels `type` is the Lua builtin compared
+-- with a string, so both `(type ~= ...)` terms are always true. Harmless.
 
 local M = {}
 
@@ -67,27 +58,23 @@ M.sum = recSum
 
 --- A school's crit chance as a FRACTION. ToME keeps these as percentages and
 --- ADDS combat_generic_crit to the school's own (Combat.lua:1454, :1888,
---- :1901); v1 wrote `generic or school`, and 0 is truthy in Lua, so any actor
---- carrying the field at all scored a crit chance of exactly zero. `base` is
---- v1's stand-in for ToME's own base terms (cunning, luck, the weapon), kept
---- as it was -- reproducing those is #100, not this. See #115.
+--- :1901). Not v1's `generic or school`: 0 is truthy in Lua, so any actor
+--- carrying the field at all scored exactly zero. `base` is v1's stand-in for
+--- ToME's own base terms; reproducing those is #100. See #115.
 local function critFraction(school, generic, base)
     return ((tonumber(school) or 0) + (tonumber(generic) or 0) + base) / 100
 end
 
 --- Expected damage per hit, allowing for crits, times speed.
 ---
---- v1 wrote `power * (critChance/100 * critMult)`, which is wrong twice: the
---- caller had already turned the percentage into a fraction, so the crit term
---- was 100x too small, and multiplying BY the crit term rather than weighting
---- with it made a character with no crit worth no damage at all. Both together
---- pinned all three offence scores at ~1.0, so offence was absent from a power
---- level: on the spec's own fixture, multiplying mind power by ten moved the
---- total 4.6%. See #115.
+--- Do not restore v1's `power * (critChance/100 * critMult)`: it divided an
+--- already-fractional chance by 100 again, and multiplied BY the crit term
+--- instead of weighting with it, so a character with no crit was worth no
+--- damage. See #115.
 ---
 --- critBonus is combat_critical_power, an additive percentage on ToME's base
---- 150% multiplier, so critBonus/100 + 1.5 IS the multiplier -- v1 had that
---- part right. The `+ 1` floor and the speed factor are v1's and stay.
+--- 150%, so critBonus/100 + 1.5 IS the multiplier. The `+ 1` floor and the
+--- speed factor are v1's and stay.
 local function offensePowerLevel(power, critChance, critBonus, speed)
     local mult = (tonumber(critBonus) or 0) / 100 + 1.5
     local c = tonumber(critChance) or 0
@@ -121,10 +108,8 @@ local function weaponPowerLevels(actor)
     return attackScores
 end
 
---- The component scores for an actor.
--- @param actor an Actor (or anything with the same fields and methods)
--- @param global_speed the speed multiplier to apply; the original always
---   passed the player's, whoever was being scored
+--- The component scores for an actor. `global_speed` is a parameter because
+--- the original passed the player's, whoever was being scored.
 function M.scores(actor, global_speed)
     local scores = {}
     scores.survivalScore = actor.life / 10 * actor.life / actor.max_life
@@ -150,24 +135,15 @@ function M.level(actor, global_speed)
 end
 
 -------------------------------------------------------------------------------
--- Rank weighting (#62, salvage-mishander.md item 2)
+-- Rank weighting (#62)
 -------------------------------------------------------------------------------
 --
--- A flat threshold stops for every pack of commons and then, raised so it does
--- not, lets a pair of rares through -- so each enemy's power is weighted by
--- its rank band before it is compared. Pure like the rest of the file, and it
--- touches neither scores nor level, which spec/power_spec.lua pins to v1's
--- numbers.
---
--- ToME 1.7.6's ranks (mod/class/Actor.lua textRank / allowedRanks), and
--- mishander's bands over them by the same `rank < 3` / `rank < 4` cuts:
+-- Bands over ToME's ranks, by mishander's `rank < 3` / `rank < 4` cuts; the
+-- rank table and the `t.rank or 2` default are in docs/api-surface-1.7.6.md.
 --
 --     NORMAL  rank < 3   1 critter, 2 normal
 --     ELITE   rank < 4   3 elite, 3.2 rare, 3.5 unique
 --     BOSS    otherwise  4 boss, 5 elite boss, 10 god, 11 godslayer
---
--- An actor without a rank is NORMAL, which is the engine's own default
--- (Actor.lua:206 `t.rank = t.rank or 2`).
 
 M.RANK_NORMAL = "normal"
 M.RANK_ELITE  = "elite"
@@ -181,11 +157,8 @@ function M.rankBand(rank)
     return M.RANK_BOSS
 end
 
---- The multiplier for an actor's power, by its rank band.
--- @param actor anything with a `rank` field
--- @param weights { normal = n, elite = n, boss = n }; a band with no weight
---   (or a non-number) multiplies by 1, so an unconfigured band changes
---   nothing
+--- The multiplier for an actor's power, by its rank band. A band with no
+--- weight, or a non-number, multiplies by 1.
 function M.rankWeight(actor, weights)
     local w = weights and weights[M.rankBand(actor and actor.rank)]
     return tonumber(w) or 1

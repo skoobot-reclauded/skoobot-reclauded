@@ -7,52 +7,34 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- ---------------------------------------------------------------------------
---
--- One channel for everything the bot writes about itself: five levels, one
--- setting, two sinks, and nothing spent when a level is off. v1 printed every
--- thought unconditionally, and mishander's fork added ~15 game.log calls on
--- hot paths, one of them inside a per-tile FOV callback
--- (salvage-mishander.md); neither could be turned off.
+-- One channel for everything the bot writes about itself (#46): five levels,
+-- one setting, two sinks, and nothing spent when a level is off.
 --
 --   error   the addon is wrong: an unknown stop condition, a liveness trip
 --   warn    the player should probably know: a rule dropped for a talent
 --           the character no longer has
---   info    one line per event the bot took part in: an action, a stop, a
---           migration. A few lines per game turn at most.
+--   info    one line per event the bot took part in. A few lines a turn.
 --   debug   per-decision reasoning: state, life deltas, sustain attempts
---   trace   per-talent and per-iteration chatter: the available-talent
---           filter, the act counter. Unbounded in volume; never on by
---           default.
+--   trace   per-talent and per-iteration chatter. Never on by default.
 --
--- Every line goes to the injected file sink (print, so te4_log.txt in the
--- game) behind the fixed prefix the harness filters on, and an info line
--- carries no level tag -- so the lines the scenarios grep for read exactly as
--- they did before levels existed. `^\[SKOOBOT\]` is every line of the
--- addon's; `^\[SKOOBOT\] \[(debug|trace)\]` is the chatter.
+-- An info line carries NO level tag, so what the scenarios grep for reads as
+-- it did before levels existed: `^\[SKOOBOT\]` is every line of the addon's,
+-- `^\[SKOOBOT\] \[(debug|trace)\]` is the chatter.
 --
--- The optional second sink sees warn and error only; in the game it is the
--- message log. Stops are NOT logged through it: data/notice.lua owns what the
--- player sees of a stop, and the act loop emits the stop line here at info,
--- which the user sink never receives, so one notice per stop stays true (#58).
+-- Stops are never logged through the user sink: data/notice.lua owns what the
+-- player sees of a stop, so one notice per stop stays true (#58).
 --
--- Cheap when off by construction rather than discipline: a call at a disabled
--- level returns before it touches its arguments. So call sites pass a format
--- and arguments -- log.debug("[State] %s", name) -- and a site whose
--- ARGUMENTS are costly to compute passes a function instead. Nothing here
--- raises into the act loop; a bad format produces a line that says so.
---
--- Pure: spec/log_spec.lua covers it without a running game.
+-- Cheap when off by construction: a call at a disabled level returns before it
+-- touches its arguments, so pass a format and arguments, and pass a function
+-- when the ARGUMENTS are costly. Nothing here raises into the act loop.
 
 local M = {}
 
 M.PREFIX = "[SKOOBOT]"
 
--- Level numbers. A logger at level N emits everything numbered 1..N, so a
--- higher number is a noisier log; 0 is silence, including errors. The numbers
--- are what the setting persists -- the engine's settings writer quotes
--- nothing, so a name would come back as a global read of nil -- and the names
--- are what the options tab and the bridge speak.
+-- A logger at level N emits 1..N, so a higher number is noisier; 0 is silence,
+-- errors included. Numbers are what the setting persists (see data/cfg.lua),
+-- names are what the options tab and the bridge speak.
 M.LEVELS = { off = 0, error = 1, warn = 2, info = 3, debug = 4, trace = 5 }
 M.NAMES  = { [0] = "off", "error", "warn", "info", "debug", "trace" }
 M.MAX    = 5
@@ -64,9 +46,7 @@ M.DEFAULT = "info"
 -- The user sink sees this level and anything louder.
 M.USER_LEVEL = "warn"
 
---- A level given as a name ("debug"), a number (4) or a numeric string
---- ("4"), resolved to its number. Returns nil and a message for anything
---- else, so a caller can refuse a typo instead of silencing the channel.
+-- Info: the one-line-per-action narrative is what a bug report is read from.
 function M.level(v)
     if type(v) == "number" then
         if v ~= math.floor(v) or v < 0 or v > M.MAX then
@@ -97,11 +77,8 @@ function M.line(n, text)
     return M.PREFIX .. " [" .. tostring(M.NAMES[n] or n) .. "] " .. text
 end
 
--- The text of one call: a function is called and its result used; a format
--- with arguments is formatted; a format with none is taken as it is, so a
--- literal "%" in a plain message is not a crash. Looked up as fmt:format(...)
--- rather than a captured string.format, so a test can prove the formatter was
--- not reached by replacing string.format.
+--- One formatted line: the prefix, the level tag for anything but info, and
+--- the text.
 local function render(fmt, ...)
     if type(fmt) == "function" then
         local ok, r = pcall(fmt, ...)
@@ -118,15 +95,9 @@ local function render(fmt, ...)
     return table.concat(parts, " ") .. " (log format error: " .. tostring(out) .. ")"
 end
 
---- A logger.
--- @param opts.sink   function(line): where every enabled line goes. The
---                    game passes print. Required.
--- @param opts.user   function(levelName, text): the second sink, warn and
---                    above, without prefix or tag. Optional.
--- @param opts.level  the initial level, as M.level accepts it; M.DEFAULT
---                    when absent or unknown.
--- @return a table with error/warn/info/debug/trace(fmt, ...), log(level,
---         fmt, ...), setLevel(level), getLevel(), enabled(level).
+-- A format with no arguments is taken as it is, so a literal "%" in a plain
+-- message is not a crash. Looked up as fmt:format(...) rather than a captured
+-- string.format, so a test can prove the formatter was not reached.
 function M.new(opts)
     opts = opts or {}
     local sink = opts.sink or print
@@ -168,9 +139,8 @@ function M.new(opts)
         end
     end
 
-    -- One function per level, gated before its arguments are looked at: the
-    -- comparisons are against upvalues, so a disabled call is a call, a
-    -- compare and a return.
+    -- Gated before the arguments are looked at, against upvalues: a disabled
+    -- call is a call, a compare and a return.
     function L.error(fmt, ...) if level >= 1 then emit(1, fmt, ...) end end
     function L.warn(fmt, ...)  if level >= 2 then emit(2, fmt, ...) end end
     function L.info(fmt, ...)  if level >= 3 then emit(3, fmt, ...) end end

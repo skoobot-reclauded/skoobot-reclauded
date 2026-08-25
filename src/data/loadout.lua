@@ -10,23 +10,13 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- A PURE MODULE (#18), the data/rules.lua pattern: no globals, no ToME API.
--- The caller hands in plain tables and gets a PROPOSAL back; nothing is
--- written until apply() is asked to, and apply() writes through
--- data/rules.lua, which is passed in rather than loaded here.
--- spec/loadout_spec.lua runs all of it without a game.
+-- A PURE MODULE (#18): the caller hands in plain tables and gets a PROPOSAL
+-- back. Nothing is written until apply() is asked to.
 --
--- Why this can work at all: the NPC AI has this bot's problem -- which of an
--- actor's talents attack, heal, defend, buff -- and ToME answers it with data.
--- Every talent the NPC AI may use carries a `tactical` table
--- (mod/class/interface/ActorAI.lua, "TALENT TACTICAL TABLES"): `{ ATTACK =
--- { weapon = 2 }, DISABLE = { stun = 2 } }`, `{ DEFEND = 2 }`, `{ HEAL = 2 }`.
--- 86% of 1.7.6's non-passive talents have one; most of the rest carry the
--- game's own `no_npc_use`. The keys are language-independent and discovery
--- iterates talents by id, so "must key on talent IDs" holds by construction.
--- TRAP: the tome module LOWERCASES the keys as it loads a talent
--- (data/talents.lua aiLowerTacticals), so a definition read at runtime says
--- `attack` where the data file says `ATTACK`. Both are accepted here.
+-- It works because the NPC AI has this bot's problem and ToME answers it with
+-- data: every talent an NPC may use carries a `tactical` table. The keys are
+-- lowercased as a talent loads, so both spellings are accepted here -- see
+-- docs/api-surface-1.7.6.md.
 --
 -- The rule, applied in order to every talent the character knows:
 --
@@ -37,41 +27,22 @@
 --   5  tactical is a function                 called once with no target; a table back is
 --                                             used; nothing back and requires_target -> Combat,
 --                                             else unassigned
---   6  ATTACK / ATTACKAREA / DISABLE          Combat (CLOSEIN beside an attack lands here; so
---                                             does Block, ATTACK = 3, DEFEND = 3)
+--   6  ATTACK / ATTACKAREA / DISABLE          Combat
 --   7  HEAL                                   Recovery
 --   8  DEFEND                                 Damage Prevention
 --   9  anything else                          unassigned, and the reason says which key
 --
--- Step 9 is deliberate, and stated to the player rather than guessed at: an
--- ESCAPE talent would fire as an attack since the bot has no flee behaviour,
--- SPECIAL is Shoot Down and friends, and an activated BUFF belongs in a
--- rotation only as an opener.
+-- Step 9 is stated to the player rather than guessed at. Priority within a
+-- section is COOLDOWN DESCENDING, ties by the tactical weight sum, so
+-- long-cooldown hitters fire the moment they are available and the rotation
+-- falls through to the spammable fillers.
 --
--- Four guards, each backed by a data field:
---
--- * `sustain_slots` groups mutually exclusive sustains -- the three chants,
---   the three hymns -- which a naive list would toggle against each other for
---   ever. At most one per group is placed, and only with a reason the data
---   gives (it is already active, or it has the highest level); otherwise none,
---   and the group is listed as a CHOICE for the player.
--- * `hide` is read, not filtered on: a hidden talent (the chants are) stays in
---   the proposal and is marked.
--- * `on_pre_use` is NOT evaluated here. 144 Combat talents need a shield or a
---   two-hander, and discovery is a snapshot with no target and possibly no
---   weapon yet, so they are included and marked "conditional"; the act loop's
---   own filter (#5) refuses them turn by turn.
--- * a function-form `tactical` (Sun Ray) needs a target; hence step 5.
---
--- Priority within a section is COOLDOWN DESCENDING, ties by the tactical
--- weight sum: long-cooldown hitters sit at the top so they fire the moment
--- they are available and the rotation falls through to the spammable fillers.
--- Tactical weights alone are coarse (1-3) and rank badly.
---
--- Validated against mishander's hand-tuned Sun Paladin build, a fixture in
--- spec/loadout_spec.lua: 13 of its 14 placements reproduced from metadata
--- alone; the 14th they put under Damage Prevention where the data (HEAL) says
--- Recovery (docs/salvage-mishander.md item 12).
+-- `on_pre_use` is NOT evaluated: discovery is a snapshot with no target and
+-- possibly no weapon, so the 144 Combat talents needing a shield or a
+-- two-hander are included and marked "conditional", and the act loop's own
+-- filter (#5) refuses them turn by turn. `hide` is read, not filtered on.
+-- `sustain_slots` groups mutually exclusive sustains, which a naive list would
+-- toggle against each other for ever.
 
 local M = {}
 
@@ -96,25 +67,14 @@ local UNMAPPED = {
 
 local function isTable(v) return type(v) == "table" end
 
---- #98: can the weapon in the main hand make a melee attack at all?
----
---- A bow or a sling attacks through its ammunition, with T_SHOOT, and the game
---- gates most melee talents behind a melee weapon anyway -- so proposing
---- *Attack* to an Archer is a visibly wrong recommendation on the first screen
---- a new player sees, which is the whole cost: at runtime the talent would
---- simply be refused and the rotation would fall through.
----
---- Keyed on the WEAPON, not the class: no list of "ranged classes" survives
---- contact with ToME's build variety. A Sun Paladin with a staff is in melee on
---- purpose, and a staff is not archery, so nothing here touches them.
+--- #98: can the weapon in the main hand make a melee attack at all? Keyed on
+--- the WEAPON, not the class -- no list of "ranged classes" survives ToME's
+--- build variety, and a Sun Paladin with a staff is in melee on purpose.
 local ARCHERY_SUBTYPE = { bow = true, sling = true }
 
 --- Is this proposed talent a melee attack the main hand cannot deliver?
----
---- FAILS SAFE. Only a talent whose range is KNOWN and is 1 or less counts
---- as melee: a nil range means the caller did not supply one, and guessing
---- "melee" there would quietly drop a ranged talent from the proposal,
---- which is a worse failure than the one being fixed.
+--- FAILS SAFE: only a KNOWN range of 1 or less counts as melee, because
+--- guessing at a nil range would quietly drop a ranged talent instead.
 local function meleeWithoutAMeleeWeapon(e, opts)
     local mh = opts and opts.mainhand
     if not isTable(mh) then return nil end
@@ -266,20 +226,13 @@ local function classify(e, opts)
     return "unassigned", rec(nil, table.concat(reasons, "; "))
 end
 
---- #98: a character the suggestion arms with a RANGED attack is a character
---- that wants somewhere to stand.
+--- #98: a character the suggestion arms with a RANGED attack wants somewhere
+--- to stand, so it gets a flee row -- LAST in Combat, under every attack.
 ---
---- Keyed on the talents the suggestion itself placed, not on the class and not
---- on the weapon: a Combat rotation that reaches past arm's length IS the
---- evidence that the character fights at range, so the Sun-Paladin-with-a-staff
---- case that defeats weapon and class tests never arises.
----
---- It goes LAST in Combat, under every attack: above them the bot would back
---- away before shooting; below, it is what the row is for.
----
---- Depends on #97 being fixed -- before that this row looped for ever against
---- an immobile enemy out of talent range, and suggesting it to every ranged
---- character would have shipped that loop to all of them.
+--- Keyed on the talents the suggestion itself placed, not on class or weapon:
+--- a Combat rotation that reaches past arm's length IS the evidence that the
+--- character fights at range. Depends on #97 being fixed, or this row loops
+--- for ever against an immobile enemy out of talent range.
 local FLEE_KEEP_LOS = { action = "flee", from = "nearest", keep_los = true }
 
 local function wantsFleeRow(combatEntries)
@@ -374,18 +327,13 @@ local function resolveSlots(entries)
 end
 
 --- Discover a loadout.
--- @param talents a list of {tid=, t=<talent def or the plain fields of one>,
---   level=<talent level>, active=<is the sustain up>, name=<display name>}
--- @param opts optional: self = the actor handed to a function-form tactical;
---   mainhand = {name=, subtype=, archery=} for the weapon in the main hand,
---   which decides whether a melee attack is worth proposing at all (#98)
--- @return a proposal:
---   entries    {tid, name, section, priority, reason, hidden, conditional, cooldown}
---              in section order, then priority order
---   unassigned {tid, name, reason}   known, usable, but in no section; the reason says why
---   skipped    {tid, name, reason}   the game says an AI must not use these
---   choices    {slot, tids, names, reason}   sustain groups the player must pick from
---   counts     {entries=, unassigned=, skipped=, choices=}
+-- @param talents list of {tid, t = <talent def>, level, active, name}
+-- @param opts    self = actor for a function-form tactical; mainhand =
+--                {name, subtype, archery} (#98); declined; rm
+-- @return a proposal: entries {tid, name, section, priority, reason, hidden,
+--   conditional, cooldown} in section then priority order; unassigned and
+--   skipped, each {tid, name, reason}; choices {slot, tids, names, reason};
+--   and counts.
 function M.discover(talents, opts)
     opts = opts or {}
     local declined = isTable(opts.declined) and opts.declined or {}
@@ -468,20 +416,14 @@ function M.unplaced(proposal, rules, rm)
     return out
 end
 
---- Write a proposal into a rules table, through data/rules.lua.
---
--- "merge" (the default) keeps every row the player placed. A talent with a row
--- that has lost the `suggested` mark in any section is the player's decision:
--- none of its rows are touched. Rows that still carry the mark are discovery's
--- own -- the talent screen clears it the moment a row is moved by hand -- and
--- are rewritten from the fresh proposal, after the hand rows, so a talent
--- learned since the last run lands among them in priority order rather than at
--- the bottom. Re-running is therefore idempotent.
---
--- "replace" empties every section first; the caller asks for confirmation, not
--- this function. Every row written carries suggested = true.
--- @param rm the data/rules.lua module
--- @return {added=, removed=, kept=}
+--- Write a proposal into a rules table, through data/rules.lua (`rm`).
+--- Returns {added, removed, kept}.
+---
+--- "merge" (the default) never touches a talent whose row has lost the
+--- `suggested` mark in any section -- that mark is what tells discovery's own
+--- rows from the player's, and the talent screen clears it the moment a row is
+--- moved by hand. Re-running is idempotent. "replace" empties every section
+--- first; the caller asks for confirmation, not this function.
 function M.apply(proposal, rules, rm, mode)
     mode = mode or "merge"
     local report = { added = 0, removed = 0, kept = 0, declined = 0, mode = mode }

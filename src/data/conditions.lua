@@ -8,37 +8,23 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- ---------------------------------------------------------------------------
+-- One entry per condition, and the act loop walks the list -- so an entry with
+-- no detector cannot fire, and a detector with no entry cannot exist (#12;
+-- docs/design-stop-conditions.md 3.1).
 --
--- One entry per condition is the single source of truth for its name, default
--- policy, detection, site, message and what it blocks (#12;
--- docs/design-stop-conditions.md 3.1). The act loop walks this list, so an
--- entry with no detector cannot fire and a detector with no entry cannot exist.
+-- `default` tells the two kinds apart. POLICY entries have WARN / STOP /
+-- IGNORE, and their order and codes are what the save holds -- rename nothing.
+-- LIVENESS entries have none, because they are not policy: pathing while
+-- unable to move is a bug, not a risk appetite (design 1.1).
 --
--- Two kinds of entry share the list, told apart by `default`:
---
---   * POLICY entries have a default of WARN, STOP or IGNORE. Their order IS
---     the menu's order and the saved list's, and their codes and labels are
---     what the save holds -- rename nothing.
---   * LIVENESS entries have no default because they are not policy:
---     attempting to path while unable to move is a bug, not a risk appetite
---     (design 1.1). The act loop reads them through capabilities().
---
--- Detection is by CAPABILITY, never by effect name: `attr("never_move")` is the
--- one predicate ToME's own move() gates on, and it covers sixteen effects plus
--- encumbrance where an effect list could never be complete. The status
--- attributes are additive counters (two sources of stun make 2; confused is a
--- 0-50 percentage), so every test is on truthiness or > 0, never `== 1` --
--- v1's `== 1` read a doubly stunned or a 30%-confused character as unafflicted
--- (docs/api-surface-1.7.6.md, value-domain notes).
+-- Detect by CAPABILITY, never by effect name, and never with `== 1`: the
+-- status attributes are additive counters, so a doubly stunned or 30%-confused
+-- character reads as unafflicted (docs/api-surface-1.7.6.md, value-domain
+-- notes). `attr("never_move")` is the one predicate the engine's own move()
+-- gates on, and covers sixteen effects plus encumbrance.
 --
 -- Policy and block are two consumers of one signal: DEBUFF_DAZED at IGNORE
--- still cannot path, because dazed sets never_move and the act loop consults
--- the block whatever the policy says.
---
--- Pure: everything about the situation arrives in `ctx`, so
--- spec/conditions_spec.lua covers every predicate, message and the
--- reconciliation without a running game.
+-- still cannot path.
 
 local M = {}
 
@@ -63,17 +49,15 @@ M.BLACKOUT_TURNS = 1
 -- Unset means STOPPED (the player must look).
 M.HANDED_BACK = "handed_back"
 
--- What a detector is given besides the actor, filled in by the act loop:
+-- What a detector gets besides the actor, filled in by the act loop:
 --   ctx.hostiles     how many hostiles are in view
---   ctx.score        the situation scored (data/score.lua, #11): the four
---                    power conditions read their flag from it and word
---                    their message from its details and its suffix
+--   ctx.score        the situation scored (data/score.lua)
 --   ctx.cfg          function(key) -> the setting's value
 --   ctx.chestInView  function(p) -> is an unopened glowing chest in view
 --   ctx.delta        life change this turn (SITE_LOOP only)
---   ctx.turnsLost    whole turns the character never got (#77)
+--   ctx.turnsLost    whole turns the character never got
 --   ctx.title        function(key) -> the option's title in the options tab
---   ctx.life         data/life.lua's reading of the life pool (#91)
+--   ctx.life         data/life.lua's reading of the life pool
 --   ctx.describeLife function(reading) -> that reading in the player's words
 
 --- A status attribute as the counter it is: 0 when absent.
