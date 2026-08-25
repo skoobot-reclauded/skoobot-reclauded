@@ -97,7 +97,7 @@ try {
     $null = Assert-Result ([pscustomobject]@{ Status = 'OK'; Result = $g.Addons; Tainted = $false }) 'the product is loaded' -Match 'skoobot_reclauded'
 
     $install = Probe @'
-_G.fl = { spawned = {}, scouters = nil }
+_G.fl = { spawned = {}, scouters = nil, pacified = nil }
 local b = rawget(_G, "skoobot_reclauded")
 if not b or not b.rules or not b.rules.flee or not b.rules.module.isAction then return "OLD no flee in the runtime table" end
 local SCOUTERS = { "SCOUTER_BIGENEMY", "SCOUTER_STRONGERENEMY", "SCOUTER_CROWDPOWER", "SCOUTER_ENEMYCOUNT" }
@@ -114,6 +114,34 @@ function fl.hostiles()
       if a and p:reactionToward(a) < 0 and p:canSee(a) and game.level.map.seens(x, y) then n = n + 1 end
     end, nil)
   return n
+end
+-- Every other hostile put on the player's own faction for the length of a
+-- probe, and put back afterwards. A probe that spawns its own actor and then
+-- measures "the nearest hostile" is a coin flip without this: the fixture's
+-- level carries about thirty hostiles in view, several at the distances the
+-- probes spawn at, so which one the rotation picks depends on where they
+-- wandered. Removing the interference rather than detecting it, as
+-- scenario-explore-exits.ps1 does for the same defect class -- see #124.
+function fl.pacify()
+  local p = game.player
+  fl.pacified = {}
+  for _, e in pairs(game.level.entities or {}) do
+    if e ~= p and e.faction and e.x and p.reactionToward and p:reactionToward(e) < 0 then
+      fl.pacified[#fl.pacified + 1] = { e, e.faction }
+      e.faction = p.faction
+    end
+  end
+  if p.x then p:playerFOV() end
+  return #fl.pacified
+end
+function fl.unpacify()
+  local list = fl.pacified or {}
+  for _, f in ipairs(list) do f[1].faction = f[2] end
+  local ok = true
+  for _, f in ipairs(list) do if f[1].faction ~= f[2] then ok = false end end
+  fl.pacified = nil
+  if game.player.x then game.player:playerFOV() end
+  return ok
 end
 function fl.onChangeLevel()
   local p = game.player
@@ -224,11 +252,15 @@ function fl.immobile(dist)
     if ok then sx, sy = p.x + d[1] * dist, p.y + d[2] * dist break end
   end
   if not sx then return "SETUP no free line at distance " .. dist end
+  -- Before spawning, not after: the spawn must be the only hostile the
+  -- rotation can pick, or "nearest" is decided by whatever wandered closest
+  -- (#124). Every return below here has to put the factions back.
+  local others = fl.pacify()
   local m
   for _ = 1, 8 do
     m = game.zone:makeEntity(game.level, "actor",
       { special = function(e) return not e.unique and (e.rank or 1) <= 2 end }, nil, true)
-    if not m then return "SETUP no actor to spawn" end
+    if not m then break end
     m.rank = 2
     m.name = "rooted " .. tostring(m.name)
     m.energy.mod = 0
@@ -239,16 +271,29 @@ function fl.immobile(dist)
     game.level:removeEntity(m, true)
     m = nil
   end
-  if not m then return "SETUP the spawned actor is not a visible hostile" end
+  if not m then
+    fl.unpacify()
+    return "SETUP the spawned actor is not a visible hostile"
+  end
   m:addTemporaryValue("never_move", 1)
   fl.spawned[#fl.spawned + 1] = m
+  -- The product's own hostile list, not a second implementation of "nearest":
+  -- anything other than exactly one means the flee target need not be the
+  -- spawn, and the measurement below would describe an actor this probe never
+  -- chose. SETUP, so the runner reports INCONCLUSIVE rather than a false FAIL.
+  local seen = tonumber(tostring(b.inspect()):match("hostiles=(%d+)")) or -1
+  if seen ~= 1 then
+    fl.unpacify()
+    return ("SETUP %d hostiles in view after pacifying %d, so the flee target need not be the spawn"):format(seen, others)
+  end
   fl.rules("nearest")
   local t0 = game.turn
   b.state = 13
   b.query()
-  return ("IMMOBILE d=%d nm=%s dturn=%d reason=%s"):format(
+  local restored = fl.unpacify()
+  return ("IMMOBILE d=%d nm=%s dturn=%d others=%d restored=%s reason=%s"):format(
     core.fov.distance(p.x, p.y, m.x, m.y), tostring(m:attr("never_move") and true or false),
-    game.turn - t0, tostring(b.last_reason))
+    game.turn - t0, others, tostring(restored), tostring(b.last_reason))
 end
 function fl.unspawn()
   for _, m in ipairs(fl.spawned) do if m.x and not m.dead then game.level:removeEntity(m, true) end end
@@ -578,6 +623,7 @@ return "installed"
     if ($g1.Result -match '^SETUP') { Inconclusive $g1.Result }
     $null = Assert-Result $g1 'the target really is immobile and at range' -Match ' d=3 nm=true '
     $null = Assert-Result $g1 'query advances no game turn' -Match ' dturn=0 '
+    $null = Assert-Result $g1 'the pacified hostiles got their factions back' -Match ' restored=true '
     $null = Assert-Result $g1 'the flee is skipped, and says why' -Match 'nothing to flee from: .*cannot follow, and is not next to you'
     Ok ($g1.Result -notmatch 'cornered') 'it is NOT reported as cornered: there is somewhere to go, just no reason to go' $g1.Result
 
@@ -587,6 +633,7 @@ return "installed"
     Write-Host "  adjacent   $($g2.Result)"
     if ($g2.Result -match '^SETUP') { Inconclusive $g2.Result }
     $null = Assert-Result $g2 'the adjacent case is set up as intended' -Match ' d=1 nm=true '
+    $null = Assert-Result $g2 'the pacified hostiles got their factions back' -Match ' restored=true '
     Ok ($g2.Result -notmatch 'nothing to flee from') 'standing next to it, the flee is NOT skipped' $g2.Result
     # ----- E: the talent screen ---------------------------------------------
     Write-Host ''
