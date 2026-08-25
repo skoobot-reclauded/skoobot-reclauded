@@ -112,15 +112,36 @@ function mt.reset()
   while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end
   if b.active then b.stop("test reset") end
 end
--- Quiet: nothing in sight and not a level-change tile (the explore branch
--- hands back there before anything else).
+-- An adjacent grid the spawn can stand on AND be seen from: free to enter,
+-- and not sight-blocking, because ToME has terrain that blocks sight without
+-- blocking movement and an actor standing in it is not a visible hostile.
+-- Returns nil when this spot has no such grid, which is a reason to move on
+-- rather than to spawn and hope (#122).
+function mt.spawnGrid()
+  local p = game.player
+  for _, c in pairs(util.adjacentCoords(p.x, p.y)) do
+    local x, y = c[1], c[2]
+    if game.level.map:isBound(x, y) and not game.level.map:checkAllEntities(x, y, "block_move")
+       and not game.level.map(x, y, engine.Map.ACTOR) and not game.level.map:opaque(x, y) then
+      return x, y
+    end
+  end
+  return nil
+end
+-- Quiet: nothing in sight, not a level-change tile (the explore branch hands
+-- back there before anything else), and somewhere beside us the probe's actor
+-- can be both placed and seen.
+function mt.quietHere()
+  local x = mt.spawnGrid()
+  return mt.hostiles() == 0 and not mt.onChangeLevel() and x ~= nil
+end
 function mt.findQuiet()
   local p = game.player
   for i = 1, 80 do
-    if mt.hostiles() == 0 and not mt.onChangeLevel() then return true end
+    if mt.quietHere() then return true end
     p:teleportRandom(p.x, p.y, 60, 10)
   end
-  return mt.hostiles() == 0 and not mt.onChangeLevel()
+  return mt.quietHere()
 end
 
 -- 1, 2, 3: the talents, the rules, the scouters.
@@ -148,24 +169,36 @@ function mt.setup()
 end
 
 -- 4: one hostile next to us.
+--
+-- The draw is retried, because it is a draw: makeEntity's filter constrains
+-- rank and uniqueness, not faction or visibility, so a single attempt can
+-- hand back an actor the player does not react to as an enemy or cannot see,
+-- and one attempt is what made this scenario flake between identical runs
+-- (#122). Counted as a difference, not as a presence: a wanderer arriving
+-- between findQuiet and here would otherwise be mistaken for the spawn.
 function mt.spawn()
   local p = game.player
-  local m = game.zone:makeEntity(game.level, "actor",
-    { special = function(e) return not e.unique and (e.rank or 1) <= 2 end }, nil, true)
-  if not m then return "SETUP no actor to spawn" end
-  local sx, sy
-  for _, c in pairs(util.adjacentCoords(p.x, p.y)) do
-    local x, y = c[1], c[2]
-    if game.level.map:isBound(x, y) and not game.level.map:checkAllEntities(x, y, "block_move")
-       and not game.level.map(x, y, engine.Map.ACTOR) then sx, sy = x, y break end
+  local sx, sy = mt.spawnGrid()
+  if not sx then mt.unspawn() return "SETUP no free adjacent tile the spawn could be seen on" end
+  local tried = 0
+  for _ = 1, 8 do
+    local m = game.zone:makeEntity(game.level, "actor",
+      { special = function(e) return not e.unique and (e.rank or 1) <= 2 end }, nil, true)
+    if not m then break end
+    tried = tried + 1
+    local before = mt.hostiles()
+    game.zone:addEntity(game.level, m, "actor", sx, sy)
+    p:playerFOV()
+    local n = mt.hostiles()
+    if n == before + 1 then
+      _G.__mt_spawned = m
+      return ("OK spawned=%s rank=%s hostiles=%d draws=%d"):format(
+        tostring(m.name), tostring(m.rank), n, tried)
+    end
+    game.level:removeEntity(m, true)
   end
-  if not sx then return "SETUP no free adjacent tile" end
-  game.zone:addEntity(game.level, m, "actor", sx, sy)
-  _G.__mt_spawned = m
-  p:playerFOV()
-  local n = mt.hostiles()
-  if n == 0 then mt.unspawn() return "SETUP the spawned actor is not a visible hostile" end
-  return ("OK spawned=%s rank=%s hostiles=%d"):format(tostring(m.name), tostring(m.rank), n)
+  mt.unspawn()
+  return ("SETUP no drawn actor was a visible hostile after %d draws"):format(tried)
 end
 function mt.unspawn()
   local m = _G.__mt_spawned
@@ -203,7 +236,7 @@ return "installed " .. COND .. " " .. PLAIN
     $null = Assert-Result $setup 'Combat rules are [conditional, plain] in that order' -Match "combat=$Conditional,$Plain"
 
     $quiet = Invoke-Bridge -Lua 'return tostring(mt.findQuiet())' -TimeoutSec 120
-    if ($quiet.Result -ne 'True') { Inconclusive 'no spot with nothing in sight to spawn into' }
+    if ($quiet.Result -ne 'True') { Inconclusive 'no spot with nothing in sight AND a visible free tile beside it' }
 
     $spawn = Invoke-Bridge -Lua 'return mt.spawn()' -TimeoutSec 60
     Write-Host "  $($spawn.Result)"
