@@ -17,49 +17,24 @@
 -- PORTED FROM SkooBot 0.0.12 (D-12). The decision logic is the original's,
 -- deliberately unchanged, so that the port can be measured against the
 -- original for parity before anything is fixed. Where a line of the original
--- was a known bug, it is reproduced faithfully and marked `-- v1:` with the
--- task that fixes it; do not "tidy" those in passing, fix them under their
--- task with a test.
+-- was a known bug it is reproduced faithfully and marked `-- v1:` with the
+-- task that fixes it; do not "tidy" those in passing -- fix them under their
+-- task, with a test.
 --
--- What did change, and why:
+-- NOTHING is added to mod.class.Player except the two one-line wrappers at the
+-- bottom. The original is still installed by real people, and two addons
+-- defining the same method on one class means the one loaded last silently
+-- wins, so nothing here may carry a name the original uses -- v1's dozen
+-- methods (checkStop, tryStop, getStopConditionList, ...) and its four leaked
+-- globals are locals or runtime-table fields here. State lives in the
+-- `skoobot_reclauded` runtime table, config on `player.skoobot_reclauded`, and
+-- everything the harness observes -- inspect(), actions, last_reason -- is on
+-- the runtime table. Since #14 the tooltip line is an engine hook
+-- (hooks/load.lua) and there is no Actor superload at all.
 --
--- * Nothing is added to mod.class.Player except the ONE wrapped method at
---   the bottom (act). The original added a dozen methods to
---   the class -- checkStop, tryStop, getStopConditionList, ... -- and the
---   original is still installed by real people. Two addons defining the same
---   method on the same class means the one loaded last silently wins, so
---   nothing here may carry a name the original uses. State lives in the
---   `skoobot_reclauded` runtime table, config on `player.skoobot_reclauded`.
---   Since #14 those two one-line wrappers are the whole superload surface:
---   the tooltip line is an engine hook (hooks/load.lua) and there is no
---   Actor superload at all.
--- * The original leaked four functions into _G (aiStop, checkForAdditionalAction,
---   getUnspentTotal, skoobot_act). They are locals here.
--- * Power scoring moved to data/power.lua, a pure module busted can test.
--- * SAI_passTurn is gone: its only call in the original sat after two branches
---   that both return, so it could never run.
--- * Everything the harness needs to observe the bot -- inspect(), actions,
---   last_reason -- is on the runtime table, as the walking skeleton had it.
--- * A stop is one call, stop(severity, text), and data/notice.lua decides how
---   it looks (#58); a message that names a key looks the binding up (#57).
---   v1's aiStop(msg) took a pre-coloured string from each of its ~25 sites.
--- * What the bot writes about itself goes through data/log.lua (#46): five
---   levels, off below info by default, one "[SKOOBOT]" channel into
---   te4_log.txt and warnings into the message log. v1's print() on every
---   thought is the trace level now.
--- * The stop conditions are one list in data/conditions.lua (#12): code,
---   label, default, detector, site, message and what it blocks, walked by
---   one loop here. v1's DEFAULT_CONDITIONS table and its checkForDebuffs /
---   checkPowerLevel if-chains are gone, with their `== 1` tests; the act
---   loop consults what the detected conditions block (move / act / target)
---   so "cannot move but can act" has a defined response in every state.
--- * The situation is scored (data/score.lua, #11): the four power
---   conditions read their flag off it, their messages carry the threat
---   score, and the FIGHT branch follows its posture -- retreat a step,
---   hold and wait, fight, or hand back with the reasons -- where v1 could
---   only stop or charge. The player's knobs are the score's parameters.
---   The FIGHT branch's v1 log(msg) lines went through the channel with a
---   format each on the way (#66); the shim is gone.
+-- What can be decided without a game lives in the pure modules, which busted
+-- covers: data/power.lua, data/score.lua (#11), data/conditions.lua (#12),
+-- data/notice.lua (#58), data/log.lua (#46), data/life.lua (#91).
 
 local Astar = require "engine.Astar"
 local KeyBind = require "engine.KeyBind"
@@ -86,36 +61,31 @@ local STATE_SEEK    = 14
 
 -- FIXED (#13, T-027). v1 stopped after turnCount > 1000 player acts: an
 -- invocation count, not a measure of progress, so a productive run of a
--- thousand turns tripped the same wire as a spin ("did it get stuck?"), and
--- a spin inside one act was invisible to it until a thousand wasted
--- iterations had passed. yura9111's PR to the original counted auto-explore
--- calls the same way (salvage-yura9111.md). Both are gone.
+-- thousand turns tripped the same wire as a spin, and a spin inside one act was
+-- invisible until a thousand wasted iterations had passed. yura9111's PR to the
+-- original counted auto-explore calls the same way (salvage-yura9111.md).
 --
--- The liveness invariant in their place (design-stop-conditions.md 1.3):
--- an act-loop iteration that did not advance game.turn consumed no game
--- time and so did nothing, whatever the code believes it did. STALL_LIMIT
--- consecutive no-ops is a livelock whatever the cause -- the pinned
--- auto-explore v1 froze on, encumbrance, a talent the game refuses every
--- time, and the next one nobody has imagined -- and the bot stops with the
--- AI state in the reason so that every trip is a bug report. There is no
--- ceiling on a run that is advancing: a productive long run trips nothing.
+-- The liveness invariant in their place (design-stop-conditions.md 1.3): an
+-- act-loop iteration that did not advance game.turn consumed no game time and
+-- so did nothing, whatever the code believes it did. STALL_LIMIT consecutive
+-- no-ops is a livelock whatever the cause, and the bot stops with the AI state
+-- in the reason so that every trip is a bug report. There is no ceiling on a
+-- run that is advancing.
 --
--- Why 8. One no-op iteration is legitimate: auto-explore refuses to start
--- because something just came into view, and the next iteration fights.
--- Nothing legitimate needs more than two, and every no-op costs a full
--- decision on a frame the player is waiting for, so the limit is small;
--- eight leaves room for a sequence nobody has thought of while still
--- firing inside a single keypress. The counter lives on the activation, so
--- a restart by the player starts it clean.
+-- Why 8: one no-op iteration is legitimate -- auto-explore refuses to start
+-- because something just came into view, and the next iteration fights --
+-- nothing legitimate needs more than two, and every no-op costs a full decision
+-- on a frame the player is waiting for. Eight leaves room for a sequence nobody
+-- has thought of while still firing inside a single keypress. The counter lives
+-- on the activation, so a restart by the player starts it clean.
 local STALL_LIMIT = 8
 
--- THINK_LIMIT stays, as the inner guard. It counts skoobot_act() re-entries
--- within one iteration -- the REST-to-EXPLORE hop when there is nothing to
--- rest for, HUNT-to-EXPLORE, FIGHT-to-REST, checkForAdditionalAction after
--- a free action -- which all happen at one game.turn and so are invisible
--- to the progress invariant until the iteration ends. A productive chain
--- is two or three deep; 25 without settling is real spinning inside one
--- decision, and it is caught before it can overflow the stack.
+-- THINK_LIMIT stays as the inner guard. It counts skoobot_act() re-entries
+-- within one iteration -- REST-to-EXPLORE, HUNT-to-EXPLORE, FIGHT-to-REST,
+-- checkForAdditionalAction after a free action -- which all happen at one
+-- game.turn and so are invisible to the progress invariant until the iteration
+-- ends. A productive chain is two or three deep; 25 without settling is real
+-- spinning inside one decision, caught before it can overflow the stack.
 local THINK_LIMIT = 25
 
 -- The runtime table. Transient: none of this is saved with the character.
@@ -190,13 +160,10 @@ local function scoreKnobs()
 end
 
 -- The channel (#46). The file sink is print, which the engine writes to
--- te4_log.txt; the user sink is the message log, for warn and error only,
--- in the stop notices' style so the player sees one voice. `game` is looked
--- up at call time: this chunk runs while the module is still loading and
--- `game` is false. The level starts from the persisted setting (LOG_LEVEL,
--- seeded by data/settings.lua before any class loads) and is switched for
--- the session by the options tab or, from the bridge,
--- skoobot_reclauded.log.setLevel("debug").
+-- te4_log.txt; the user sink is the message log, warn and error only. `game` is
+-- looked up at CALL time: this chunk runs while the module is still loading and
+-- `game` is false. The level starts from the persisted setting, seeded by
+-- data/settings.lua before any class loads.
 local chan = logm.new{
     sink = print,
     user = function(levelName, text)
@@ -209,11 +176,9 @@ local chan = logm.new{
 }
 bot.log = chan
 
---- Per-character configuration, persisted with the save.
---
--- v1 scattered this over four player fields (skoobotautotalents,
--- skoobotstopconditions, skoobotstopwarn, skoobotactiontimer). One table under
--- a name the original does not use keeps the two addons' saves apart.
+--- Per-character configuration, persisted with the save. One table under a
+--- name the original does not use, where v1 scattered it over four player
+--- fields, so the two addons' saves cannot read each other's.
 local function data(p)
     p = p or game.player
     if not p.skoobot_reclauded then p.skoobot_reclauded = {} end
@@ -232,16 +197,14 @@ bot.data = data
 -------------------------------------------------------------------------------
 
 -- FIXED (T-019). v1 wrote the list to the save once and never looked at it
--- again, so a character never gained a condition added later and never lost
--- one removed -- and every lookup of a code the save lacked returned nil to a
--- caller that indexed it. v1 got away with that by never adding a condition;
--- the port's first one, TERRAIN_GLOWING_CHEST (T-013), is consulted on every
--- explore decision and took down every character created before it. The
--- saved list is now reconciled with the policy entries of conditions.LIST
--- whenever it differs (conditions.reconcile): same codes in the same order
--- with fresh labels, keeping the user's WARN/STOP/IGNORE choice wherever the
--- code survives. Rebuilt in place, so anything already holding the table
--- sees the result.
+-- again, so a character never gained a condition added later nor lost one
+-- removed -- and every lookup of a code the save lacked returned nil to a
+-- caller that indexed it. v1 got away with it by never adding a condition; the
+-- port's first, TERRAIN_GLOWING_CHEST (T-013), is consulted on every explore
+-- decision and took down every character created before it. The saved list is
+-- reconciled with conditions.LIST whenever it differs, keeping the player's
+-- WARN/STOP/IGNORE choice wherever the code survives, and rebuilt in place so
+-- anything already holding the table sees the result.
 local function getStopConditionList(p)
     local d = data(p)
     local list = d.stopconditions
@@ -257,9 +220,9 @@ local function getStopConditionList(p)
 end
 
 -- FIXED (T-019). v1 returned nil for an unknown code and every caller indexed
--- it. After reconciliation an unknown code can only be a programming error (a
--- lookup with no conditions.LIST entry), so it fails closed: the bot treats
--- it as STOP, and the log names the code so the entry gets added.
+-- it. After reconciliation an unknown code can only be a programming error, so
+-- it fails closed: treated as STOP, with the code in the log so the entry gets
+-- added.
 local function getStopCondition(p, code)
     for index, v in ipairs(getStopConditionList(p)) do
         if v.code == code then return v, index end
@@ -319,14 +282,10 @@ end
 --- does. Shared by the tab, the stop popup's checkbox (#58) and the log-level
 --- entry -- one writer, so the file format cannot drift between them (#90).
 ---
---- The file has to create the addon's namespace table before assigning into
---- it: the engine runs every /settings/*.cfg as Lua at startup, long before
---- any addon exists, so an unguarded line indexes nil, dies, and is
---- swallowed. data/cfg.lua owns that format; every writer goes through here
---- so there is one of it.
----
---- A value the format cannot hold is not written to disk rather than
---- written in a form that will not load. The live table still takes it, so
+--- The file has to create the addon's namespace table before assigning into it;
+--- data/cfg.lua owns that format, and every writer goes through here so there
+--- is one of it. A value the format cannot hold is not written to disk rather
+--- than written in a form that will not load: the live table still takes it, so
 --- the session behaves as asked and only the persistence is refused.
 function bot.setSetting(option, value)
     local s = config.settings.tome.skoobot_reclauded
@@ -374,12 +333,11 @@ end
 
 --- "Save as default for future characters" (#95): copy every per-character
 --- value this character has onto the account, so the next character starts
---- where this one ended up. The owner's way of configuring the global
---- settings FROM a character they have just tuned.
+--- where this one ended up.
 ---
---- Only values the character actually set are copied. A threshold the
---- character never overrode is already the account's, and writing it back
---- would be a no-op that still rewrote the file.
+--- Only values the character actually SET are copied -- a threshold it never
+--- overrode is already the account's, and writing it back would be a no-op
+--- that still rewrote the file.
 function bot.saveAsDefaults()
     local d = game.player and game.player.skoobot_reclauded
     local own = d and d.settings
@@ -445,12 +403,9 @@ end
 ---
 --- Deliberately NOT gated on STOP_POPUP, which is off by default and is a
 --- preference about noise during play; this is the one moment a new
---- installation cannot start at all. The dialog carries its own two ways
---- of never seeing it again, so the preference it ignores is replaced by a
---- better-placed one rather than simply overridden.
----
---- Silent when a dialog is already up: the talent screen may be open
---- because the player is acting on the last one.
+--- installation cannot start at all, and the dialog carries its own two ways of
+--- never seeing it again. Silent when a dialog is already up: the talent screen
+--- may be open because the player is acting on the last one.
 function offerSetup()
     local p = game.player
     if not p then return end
@@ -459,10 +414,9 @@ function offerSetup()
     if bot.do_nothing then return end
     if bot.setup_prompted then return end          -- this session
     if data(p).nosetupprompt then return end       -- this character, for good
-    -- Never stack. This matters more than it looks: the offer is itself a
-    -- dialog, so a bot toggled again while it is up would hand back with "a
-    -- dialog is open: SkooBot: Reclauded" -- blocked by its own helpfulness.
-    -- Measured, not guessed: that is exactly what the first-run scenario
+    -- Never stack. The offer is itself a dialog, so a bot toggled again while
+    -- it is up would hand back with "a dialog is open: SkooBot: Reclauded",
+    -- blocked by its own helpfulness -- which is what the first-run scenario
     -- reported when this check was only about other people's dialogs.
     if game.dialogs and #game.dialogs > 0 then return end
 
@@ -543,10 +497,9 @@ local function activationInit()
         -- at the last one; stalled is how many in a row found it unchanged.
         iterations = 0, last_turn = game.turn, stalled = 0,
         -- #77: the last game.turn the ENGINE gave the player a turn, and the
-        -- whole turns it never got. Tracked separately from last_turn above,
-        -- which counts DECISIONS -- during a rest or a run the bot makes
-        -- none, and reading a blackout off that clock reported the whole
-        -- rest as time lost, every rest.
+        -- whole turns it never got. Separate from last_turn above, which counts
+        -- DECISIONS: during a rest or a run the bot makes none, so a blackout
+        -- read off that clock reported the whole rest as time lost.
         last_act_turn = game.turn, turns_lost = 0,
         -- #78: steps spent walking to a glowing chest, so a chest across
         -- the level is not chased for ever. Reset whenever the walk ends.
@@ -562,11 +515,10 @@ local function activationInit()
     }
 end
 
---- Drop the activation and its loop scratch, so that the next skoobot_act()
---- builds a fresh activation from where the player stands now (#65). Every
---- entry point begins this way: the counters, the start tile and the
---- unspent-points baseline belong to ONE activation, and what query() or
---- runonce() left behind must never become a real run's.
+--- Drop the activation and its loop scratch, so the next skoobot_act() builds
+--- a fresh one from where the player stands now (#65). Every entry point begins
+--- this way: the counters, the start tile and the unspent-points baseline
+--- belong to ONE activation.
 local function clearActivation()
     bot.activation = nil
     bot.loop = nil
@@ -652,27 +604,23 @@ local function SAI_useTalent(tid, who, force_level, ignore_cd, target)
     -- FIXED (T-010). The 5th arg is force_target and the 7th is no_confirm.
     -- v1 passed the target but never no_confirm, so a talent that wanted a
     -- confirmation or interactive targeting opened a prompt with no human to
-    -- answer it -- the rotation stalled instead of falling through to the next
-    -- priority (old #49, every marked-target class). With no_confirm and a
-    -- forced target, such a talent instead refuses cleanly, and the refusal is
-    -- read here (#76) so filterFailedTalents drops it and the next priority is
-    -- tried. T-001 remediation 3; the scored rotation is T-020.
+    -- answer it and the rotation stalled instead of falling through (old #49,
+    -- every marked-target class). With no_confirm and a forced target such a
+    -- talent refuses cleanly, and the refusal is read here (#76) so
+    -- filterFailedTalents drops it and the next priority is tried.
     --
-    -- FALSE is the refusal. The engine returns it from every failing path in
-    -- useTalent -- talent not usable, preUseTalent refused, or postUseTalent
-    -- returned nil because the talent's own action refused (engine/interface/
-    -- ActorTalents.lua :171 :176 :197 :207 :213 :236 :282). NIL is NOT a
-    -- refusal: it is a talent still suspended in its coroutine waiting for
-    -- targeting or a confirm, which no_confirm and a forced target are meant
-    -- to prevent, and which must not be recorded as failed if it happens
-    -- anyway -- the talent may yet fire. So this tests `== false`, not
-    -- falsiness.
+    -- FALSE is the refusal, and `== false` is the test, not falsiness. The
+    -- engine returns false from every failing path in useTalent
+    -- (engine/interface/ActorTalents.lua :171 :176 :197 :207 :213 :236 :282).
+    -- NIL is NOT a refusal: it is a talent still suspended in its coroutine
+    -- waiting for targeting or a confirm, which must not be recorded as failed
+    -- -- it may yet fire.
     --
-    -- The mark has to land before the caller's checkForAdditionalAction(),
-    -- and it does: fireTier calls this, then returns, then re-enters
-    -- skoobot_act(true) -- noAction, so loopInit does NOT run and the mark
-    -- survives into the retry. That is what lets Attack follow a refused
-    -- Rockswallow inside one iteration (scenario-t010-marked-target).
+    -- The mark has to land before the caller's checkForAdditionalAction(), and
+    -- it does: fireTier calls this, returns, then re-enters skoobot_act(true)
+    -- -- noAction, so loopInit does NOT run and the mark survives into the
+    -- retry. That is what lets Attack follow a refused Rockswallow inside one
+    -- iteration (scenario-t010-marked-target).
     local ret = game.player:useTalent(tid, who, force_level, ignore_cd, target, false, true)
     if ret == false and bot.loop then bot.loop.talentfailed[tid] = true end
     return ret
@@ -691,12 +639,11 @@ end
 
 --- #103: how many level changes the player has actually seen.
 ---
---- Walked once, at the moment the level turns out to be finished, not per
---- turn -- the map is a few thousand grids and this is the one place that
---- wants the answer. `has_seens` is the engine's own memory of what the
---- character has looked at, which is the same test autoExplore uses to
---- decide a tile is worth walking to, so this counts only stairs the
---- PLAYER knows about.
+--- Walked once, at the moment the level turns out to be finished, not per turn
+--- -- the map is a few thousand grids. `has_seens` is the engine's own memory
+--- of what the character has looked at, the same test autoExplore uses to
+--- decide a tile is worth walking to, so this counts only stairs the PLAYER
+--- knows about.
 local function knownLevelChanges()
     local map = game.level and game.level.map
     if not map then return 0 end
@@ -724,20 +671,18 @@ local function SAI_beginExplore()
     else
         -- #103: this is not an inability, and calling it one made the bot
         -- repeat "Cannot act: auto-explore refused to start" every time the
-        -- player toggled it, on a level that was simply finished.
+        -- player toggled it on a level that was simply finished.
         --
         -- The engine's autoExplore (engine/interface/PlayerExplore.lua:204)
         -- flood-fills for unseen tiles and unvisited items and returns false
         -- when it can reach NEITHER. Exits are collected (`:210`) and never
-        -- targeted -- `:292` chooses among unseen_items and unseen_tiles
-        -- only -- so a refusal means exactly one thing: there is nothing
-        -- reachable left to explore. That is a hand-back, not a cannot-act:
-        -- the bot has finished what it knows how to do and the next move is
-        -- the player's.
+        -- targeted -- `:292` chooses among unseen_items and unseen_tiles only
+        -- -- so a refusal means exactly one thing: nothing reachable left to
+        -- explore. That is a hand-back, not a cannot-act.
         --
         -- The stairs are named when the player has found any, because
         -- "explored" and "so take the stairs" are one sentence to them.
-        -- Walking there and asking is #86; this is the honest stop until it.
+        -- Walking there and asking is #86.
         local exits = knownLevelChanges()
         local reason = "this level is explored -- nothing reachable left to see"
         if exits > 0 then
@@ -792,12 +737,10 @@ local function spotHostiles(self, actors_only)
             end
         end, nil)
 
-    -- #62 (salvage item 2): each enemy's power is weighted by its rank band
-    -- -- so a pack of commons no longer reads as a threat and a single boss
-    -- reads as more of one; the bands and the default weights are
-    -- mishander's, power.rankWeight says which rank is which -- and recorded
-    -- on its entry with its distance, for the score (#11). v1 summed these
-    -- into the loop scratch here; the scorer sums them now.
+    -- #62 (salvage item 2): each enemy's power is weighted by its rank band,
+    -- so a pack of commons no longer reads as a threat and a single boss reads
+    -- as more of one -- power.rankWeight says which rank is which -- and
+    -- recorded on its entry with its distance, for the score (#11).
     for _, a in ipairs(seen) do
         a.power = score.enemyPower(power.level(a.actor, game.player.global_speed),
             power.rankWeight(a.actor, rankWeights()))
@@ -859,15 +802,12 @@ bot.suffocating = function() local p = game.player return suffocatingAt(p, p.x, 
 
 --- The nearest unopened glowing chest in view, or nil (T-013, #78).
 ---
---- v1 walked straight past them; the user asked the bot to STOP for one, so
---- the player can decide whether to open it -- glowing chests can be
---- guarded. A glowing chest is a terrain grid
+--- A glowing chest is a terrain grid
 --- (data/general/events/glowing-chest.lua) with `special = true`, a name
 --- containing "chest", and `chest_opened` set once opened, so detection is
---- exact and needs no name-string heuristics beyond that.
----
---- Returns the grid rather than a boolean because #78 walks to it: the
---- condition asks "is one in view", the SEEK state asks "where".
+--- exact and needs no name-string heuristics beyond that. Returns the grid
+--- rather than a boolean because #78 walks to it: the condition asks "is one in
+--- view", the SEEK state asks "where".
 local function nearestGlowingChest(self)
     if not self.x then return nil end
     local map = game.level.map
@@ -897,7 +837,7 @@ bot.nearestChest = function(p) return nearestGlowingChest(p or game.player) end
 -- v1 looked for `not air_level or air_level > 0` and did no reachability check,
 -- so it could pick a pocket of air inside a wall and then fail to path there
 -- (T-001 / salvage #6). This uses the same breathable test as the suffocation
--- trigger, and `canMove` so a coral wall that merely has air is never chosen.
+-- trigger, and `canMove`, so a coral wall that merely has air is never chosen.
 local function getPathToAir(self)
     if not self.x then return nil end
     local map = game.level.map
@@ -929,20 +869,15 @@ end
 --- `door_player_check` (mod/class/Grid.lua:65 opens a yes/no popup on it) or
 --- `door_player_stop` (a message popup).
 ---
---- None of them sets `block_move`, so the engine's own passability says yes
---- and Astar routes straight through: with a hostile past the door, the FIGHT
---- branch's path ran into it, the popup opened, and a dialog is a hand-back
---- by design. The player closes it, restarts the bot, and it walks back in
---- within two to five turns. The first long soak (#61, 2026-08-23) measured
---- 65 of 66 stops in ten minutes as exactly this -- the single largest source
---- of hand-backs the bot produced.
+--- None of them sets `block_move`, so the engine's own passability says yes and
+--- Astar routes straight through: with a hostile past the door the path ran
+--- into it, the popup opened, and a dialog is a hand-back by design. The first
+--- long soak (#61) measured 65 of 66 stops in ten minutes as exactly this.
 ---
---- So the bot never PLANS a route through one. It is not about remembering a
+--- So the bot never PLANS a route through one. Not a matter of remembering a
 --- refusal: a grid the player must be asked about is not a grid the bot may
---- decide to enter, whether or not it has been asked yet, and the ask itself
---- still hands back so the player keeps the decision. If a vault door is the
---- only way to a hostile, "no path to <name>" is the honest answer.
----
+--- decide to enter, whether or not it has been asked yet. If a vault door is
+--- the only way to a hostile, "no path to <name>" is the honest answer.
 --- Opening one deliberately is unaffected: the player walks in themselves.
 local function needsConsent(x, y)
     if not game.level or not game.level.map then return false end
@@ -1028,14 +963,13 @@ local function carried(p, name)
 end
 
 --- The rules in the current shape, pruned of talents the character no longer
---- has. FIXED (#56): v1 kept a flat {tid, usetype, priority} list and sorted
---- it on every read, unstably. The saved table is now four ordered sections,
---- migrated IN PLACE on first read (data/rules.lua), so the dialog, the act
---- loop and a scenario holding the table all see one shape. A v1 rule on an
+--- has. FIXED (#56): v1 kept a flat {tid, usetype, priority} list and sorted it
+--- on every read, unstably. The saved table is now four ordered sections,
+--- migrated IN PLACE on first read (data/rules.lua). A v1 rule on an
 --- activatable item carried the item's talent slot, which changes with every
---- swap (#55); it is re-keyed on the item's name here, the way ToME keys its
---- own item hotkeys. Item rules are never pruned: the item can come back, and
---- a rule whose item is away is simply skipped.
+--- swap (#55); it is re-keyed on the item's NAME here, the way ToME keys its
+--- own item hotkeys. Item rules are never pruned: the item can come back, and a
+--- rule whose item is away is simply skipped.
 local function getRules(p)
     local d = data(p)
     local r, report = rules.normalize(d.autotalents)
@@ -1099,11 +1033,10 @@ local function getAutoTalents(section)
     return rules.tids(getRules(p), section, function(e) return resolveRule(p, e) end)
 end
 
---- The capability counters a held Combat entry waits out (#15). The same
---- four the DEBUFF_* stops watch, named as attributes rather than as effect
---- ids on purpose: data/conditions.lua detects by capability, never by
---- effect name, because a dozen effects set `stunned` and only the attr is
---- common to them.
+--- The capability counters a held Combat entry waits out (#15). Named as
+--- attributes rather than effect ids on purpose: data/conditions.lua detects
+--- by capability, never by effect name, because a dozen effects set `stunned`
+--- and only the attr is common to them.
 local IMPAIRMENTS = { "stunned", "dazed", "confused", "frozen" }
 
 --- Is the character impaired in a way a held Combat entry waits out (#15)?
@@ -1127,27 +1060,24 @@ local IMPAIRING_SUBTYPES = { stun = true, confusion = true }
 
 --- #68: does every impairment on the character run out this turn?
 ---
---- The point of holding is to wait for full damage. Waiting out an
---- impairment that is about to lapse anyway costs the rotation a turn and
---- buys nothing, so a held entry is released on the last turn.
+--- The point of holding is to wait for full damage, and waiting out an
+--- impairment that lapses anyway costs the rotation a turn and buys nothing,
+--- so a held entry is released on the last turn.
 ---
---- Durations are per EFFECT, and there is no list of impairing effects to
---- read -- #12 detects by capability precisely because effect ids are many
---- and the attr is one. `__tmpvals`, which records the attributes an effect
---- set, looks like the link and is NOT: EFF_STUNNED and its kind call
---- addTemporaryValue directly, which does not record there (the engine says
---- so at engine/interface/ActorTemporaryEffects.lua:249), so a scan of it
---- finds nothing and the refinement silently never fires. Measured, not
---- assumed -- scenario-hold part 3c reported `claimed=none` and still does,
---- as the guard on this. The subtype is the link that exists.
+--- Durations are per EFFECT, and there is no list of impairing effects to read
+--- -- #12 detects by capability precisely because effect ids are many and the
+--- attr is one. `__tmpvals`, which records the attributes an effect set, looks
+--- like the link and is NOT: EFF_STUNNED and its kind call addTemporaryValue
+--- directly, which does not record there (engine/interface/
+--- ActorTemporaryEffects.lua:249), so a scan of it finds nothing and the
+--- refinement silently never fires. Measured, not assumed -- scenario-hold
+--- part 3c reported `claimed=none` and still does, as the guard on this. The
+--- SUBTYPE is the link that exists.
 ---
---- It ERRS TOWARD HOLDING, as the simple form did, and in two ways:
----
----   * an impairment with no live impairing effect to explain it is treated
----     as lasting. An unexplained stun is not evidence of one about to end.
----   * the LONGEST candidate wins, and candidates are not attributed to a
----     particular attr. A long confusion holds a lapsing stun. That is
----     coarse in the safe direction.
+--- It ERRS TOWARD HOLDING, in two ways: an impairment with no live impairing
+--- effect to explain it is treated as lasting, and the LONGEST candidate wins
+--- without being attributed to a particular attr, so a long confusion holds a
+--- lapsing stun. Coarse, in the safe direction.
 local function impairmentEnding(p)
     local any = false
     for _, a in ipairs(IMPAIRMENTS) do
@@ -1184,12 +1114,10 @@ bot.effectiveLife = function(p) return lifem.of(p or game.player) end
 --- character is impaired (#15) -- skipped like a talent on cooldown, so the
 --- rotation falls through to the next entry.
 ---
---- Returns the rotation AND how many entries were held out of it (#75). An
+--- Returns the rotation AND how many entries were held out of it (#75): an
 --- empty rotation has three causes -- nothing configured, everything on
---- cooldown, everything held -- and the stop that reports it could only
---- name the first two, so a player who set STUNNED to IGNORE and held every
---- Combat row was told something untrue. Only the debug channel said
---- "Holding <key> while impaired", and a player is not reading that.
+--- cooldown, everything held -- and a stop that could name only the first two
+--- told a player who had held every row something untrue.
 local function getCombatRotation()
     local p = game.player
     -- #68: an impairment that lapses this turn is not worth waiting out.
@@ -1304,27 +1232,20 @@ bot.rules = {
 
 --- "Here is how to start", once per character (#72).
 ---
---- At load the addon printed its keys to te4_log.txt and nothing else: the
---- message log got a line only if a keybind collision was found (#50).
---- docs/first-run.md section 2 measured it -- message-log lines mentioning
---- SkooBot: 0. A player who installed this from the description knows the
---- keys; one who installed it from the Workshop list, where the description
---- is behind a click, or who inherited a friend's addon set, sees nothing at
---- all until they happen to press one. The bot never makes itself known.
+--- Before it, the addon printed its keys to te4_log.txt and nothing else: a
+--- player who installed it from a Workshop list or inherited a friend's addon
+--- set saw nothing at all until they happened to press a key
+--- (docs/first-run.md section 2 measured zero message-log lines).
 ---
---- One line, and only to somebody who has nothing configured -- a player who
---- has set up their talent rules does not need telling how to start -- and
---- only once per character, so it is never the addon nagging. The flag lives
---- on the character (bot.data), the same store the auto-talent scratch and
---- the WARN acknowledgements use, so the engine saves it with them and the
---- next load is silent.
----
---- A character that already HAS rules is marked as greeted without being
---- greeted: otherwise clearing every rule later would make the addon treat
+--- One line, only to somebody who has nothing configured, and only once per
+--- character. The flag lives on the character (bot.data) so the engine saves
+--- it. A character that already HAS rules is marked greeted WITHOUT being
+--- greeted -- otherwise clearing every rule later would make the addon treat
 --- them as new and start explaining itself again.
 ---
---- Called from the ToME:runDone hook, which is the first moment the message
---- log is live (game.log is a no-op until uiset:activate, engine/Game.lua:56).
+--- Called from ToME:runDone, the first moment the message log is live
+--- (game.log is a no-op until uiset:activate, engine/Game.lua:56).
+--- @return true when it said something
 --- @return true when it said something
 function bot.greet()
     local p = game.player
@@ -1443,18 +1364,12 @@ bot.loadout = {
 --- the one with the highest COUNTED power, with the nearer one on a tie.
 --- `hostiles` is spotHostiles' list (actors only).
 ---
---- #80: this ranked by bot.power, the raw heuristic, because when #59 was
---- written that was the figure the tooltip showed. Since #11 the tooltip
---- shows the counted, rank-weighted figure as well; the score's retreat
---- posture fires this very step while score.figures.strongest is ranked by
---- the weighted figure; and every power stop quotes the weighted figure.
---- Three places calling one enemy "the strongest" and a fourth disagreeing
---- is a bug waiting for a rare and a boss to be in view at once, which is
---- exactly when it matters. spotHostiles records the weighted figure on
---- every entry as `.power` (data/score.lua enemyPower x power.rankWeight),
---- so this is the same value score.lua reads, read the same way -- including
---- `or 0`, and including the nearer-on-tie rule, so the two cannot pick
---- different enemies.
+--- #80: ranked by the COUNTED, rank-weighted figure (spotHostiles records it
+--- on every entry as `.power`), read the same way score.lua reads it --
+--- including `or 0` and the nearer-on-tie rule -- so the two cannot pick
+--- different enemies. It ranked by the raw heuristic until then, and three
+--- places calling one enemy "the strongest" while a fourth disagreed is a bug
+--- waiting for a rare and a boss to be in view at once.
 local function fleeTarget(entry, hostiles)
     local p = game.player
     local best, bestPower, bestDist
@@ -1472,34 +1387,29 @@ end
 
 --- The grid one flee step would take, or nil and the reason in words.
 ---
---- Ported from the engine's own flee AIs (engine/ai/simple.lua, flee_dmap
---- with flee_simple as its fallback; Nicolas Casalini, GPL-3.0). Every ToME
---- actor keeps a distance map (engine/interface/ActorFOV.lua): at each grid
---- it has seen, `game.turn + radius - distance` as of the last time it saw
---- it -- so the value is HIGHER where the hostile looked more recently and
---- from closer, and nil where it never looked. Among the eight neighbours the
---- player can move to, the one with the lowest value wins -- nil lowest of
---- all, so a grid out of the hostile's view beats one merely farther away --
---- and only a grid scoring below where the player stands counts as a step
---- away at all. When the hostile's map has no value for the player's own
---- grid (it has not looked yet -- a fresh spawn, or a hostile that has not
---- acted since arriving), plain distance decides instead: the neighbour
---- farthest from it, and only one farther than here. Ties either way go to
---- the farther grid, then to the first in the engine's direction order.
---- A character who cannot move (never_move: pinned, held, overloaded) has no
---- step; attempting the impossible is the liveness bug T-012 fixed.
+--- Ported from the engine's own flee AIs (engine/ai/simple.lua, flee_dmap with
+--- flee_simple as its fallback; Nicolas Casalini, GPL-3.0). Every ToME actor
+--- keeps a distance map (engine/interface/ActorFOV.lua): at each grid it has
+--- seen, `game.turn + radius - distance` as of the last time it saw it -- so
+--- the value is HIGHER where the hostile looked more recently and from closer,
+--- and nil where it never looked. Among the eight neighbours the player can
+--- move to, the lowest value wins -- nil lowest of all, so a grid out of the
+--- hostile's view beats one merely farther away -- and only a grid scoring
+--- below where the player stands counts as a step away at all. When the
+--- hostile's map has no value for the player's own grid, plain distance decides
+--- instead: the neighbour farthest from it, and only one farther than here.
+--- Ties go to the farther grid, then to the first in the engine's direction
+--- order. A character who cannot move has no step; attempting the impossible is
+--- the liveness bug T-012 fixed.
 ---
---- #69: with `keep_los` set, only neighbours that still have line of sight to
---- that hostile are candidates -- the shape of the engine's own
---- `aiCanFleeDmapKeepLos` (mod/class/interface/ActorAI.lua; Nicolas
---- Casalini, GPL-3.0), which is what a ranged character wants: back off and
---- keep shooting, where the plain flee happily steps behind a tree and
---- wastes the turn if the next row is a bolt. Everything else is unchanged,
---- so the same "least seen, then farthest" rule picks among the grids that
---- qualify -- the LOS test is a filter on the candidates, not a different
---- preference. The engine's version skips its own canMove check when the
---- grid is one the hostile has never looked at; this does not, because a
---- grid the player cannot enter is not a step whoever has seen it.
+--- #69: with `keep_los`, only neighbours that still have line of sight to that
+--- hostile are candidates -- the shape of the engine's own
+--- `aiCanFleeDmapKeepLos` (mod/class/interface/ActorAI.lua) -- which is what a
+--- ranged character wants, where the plain flee happily steps behind a tree and
+--- wastes the turn if the next row is a bolt. The LOS test is a filter on the
+--- candidates, not a different preference. The engine's version skips its own
+--- canMove check for a grid the hostile has never looked at; this does not,
+--- because a grid the player cannot enter is not a step whoever has seen it.
 local function fleeStep(entry, hostiles)
     local p = game.player
     if not p.x then return nil, nil, "no position" end
@@ -1548,43 +1458,34 @@ local function fleeStep(entry, hostiles)
     return bx, by, h
 end
 
---- One step away from a hostile (#59): the flee action of the Combat
---- rotation. In query mode it says what it would do; otherwise it takes the
---- step through the player's own move(), which spends the turn. A flee that
---- has no step reports "not available" and returns false so the rotation
---- moves on -- like a talent on cooldown -- and it never stops the bot by
---- itself. Each attempt counts toward bot.actions like every other action,
---- so a circle around a pillar is counted by the same guards as anything
---- else. A step the engine then refuses (move() returned false: the grid
---- changed under us) is marked failed for this iteration like a refused
---- talent, so it is not retried until the next turn.
+--- One step away from a hostile (#59): the flee action of the Combat rotation.
+--- In query mode it says what it would do; otherwise it takes the step through
+--- the player's own move(), which spends the turn. A flee with no step reports
+--- "not available" and returns false so the rotation moves on, like a talent
+--- on cooldown, and it never stops the bot by itself. A step the engine then
+--- refuses (the grid changed under us) is marked failed for this iteration
+--- like a refused talent, so it is not retried until the next turn.
 --- #97: is retreating from this target pointless?
 ---
---- The reported loop: a Skirmisher with `Shoot` (range 6) and *Flee but
---- keep sight* under it, ten grids from an immobile brown mold with sight
---- 10. At nine grids a farther neighbour still has line of sight, so the
---- flee takes it; at ten, farther means eleven, which is out of sight, so
---- no step qualifies, the row falls through as designed, and the act loop
---- does the next right thing -- it paths toward the target to get in
---- range. Two grids, forever, in FIGHT, without ever handing back. The bot
---- was closing the distance and retreating from it on alternate turns.
+--- A target that cannot move and is not already adjacent cannot become
+--- adjacent, so stepping away from it buys nothing. Adjacent is the exception,
+--- deliberately: backing off a mold you are standing next to is exactly what
+--- the row is for.
 ---
---- What makes it permanent is that the mold never moves, so the geometry
---- resets exactly. THAT is the thing to test, not the ranges: a rule keyed
---- on "can anything in the rotation reach it" has the same oscillation one
---- grid outside a talent's range whenever that talent is on cooldown.
+--- Without it, the reported loop: a Skirmisher with `Shoot` (range 6) and
+--- *Flee but keep sight* under it, ten grids from an immobile brown mold with
+--- sight 10. At nine grids a farther neighbour still has line of sight, so the
+--- flee takes it; at ten, farther is out of sight, no step qualifies, the row
+--- falls through as designed, and the act loop paths toward the target to get
+--- in range. Two grids, for ever, in FIGHT, without ever handing back.
 ---
---- So: a target that cannot move and is not already adjacent cannot become
---- adjacent, and stepping away from it buys nothing. Adjacent is the
---- exception and is deliberate -- backing off a mold you are standing next
---- to is exactly what the row is for, since that is where it can hurt you.
----
---- Approximation, knowingly. The principled question is whether the target
---- is a threat AT THIS DISTANCE, which needs its talents and their ranges;
---- that is #99, and this is the subset of it that is certain, cheap, and
---- enough for the reported case. An immobile creature with a ranged attack
---- is not covered, and fleeing while keeping sight would not have helped
---- against one anyway.
+--- Keyed on "cannot move", NOT on "can anything in the rotation reach it":
+--- that rule has the same oscillation one grid outside a talent's range
+--- whenever that talent is on cooldown. Knowingly an approximation -- the
+--- principled question is whether the target is a threat AT THIS DISTANCE,
+--- which needs its talents and their ranges, and that is #99. An immobile
+--- creature with a ranged attack is not covered, and keeping sight would not
+--- have helped against one anyway.
 local function pointlessFlee(p, target)
     local a = target and target.actor
     if not a or not a.x then return nil end
@@ -1631,8 +1532,8 @@ bot.rules.rotation = function() return getCombatRotation() end
 -- someone standing in front of the target blocks a non-piercing attack.
 --
 -- `talentsToUse` is a rotation list: talent ids, and (#59) built-in action
--- entries, which have no talent to check and are passed over here -- whether
--- a flee has a step is the rotation's question, not a target's.
+-- entries, which have no talent to check and are passed over here -- whether a
+-- flee has a step is the rotation's question, not a target's.
 local function getAvailableTalents(target, talentsToUse)
     local avail = {}
     local tx, ty
@@ -1707,20 +1608,17 @@ end
 
 --- The player's own power level as the score compares it (#62,
 --- salvage-mishander.md item 3): the heuristic's figure scaled by the life
---- left, on score.lifeFactor's curve (#79) rather than the straight line
---- #62 shipped. mishander's own note said linear was probably wrong and
---- they were right: a character at 51% life is worse off than
---- half-strength, because it has fewer turns of margin, must spend some of
---- them healing, and cannot take the risk that a crit ends the run.
+--- left, on score.lifeFactor's curve (#79) rather than the straight line #62
+--- shipped.
 ---
---- The curve is 1 at full life exactly, so nothing a player has tuned
---- changes until they are hurt -- which is why this needed no migration of
---- MAX_DIFF_POWER or MAX_COMBINED_POWER, both of which are margins ADDED to
---- this figure.
---- #91: over the life POOL, not life/max_life. A Lich at die_at -500
---- and life 0 has five hundred points left and is not at nothing; the
---- discounted pool is used, so an infusion about to lapse does not make the
---- bot read itself as stronger than it will be next turn.
+--- The curve is 1 at full life exactly, so nothing a player has tuned changes
+--- until they are hurt -- which is why this needed no migration of
+--- MAX_DIFF_POWER or MAX_COMBINED_POWER, both margins ADDED to this figure.
+---
+--- #91: over the life POOL, not life/max_life. A Lich at die_at -500 and life
+--- 0 has five hundred points left; the discounted pool is used, so an infusion
+--- about to lapse does not make the bot read itself as stronger than it will
+--- be next turn.
 local function ownPowerLevel(p)
     local el = lifem.of(p)
     return score.ownPower(power.level(p, p.global_speed), el.safe_pool, el.safe_max)
@@ -1782,16 +1680,14 @@ function conditionContext(p, hostiles)
         -- #71: the option titles, so a message can name the knob the way
         -- the options tab does rather than by its key.
         title       = cfgfmt.title,
-        -- #91: life as data/life.lua decomposes it -- the pool the game
-        -- kills at, and how much of it the bot may trust. Built once per
-        -- decision, like everything else here.
+        -- #91: life as data/life.lua decomposes it -- the pool the game kills
+        -- at, and how much of it the bot may trust.
         life        = lifem.of(p),
         describeLife = lifem.describe,
         chestInView = glowingChestInView,
-        -- #77: whole turns the character never got, counted by the act
-        -- wrapper against the engine's own clock rather than the bot's
-        -- decision clock -- a rest is not a blackout. nil outside an
-        -- activation, and 0 on its first turn.
+        -- #77: whole turns the character never got, counted by the act wrapper
+        -- against the ENGINE's clock and not the bot's decision clock -- a rest
+        -- is not a blackout. nil outside an activation, 0 on its first turn.
         turnsLost   = (bot.activation and bot.activation.turns_lost) or 0,
     }
     ctx.caps = conditions.capabilities(p, ctx)
@@ -1800,25 +1696,19 @@ function conditionContext(p, hostiles)
 end
 
 -- #78: how many steps a chest is worth walking. The map is 65x40 at most in
--- the early zones, so a path longer than this is not a chest across the
--- room -- it is a chest the other side of the level, and the player did not
--- toggle the bot to have it go sightseeing.
+-- the early zones, so a longer path is not a chest across the room -- it is
+-- one the other side of the level, and the bot was not toggled on to go
+-- sightseeing.
 local SEEK_LIMIT = 40
 
 --- Should the bot walk to a chest rather than stop for it (#78)?
 ---
---- Every condition here is a reason the answer is no:
----
----   * the policy is IGNORE -- the player has said they do not care, and
----     seeking would be a stop they turned off arriving as a walk instead;
----   * something hostile is in view, or the score is not simply "fight" --
----     a chest is an opportunity and the score is about threat, so any
----     threat outranks it. This is the "no flag is set" the issue asks for,
----     read off the posture, which is handback the moment one is;
----   * the character cannot move, so there is no walking to be done;
----   * there is no chest, or the bot is already next to it -- in which case
----     the ordinary condition check hands back, which is the point of the
----     walk.
+--- Every condition here is a reason the answer is no: the policy is IGNORE, so
+--- seeking would turn a stop the player switched off into a walk; something
+--- hostile is in view or the score is not simply "fight", since a chest is an
+--- opportunity and any threat outranks it; the character cannot move; or there
+--- is no chest, or the bot is already next to it -- in which case the ordinary
+--- condition check hands back, which is the point of the walk.
 ---
 --- The policy is READ, not fired: firing it here would consume the WARN and
 --- the hand-back at the chest would never come.
@@ -1833,16 +1723,10 @@ local function seekChest(ctx, hostiles)
 end
 
 --- One loop over the condition list for a site (#12), replacing v1's
---- checkForDebuffs / checkPowerLevel if-chains and the explore branch's own
---- checks: every policy entry with a detector is evaluated, in the list's
---- order, and the first that fires under its WARN/STOP/IGNORE policy stops
---- the bot. checkStop sees the ones that did not fire too, so a WARN
---- re-arms when its condition clears. FIXED on the way (T-001, #12): v1
---- tested the status attributes with `== 1`, but they are additive
---- counters and confused is a 0-50 percentage, so a doubly stunned or a
---- 30%-confused character read as unafflicted; the detectors read them as
---- counters. v1's ASLEEP test was dead code by precedence (T-012); the
---- detector is ToME's own gate.
+--- checkForDebuffs / checkPowerLevel if-chains: every policy entry with a
+--- detector is evaluated in the list's order, and the first that fires under
+--- its WARN/STOP/IGNORE policy stops the bot. checkStop sees the ones that did
+--- not fire too, so a WARN re-arms when its condition clears.
 local function checkConditions(site, ctx)
     local p = game.player
     for _, def in ipairs(conditions.LIST) do
@@ -1886,10 +1770,10 @@ function skoobot_act(noAction)
 
     local hostiles = spotHostiles(game.player, true)
     -- #12: the turn-site conditions -- the debuffs, LIFE_LOWLIFE (only with
-    -- something in view) and the four power checks -- in the list's order.
-    -- The power checks read the situation score (#11), built here with the
-    -- rest of the context; its verdict goes to the log at debug so a bug
-    -- report can say what the bot thought of the room.
+    -- something in view) and the four power checks -- in the list's order. The
+    -- power checks read the situation score (#11), built here with the rest of
+    -- the context; its verdict goes to the log at debug so a bug report can say
+    -- what the bot thought of the room.
     local ctx = conditionContext(game.player, hostiles)
     if #hostiles > 0 then
         chan.debug("[Score] threat %s, posture %s: %s", ctx.score.suffix:sub(12), ctx.score.posture,
@@ -1925,13 +1809,10 @@ function skoobot_act(noAction)
         local p = game.player
         -- FIXED (T-015). This block never ran in v1: the guard read
         -- `not game.player.undead == 1`, which Lua parses as
-        -- `(not undead) == 1` -- a boolean compared with a number, always
-        -- false -- so a character rested underwater and drowned (TheIronBird,
-        -- eight years). mishander's `not can_breath` replacement was dead too
-        -- (can_breath is always a table). The trigger is now ToME's own
-        -- suffocation rule (data/air.lua), so run to air whenever the game
-        -- itself would be draining our breath -- water, void, whatever a
-        -- future version adds -- rather than resting into a drowning death.
+        -- `(not undead) == 1`, always false -- so a character rested underwater
+        -- and drowned for eight years. mishander's `not can_breath`
+        -- replacement was dead too, since can_breath is always a table. The
+        -- trigger is now ToME's own suffocation rule (data/air.lua).
         if suffocatingAt(p, p.x, p.y) then
             local path = getPathToAir(p)
             local moved
@@ -1957,15 +1838,13 @@ function skoobot_act(noAction)
                 return skoobot_act(true)
             end
             -- FIXED (T-011). v1 stopped on ANY damage while exploring, so a
-            -- single poison tick halted the bot (lukesilveira). Hand back
-            -- only once life has actually fallen to the threshold; above it
-            -- a scratch is not worth a stop. mishander reached the same fix
-            -- from play (salvage item 1). Since #11 the threshold is a term
-            -- of the score -- unseen damage, the one threat the explore
-            -- branch faces -- and this reads its flag, scored again here
-            -- because the delta is only known after the loop scratch was
-            -- rebuilt. The return was missing until #11: the stop used to
-            -- fall through into the chest check and auto-explore.
+            -- single poison tick halted the bot (lukesilveira); mishander
+            -- reached the same fix from play (salvage item 1). Hand back only
+            -- once life has fallen to the threshold. Since #11 that threshold
+            -- is a term of the score -- unseen damage, the one threat the
+            -- explore branch faces -- scored again here because the delta is
+            -- known only after the loop scratch was rebuilt. The return was
+            -- missing until #11: the stop fell through into the chest check.
             local unseen = evaluateSituation(game.player, hostiles, ctx.caps, true)
             if unseen.flags.EXPLORE_DAMAGE then
                 return stop(notice.STOPPED, unseen.reasons[1])
@@ -1978,35 +1857,30 @@ function skoobot_act(noAction)
             bot.state = STATE_REST
             return skoobot_act(true)
         end
-        -- FIXED (T-013). Hand back when a glowing chest is in view so the player
-        -- can decide whether to open it (they can be guarded). WARN by default:
-        -- it stops once and re-arms when the chest leaves view, so a player who
-        -- re-toggles past it has chosen to skip it. A Solipsist-style player who
-        -- never wants to be bothered sets this to IGNORE. The explore-site
-        -- entry of the list (#12): TERRAIN_GLOWING_CHEST, at HANDED_BACK.
-        -- #78: walk to it, rather than stopping the moment it comes into
-        -- view. The hand-back is the same one (#8, TERRAIN_GLOWING_CHEST at
-        -- HANDED_BACK) and still the player's decision; it just happens
-        -- WHERE the decision is easy to act on -- next to the chest -- and
-        -- not from across a room the player then has to walk themselves.
-        --
-        -- The gate is unchanged: IGNORE never seeks and never stops, and
-        -- the policy is read rather than fired, so a WARN the player has
-        -- already acknowledged does not send the bot walking again.
+        -- FIXED (T-013). Hand back when a glowing chest is in view so the
+        -- player can decide whether to open it -- they can be guarded. WARN by
+        -- default: it stops once and re-arms when the chest leaves view, so a
+        -- player who re-toggles past it has chosen to skip it. The explore-site
+        -- entry of the condition list (#12), at HANDED_BACK.
+        -- #78: walk to it, rather than stopping the moment it comes into view.
+        -- The hand-back is the same one (#8, TERRAIN_GLOWING_CHEST at
+        -- HANDED_BACK) and still the player's decision; it just happens where
+        -- the decision is easy to act on. The gate is unchanged: IGNORE never
+        -- seeks and never stops, and the policy is read rather than fired, so a
+        -- WARN the player has already acknowledged does not send the bot
+        -- walking again.
         if seekChest(ctx, hostiles) then
             bot.state = STATE_SEEK
             return skoobot_act(true)
         end
         if checkConditions(conditions.SITE_EXPLORE, ctx) then return end
-        -- #62 (salvage-mishander.md item 8). v1 handed back on ANY level-change
-        -- tile, including the stairs the player had just arrived by -- so a
-        -- player who toggles the bot on arrival got "level change found" and
-        -- nothing else, and mishander, who wanted to bind auto-explore to the
-        -- bot entirely, hit it every level. Their fix was a turn counter; this
-        -- is the state it stood in for: the tile the activation started on is
-        -- exempt until the player has left it. Auto-explore itself stops on
-        -- stairs, so the bot still reaches them and hands back there as before
-        -- -- a level change is only ever the player's decision.
+        -- #62 (salvage-mishander.md item 8). v1 handed back on ANY
+        -- level-change tile, including the stairs the player had just arrived
+        -- by, so toggling the bot on arrival got "level change found" and
+        -- nothing else. The tile the activation started on is exempt until the
+        -- player has left it. Auto-explore itself stops on stairs, so the bot
+        -- still reaches them and hands back there -- a level change is only
+        -- ever the player's decision.
         local onLevelChange = game.level.map:checkEntity(game.player.x, game.player.y,
             engine.Map.TERRAIN, "change_level")
         if onLevelChange and not onActivationStartTile() then
@@ -2014,17 +1888,15 @@ function skoobot_act(noAction)
             return
         end
         -- FIXED (T-012). v1 called auto-explore while unable to move, which
-        -- cannot make progress and spun -- the pin / dominate / entangle
-        -- freeze users reported (#46). "Can I move at all?" is one predicate
-        -- over every never_move source (16+ effects plus encumbrance), the
-        -- same attr the engine's own move() gates on, so it stays correct as
-        -- ToME adds effects -- unlike mishander's fork, which tested only
-        -- EFF_PINNED. Since #12 the predicate is the CANNOT_MOVE entry of the
-        -- condition list, and the block is the union of everything detected
-        -- that declares one -- dazed, frozen, asleep at IGNORE included --
-        -- named in the reason. Exploring means moving, so a move block is a
-        -- hand-back here whatever the policies say (liveness, design 1.1);
-        -- the general backstop is the progress invariant (#13).
+        -- cannot make progress and spun -- the pin / dominate / entangle freeze
+        -- users reported (#46). "Can I move at all?" is one predicate over
+        -- every never_move source (16+ effects plus encumbrance), the same attr
+        -- the engine's own move() gates on, so it stays correct as ToME adds
+        -- effects -- unlike mishander's fork, which tested only EFF_PINNED.
+        -- Since #12 it is the CANNOT_MOVE entry of the condition list, and the
+        -- block is the union of everything detected that declares one, named in
+        -- the reason. Exploring means moving, so a move block is a hand-back
+        -- here whatever the policies say (liveness, design 1.1).
         local caps = ctx.caps
         if caps.move then
             stop(notice.STOPPED, "cannot move (" .. conditions.blockedText(caps.move) .. ")")
@@ -2042,18 +1914,16 @@ function skoobot_act(noAction)
     elseif bot.state == STATE_SEEK then
         -- #78: walking to a glowing chest.
         --
-        -- This is a SECOND kind of objective, and the reason the scorer did
-        -- not simply grow one: data/score.lua evaluates THREAT, and a chest
-        -- is an opportunity with a path and a guard check
-        -- (salvage-mishander.md item 9 explains why mishander's
-        -- FOV-callback version was unsafe). So the score is not asked to
-        -- rank chests; it is asked, every single step, whether walking is
-        -- still all right. Anything it does not answer "fight" to ends the
-        -- walk, which keeps threat strictly ahead of opportunity.
+        -- A SECOND kind of objective, and the reason the scorer did not simply
+        -- grow one: data/score.lua evaluates THREAT, and a chest is an
+        -- opportunity with a path and a guard check (salvage-mishander.md item
+        -- 9 is why mishander's FOV-callback version was unsafe). So the score
+        -- is never asked to rank chests -- only, at every step, whether walking
+        -- is still all right. Anything but "fight" ends the walk, which keeps
+        -- threat strictly ahead of opportunity.
         --
-        -- A hostile does not need handling here: the pre-branch transition
-        -- above sets FIGHT whenever anything is in view, so this branch is
-        -- only ever reached with the field clear.
+        -- A hostile needs no handling here: the pre-branch transition above
+        -- sets FIGHT whenever anything is in view.
         local act = bot.activation
         local chest = nearestGlowingChest(game.player)
         -- Gone, opened by something else, or out of sight: nothing to do.
@@ -2111,24 +1981,19 @@ function skoobot_act(noAction)
         checkForAdditionalAction()
         return
     elseif bot.state == STATE_FIGHT then
-        -- #12 (design 1.1, the response half of #7's split): what the
-        -- detected conditions say the character cannot do. Fighting needs
-        -- no movement, so a move block changes nothing until the rotation
-        -- finds no talent that reaches -- a pinned character still attacks
-        -- what is next to it -- and then the hand-back says why instead of
-        -- trying a step the engine would refuse. An act block (asleep, with
-        -- the stop at IGNORE) means no talent can be used at all, and a
-        -- target block (encased in ice) that talents only reach the ice:
-        -- both hand back here rather than walk the rotation for nothing.
+        -- #12 (design 1.1): what the detected conditions say the character
+        -- cannot do. Fighting needs no movement, so a move block changes
+        -- nothing until the rotation finds no talent that reaches -- a pinned
+        -- character still attacks what is next to it -- and then the hand-back
+        -- says why instead of trying a step the engine would refuse. An act
+        -- block (asleep, at IGNORE) means no talent can be used at all, and a
+        -- target block (encased in ice) that talents only reach the ice: both
+        -- hand back here rather than walk the rotation for nothing.
         --
-        -- #11: the score's posture says so, and says the rest. Its
-        -- handback is those two blocks, no power left, or air nearly gone
-        -- -- a flag the player has not accepted stopped the bot at the turn
-        -- site already, so none reaches here. Retreat takes one flee step
-        -- (#59's, from the strongest) before the rotation and falls through
-        -- to it when there is none; hold runs the rotation on what is in
-        -- reach and, with nothing in reach, waits a turn for the crowd
-        -- instead of walking into it.
+        -- #11: the score's posture says the rest. Retreat takes one flee step
+        -- before the rotation and falls through to it when there is none; hold
+        -- runs the rotation on what is in reach and, with nothing in reach,
+        -- waits a turn for the crowd instead of walking into it.
         local caps = ctx.caps
         local verdict = ctx.score
         if verdict.posture == score.HANDBACK then
@@ -2150,26 +2015,24 @@ function skoobot_act(noAction)
         -- #81: v1 wrote `if filterFailedTalents(getAvailableTalents(enemy))`,
         -- which tests a TABLE for truth. A table is always true, so every
         -- visible hostile became a target and this filter has never once
-        -- filtered. The port reproduced it (D-12) and #12 and #11 left it.
+        -- filtered. The port reproduced it (D-12).
         --
         -- The obvious repair -- `#... > 0` on this list -- is WRONG, and is
-        -- written down here so it is not tried again. getAvailableTalents
-        -- with no rotation reads every talent the character has and requires
-        -- canProject at the enemy's grid, so RANGE is part of the test: a
-        -- melee character five squares from an orc has nothing available on
-        -- it. Under `#... > 0` that orc is not a target, `targets` comes out
-        -- empty, and the "nothing left in sight" branch below sends the bot
-        -- to REST -- which re-enters with the orc still in view, sets FIGHT
-        -- again, and spins until THINK_LIMIT. Melee would stop working.
-        -- scenario-scoring probe A is the guard: "with nothing in reach it
-        -- would close the distance".
+        -- written down here so it is not tried again. getAvailableTalents with
+        -- no rotation reads every talent the character has and requires
+        -- canProject at the enemy's grid, so RANGE is part of the test: a melee
+        -- character five squares from an orc has nothing available on it. Under
+        -- `#... > 0` that orc is not a target, `targets` comes out empty, and
+        -- the "nothing left in sight" branch below sends the bot to REST --
+        -- which re-enters with the orc still in view, sets FIGHT again, and
+        -- spins until THINK_LIMIT. Melee would stop working. scenario-scoring
+        -- probe A is the guard: "with nothing in reach it would close the
+        -- distance".
         --
-        -- What the filter can honestly decide is the PICK. Approach needs
-        -- every hostile -- closing the distance is HOW a melee talent comes
-        -- into range -- while the first pick should be an enemy something
-        -- can actually be used on, so a turn is not spent aiming at the
-        -- weakest thing in the room when it is the one behind the wall. So
-        -- both lists are built and each is used where it belongs.
+        -- What the filter can honestly decide is the PICK: approach needs every
+        -- hostile, since closing the distance is HOW a melee talent comes into
+        -- range, while the first pick should be an enemy something can actually
+        -- be used on. So both lists are built and each is used where it belongs.
         local targets, usable = {}, {}
         for _, enemy in pairs(hostiles) do
             -- attacking is a talent, so it does not need adding as a choice
@@ -2192,21 +2055,18 @@ function skoobot_act(noAction)
         local combatTalents = filterFailedTalents(rotation)
 
         if #combatTalents > 0 then
-            -- #81: the lowest-life enemy something can be used on, falling
-            -- back to the lowest-life enemy at all when nothing can -- the
-            -- pre-#81 behaviour, kept for that case so the blast radius of
-            -- making this filter live is exactly "the first pick is not
-            -- wasted". getNearestHostile stays as the second pick: it is
-            -- what makes the approach target sensible, and it re-reads the
-            -- field itself.
+            -- #81: the lowest-life enemy something can be used on, falling back
+            -- to the lowest-life enemy at all when nothing can -- the pre-#81
+            -- behaviour, kept so that making this filter live changes exactly
+            -- one thing: the first pick is not wasted. getNearestHostile stays
+            -- as the second pick; it re-reads the field itself.
             local picks = { getLowestHealthEnemy(#usable > 0 and usable or targets), getNearestHostile() }
             local talents
 
-            -- #91: a quarter of the POOL, not of max_life. A character
-            -- whose die_at doubles its pool loses a smaller share of it to
-            -- the same hit, and should not burn a Damage Prevention talent
-            -- on a scratch; one with an adverse die_at loses a larger share
-            -- and should.
+            -- #91: a quarter of the POOL, not of max_life. A character whose
+            -- die_at doubles its pool loses a smaller share of it to the same
+            -- hit and should not burn a Damage Prevention talent on a scratch;
+            -- one with an adverse die_at loses a larger share and should.
             local el = lifem.of(game.player)
             if (bot.loop.delta < 0)
                and (el.safe_max > 0)
@@ -2238,13 +2098,11 @@ function skoobot_act(noAction)
                 end
             end
 
-            -- The rotation, in the player's order. A talent is tried on the
-            -- picks -- the lowest-life enemy, then the nearest -- and the first
-            -- usable one fires, as v1 did. A flee (#59) is tried on the field,
-            -- not on a pick, so it splits the list into tiers: every talent
-            -- above it is tried on both picks first, then the flee, then the
-            -- talents below it. Placed first it fires whenever anything is in
-            -- view; placed last it is the "nothing else to do" move.
+            -- The rotation, in the player's order: a talent is tried on the
+            -- picks -- lowest-life enemy, then nearest -- and the first usable
+            -- one fires, as v1 did. A flee (#59) is tried on the FIELD, not on
+            -- a pick, so it splits the list into tiers: everything above it is
+            -- tried on both picks first, then the flee, then what is below.
             local tier = {}
             local function fireTier()
                 if #tier == 0 then return false end
@@ -2280,28 +2138,25 @@ function skoobot_act(noAction)
             end
             if fireTier() then checkForAdditionalAction() return end
 
-            -- no legal target: get closer -- unless the character cannot
-            -- move, in which case the step is impossible and the reason
-            -- names the block (#12); or a flee was the whole rotation and
-            -- had nowhere to go (#67); or the posture is to hold (#11), in
-            -- which case a turn is spent waiting for them to come.
+            -- no legal target: get closer -- unless the character cannot move
+            -- (#12), or a flee was the whole rotation and had nowhere to go
+            -- (#67), or the posture is to hold (#11) and a turn is spent
+            -- waiting for them to come.
             if caps.move then
                 return stop(notice.CANNOT_ACT, "cannot move (" .. conditions.blockedText(caps.move)
                     .. "), and no Combat talent reaches " .. targets[1].name)
             end
 
             -- #67: CORNERED. The tail below is v1's -- when no talent fired,
-            -- walk at targets[1] -- and for a rotation of flees alone that
-            -- is a bump attack: the exact opposite of the row the player
-            -- placed. Owner's ruling: stop and say so.
+            -- walk at targets[1] -- which for a rotation of flees alone is a
+            -- bump attack, the exact opposite of the row the player placed.
             --
-            -- Only when the rotation holds NO talent. With one below the
-            -- flee, closing the distance is what brings it into range, and
-            -- "fight when you cannot run" is then what the player asked for
-            -- -- so the tail is right there and is left alone. The question
-            -- is asked of `rotation`, the player's own list, not of
-            -- `combatTalents`: a talent that merely failed this iteration
-            -- still says the player wants to fight when cornered.
+            -- Only when the rotation holds NO talent: with one below the flee,
+            -- closing the distance is what brings it into range, and "fight
+            -- when you cannot run" is what the player asked for. Asked of
+            -- `rotation`, the player's own list, not of `combatTalents` -- a
+            -- talent that merely failed this iteration still says the player
+            -- wants to fight when cornered.
             if blockedFlee then
                 local hasTalent = false
                 for _, item in ipairs(rotation) do
@@ -2333,10 +2188,10 @@ function skoobot_act(noAction)
             end
             local a = Astar.new(game.level.map, game.player)
             -- #64: never route through a grid the player must consent to
-            -- enter. Astar's add_check (engine/Astar.lua:113, :134, :156)
-            -- takes each candidate grid; a sealed door sets no block_move,
-            -- so without this the path runs through it and the bot walks
-            -- into a popup it will only hand back on.
+            -- enter. Astar's add_check (engine/Astar.lua:113, :134, :156) takes
+            -- each candidate grid; a sealed door sets no block_move, so without
+            -- this the path runs through it and the bot walks into a popup it
+            -- can only hand back on.
             local path = a:calc(game.player.x, game.player.y, targets[1].x, targets[1].y,
                 nil, nil, function(x, y) return not needsConsent(x, y) end)
             chan.debug("[Combat] [Movement] Pathing towards %s", tostring(targets[1].name))
@@ -2354,24 +2209,14 @@ function skoobot_act(noAction)
             end
         else
             chan.debug("[Combat] Nothing in the Combat rotation is usable.")
-            -- #75: an empty rotation has three causes and this said only two
-            -- of them. A player who set STUNNED to IGNORE and held every
-            -- Combat row got "none configured, or all on cooldown" -- both
-            -- untrue -- while the only mention of holding was a debug line
-            -- they were never going to read.
-            --
+            -- #75, #71: an empty rotation has three causes and the message
+            -- says which. Asked of ROWS, not #rotation: a row naming a talent
+            -- this character does not have resolves to nothing, and that is
+            -- not "nothing configured".
+            -- #18: no rows at all is the fresh-character case, and only then
+            -- does the hint point at the loadout suggestion -- offering it to a
+            -- player whose talents are merely held is noise.
             -- #57: the menu key is looked up, not quoted from the default.
-            -- #18: an empty list is also the moment a new character hits the
-            -- blank rotation, so the hint names the way out of THAT -- and
-            -- only then: pointing a player with a full rotation at the
-            -- loadout suggestion because their talents are held is noise.
-            -- #71: "none configured, or all on cooldown" handed the player
-            -- an either/or the code had already resolved. A character with
-            -- no Combat row at all has configured nothing -- the fresh-
-            -- character case the hint is for -- and any other empty rotation
-            -- is rows that exist and could not be used this turn. Rows, not
-            -- #rotation: a row naming a talent this character does not have
-            -- resolves to nothing, and that is not "nothing configured".
             local rows = #getRules(game.player).Combat
             local configured = #rotation + heldCount
             local text, extra, nothingConfigured
@@ -2418,11 +2263,9 @@ function bot.start()
         return stop(notice.CANNOT_ACT, "cannot be used in the wilderness")
     end
     -- #65: a real run begins from a fresh activation, whatever a query left
-    -- behind. v1 (and the port until now) let skoobot_act() reuse one that
-    -- was already there, so a query on the stairs followed by a toggle
-    -- elsewhere ran on the query's start tile (#62's exemption is for the
-    -- tile the bot was TOGGLED on), with its unspentTotal and its #13
-    -- liveness counters.
+    -- behind. Reusing one meant a query on the stairs followed by a toggle
+    -- elsewhere ran on the query's start tile, with its unspentTotal and its
+    -- #13 liveness counters.
     clearActivation()
     bot.active = true
     bot.actions = 0
@@ -2438,18 +2281,14 @@ function bot.stop(text, severity, opts)
     end
 end
 
---- Say what the bot would do here, acting on nothing: the decision runs
---- with do_nothing set, so no energy is spent and no game.turn passes.
+--- Say what the bot would do here, acting on nothing: the decision runs with
+--- do_nothing set, so no energy is spent and no game.turn passes.
 ---
---- The activation it builds stays on the table afterwards, for inspection
---- -- inspect(), and the scenarios that read the start tile back -- but is
---- marked as a query's, and the next entry point discards it (#65): start()
---- and runonce() always begin fresh, and a later query drops it here so
---- that its verdict is for the tile the player stands on now, as a toggle
---- there would be, not for the tile an earlier query stood on. An
---- activation that is NOT marked is honoured: none can be a run's, since
---- query refuses while the bot is active, and a test may put one there by
---- hand to ask about a start tile other than this one.
+--- The activation it builds stays on the table for inspection but is marked as
+--- a query's, and the next entry point discards it (#65), so a verdict is
+--- always for the tile the player stands on now. An activation that is NOT
+--- marked is honoured -- none can be a run's, since query refuses while the
+--- bot is active, and a test may put one there to ask about another tile.
 function bot.query()
     if bot.active == true then
         return game.log("Cannot query while SkooBot: Reclauded is active!")
@@ -2464,15 +2303,14 @@ function bot.query()
     if bot.activation then bot.activation.from_query = true end
 end
 
---- One decision, acted on, as the first decision of a toggle would be: a
---- fresh activation from this tile (#65), and nothing left behind for the
---- next entry point to inherit.
+--- One decision, acted on, as the first decision of a toggle would be: a fresh
+--- activation from this tile (#65), and nothing left for the next entry point
+--- to inherit.
 ---
---- The in-progress flag is `single_run`, not `runonce` (#70). v1 kept the
---- function and its flag apart (skoobot_runonce / tempvals.runonce); the
---- port put both on this key, so the first call replaced the function with
---- a boolean and the second RUNONCE press in a game failed with "attempt to
---- call field 'runonce' (a boolean value)".
+--- The in-progress flag is `single_run`, not `runonce` (#70): the port once
+--- put both the function and its flag on this key, so the first call replaced
+--- the function with a boolean and the second RUNONCE press in a game failed
+--- with "attempt to call field 'runonce' (a boolean value)".
 function bot.runonce()
     if bot.active == true then
         return game.log("Cannot runonce while SkooBot: Reclauded is active!")
@@ -2510,9 +2348,8 @@ local function playerActions()
     chan.trace("[PlayerActions] playerActions() game paused = %s", tostring(game.paused))
     if (not game.player.running) and (not game.player.resting) and bot.active then
         if not game.player:enoughEnergy() then
-            -- Ordinary: the nested act() a run or rest starts from lands
-            -- here once the step has spent the energy. v1 tagged it a
-            -- bugfix warning; it is control flow.
+            -- Ordinary control flow, not a bug: the nested act() a run or
+            -- rest starts from lands here once the step has spent the energy.
             chan.debug("[PlayerActions] act called with insufficient energy; waiting for the next turn")
             return
         end
@@ -2521,10 +2358,9 @@ local function playerActions()
             return
         end
         -- #13: the liveness invariant, checked BEFORE the decision so a spin
-        -- is cut at its STALL_LIMITth iteration rather than after it. The
-        -- first iteration of an activation creates the counters inside
-        -- skoobot_act(); from the second on, an unchanged game.turn means
-        -- the previous iteration spent no game time.
+        -- is cut at its STALL_LIMITth iteration rather than after it. From the
+        -- second iteration on, an unchanged game.turn means the previous one
+        -- spent no game time.
         local act = bot.activation
         if act then
             act.iterations = act.iterations + 1
@@ -2537,7 +2373,7 @@ local function playerActions()
                 act.iterations, game.turn, act.stalled)
             if act.stalled >= STALL_LIMIT then
                 -- The bug report: the full state line, at info so it is in
-                -- te4_log.txt by default; the notice carries the state.
+                -- te4_log.txt by default.
                 chan.info("[Liveness] no progress in %d iterations: %s", act.stalled, bot.inspect())
                 return stop(notice.STOPPED, ("no progress in %d iterations (state: %s) -- please report this"):format(
                     act.stalled, aiStateString()))
@@ -2555,8 +2391,7 @@ end
 
 -- v1 kept the "timer registered" flag on the player, where it was saved with
 -- the character and never cleared, so ACTION_DELAY only ever worked once per
--- character. The flag is transient here. The feature is still as rough as
--- v1's description said it was.
+-- character. The flag is transient here.
 local function scheduleAction()
     game.paused = true
     if not bot.action_timer then
@@ -2571,30 +2406,24 @@ end
 -------------------------------------------------------------------------------
 -- The engine seam (#14)
 --
--- Everything above is the addon's own. What follows is the whole of what
--- it does to the game's classes: two methods of mod.class.Player, each
--- wrapped by a one-line superload that runs the original and hands what it
--- returned to a function here, so that the behaviour is in one place and a
--- changed signature in a future ToME is one line to re-read. Neither can
--- be an engine hook, and docs/api-surface-1.7.6.md records why; the third
--- wrapper 0.1 shipped, Actor:tooltip, is the "Actor:tooltip" hook now,
--- bound in hooks/load.lua to bot.tooltip below.
+-- The whole of what this addon does to the game's classes: two methods of
+-- mod.class.Player, each wrapped by a one-line superload that runs the
+-- original and hands what it returned to a function here, so a changed
+-- signature in a future ToME is one line to re-read. Neither can be an engine
+-- hook, and docs/api-surface-1.7.6.md records why; the third wrapper 0.1
+-- shipped, Actor:tooltip, is the "Actor:tooltip" hook now.
 -------------------------------------------------------------------------------
 
---- After the engine's Player:act (#14): the per-turn driver, once the
---- engine has done the player's own turn-start work and any run or rest
---- step, whenever the bot is active and the player is waiting for input.
---- Irreducible: Player:act fires no hook, and the engine's per-turn
---- callbacks -- callbackOnAct inside Actor:act, the "Actor:actBase:Effects"
---- hook -- run before the rest and run stepping, on every actor, and need a
---- talent, effect or object to hang on. The original's return travels
---- through untouched (it returns nothing on every path in 1.7.6).
+--- After the engine's Player:act (#14): the per-turn driver, once the engine
+--- has done the player's turn-start work and any run or rest step. Irreducible
+--- -- Player:act fires no hook, and the engine's per-turn callbacks
+--- (callbackOnAct inside Actor:act, the "Actor:actBase:Effects" hook) run
+--- before the rest and run stepping, on every actor, and need a talent, effect
+--- or object to hang on. The original's return travels through untouched.
 
---- How long one of this character's turns is, in game.turn units. ToME gives
---- an actor a turn every ten ticks at speed 1, and proportionally sooner or
---- later as global_speed moves: ten for a normal character, twenty at half
---- speed, five when hasted to double. Without this a slowed character would
---- read as blacked out on every single turn (#77).
+--- How long one of this character's turns is, in game.turn units: ten ticks at
+--- speed 1, proportionally sooner or later as global_speed moves. Without it a
+--- slowed character reads as blacked out on every single turn (#77).
 local function turnLength(p)
     local s = tonumber(p.global_speed) or 1
     if s <= 0 then s = 1 end
@@ -2605,14 +2434,12 @@ local function afterAct(self, ...)
     if game.player == self then
         -- #77: the turns the character never got. This runs BEFORE the
         -- rest/run gate below, because Player:act fires on every turn the
-        -- engine hands the player -- including the ones a rest or an
-        -- auto-explore run spends. The bot makes no decision on those, so
-        -- the decision clock (#13's last_turn) does not move, and reading a
-        -- blackout off it reported an entire rest as time lost. Every rest.
-        --
-        -- A blackout is the opposite case: the engine gives the player NO
-        -- turn at all -- paralysis, stoning, a time stun -- so act() itself
-        -- does not fire and the gap is visible here when it resumes.
+        -- engine hands the player, including the ones a rest or an
+        -- auto-explore run spends -- on which the bot makes no decision, so
+        -- the decision clock (#13's last_turn) does not move and a blackout
+        -- read off it reported every rest as time lost. A blackout is the
+        -- opposite case: the engine gives NO turn, act() does not fire at all,
+        -- and the gap is visible here when it resumes.
         local act = bot.activation
         if act then
             local gap = game.turn - (act.last_act_turn or game.turn)
@@ -2620,7 +2447,6 @@ local function afterAct(self, ...)
             -- floor, not round: one turn's worth of gap is the turn just
             -- taken, and anything short of a whole extra turn is jitter --
             -- energy does not divide exactly and speed can change mid-gap.
-            -- Erring toward silence is right for a WARN nobody can act on.
             act.turns_lost = math.max(0, math.floor(gap / turnLength(self)) - 1)
         end
     end
@@ -2638,19 +2464,16 @@ local function afterAct(self, ...)
     return ...
 end
 
---- What the bot COUNTS an actor for, given its raw power level, and why,
---- in words (#11): an enemy's raw figure times its rank-band weight (#62),
---- the player's own scaled by the life left. Both come from data/score.lua's
---- two helpers -- the same ones spotHostiles and ownPowerLevel call -- so
---- the tooltip and the stop reasons cannot drift.
+--- What the bot COUNTS an actor for, given its raw power level, and why, in
+--- words (#11): an enemy's raw figure times its rank-band weight (#62), the
+--- player's own scaled by the life left. Both come from data/score.lua's two
+--- helpers -- the same ones spotHostiles and ownPowerLevel call -- so the
+--- tooltip and the stop reasons cannot drift.
 ---
---- Since #79 the life scaling is a curve, so "at 50% life" no longer means
---- "half": the multiplier is spelled out beside it rather than left for the
---- reader to assume, because the number they can check is the one they will
---- trust.
---- #91: the life is the POOL the game kills at, discounted for
---- anything about to lapse -- the same figure the checks used -- so a Lich
---- reading "at 0% life" while carrying five hundred spare points is gone.
+--- The multiplier is spelled out beside the figure because since #79 the life
+--- scaling is a curve, so "at 50% life" no longer means "half". #91: the life
+--- is the POOL the game kills at, so a Lich no longer reads "at 0% life" while
+--- carrying five hundred spare points.
 local function countedPower(actor, raw)
     if actor == game.player then
         local el = lifem.of(actor)
@@ -2664,15 +2487,11 @@ end
 
 --- The Power Level line of a creature's tooltip (#14), added by the
 --- "Actor:tooltip" hook in hooks/load.lua to the tstring the engine is
---- building. It lands where the hook fires -- after the stats block, among
---- the figures it is made from -- where 0.1's wrapper appended it at the
---- very end. Two figures since #11, so the tooltip and the bot agree: the
---- heuristic's raw power level -- scored with the PLAYER's global speed for
---- every actor, as the original did; the number v1 showed, bot.power's, and
---- the one the Maximum Enemy Power option is written against -- and beside
---- it what the bot counts this actor for, with the reason, which is the
---- figure the score's terms and the stop reasons carry. With Ctrl held,
---- the component scores follow, as before.
+--- building, so it lands among the figures it is made from. Two figures since
+--- #11: the heuristic's raw power level -- scored with the PLAYER's
+--- global_speed for every actor, as the original did, and what the Maximum
+--- Enemy Power option is written against -- and what the bot COUNTS this actor
+--- for, which is the figure the score's terms and the stop reasons carry.
 function bot.tooltip(actor, ts)
     local scores = power.scores(actor, game.player and game.player.global_speed or 1)
     local raw = power.sum(scores)
@@ -2692,19 +2511,17 @@ function bot.tooltip(actor, ts)
     end
 end
 
--- The superload surface. `loadPrevious(...)` at the top of this file is
--- the loader's chain (game/loader/init.lua:137-177): each addon's superload
--- of a class gets the previous one's table, so this wraps whatever the
--- original SkooBot wrapped when both are installed, in either order.
+-- The superload surface. `loadPrevious(...)` at the top of this file is the
+-- loader's chain (game/loader/init.lua:137-177): each addon's superload of a
+-- class gets the previous one's table, so this wraps whatever the original
+-- SkooBot wrapped when both are installed, in either order.
 --
--- ONE wrapper (#76). `postUseTalent` was the second, and the only reason for
--- it was to see a talent that refused: the engine's "Actor:postUseTalent"
--- hook fires only after `ret` has passed `if not ret then return end`
--- (mod/class/Actor.lua:6329), so the refusal is exactly the case no hook
--- sees. But it is not the only way to learn the fact -- useTalent returns
--- false for it, and SAI_useTalent had that return in hand and threw it away.
--- It reads it now, and this class is down to `act`, which has no hook
--- equivalent in 1.7.6 and stays.
+-- ONE wrapper (#76). `postUseTalent` was the second, and only to see a talent
+-- that REFUSED: the engine's "Actor:postUseTalent" hook fires after `ret` has
+-- passed `if not ret then return end` (mod/class/Actor.lua:6329), so a refusal
+-- is exactly the case no hook sees. useTalent returns false for it, which
+-- SAI_useTalent had in hand and threw away; it reads it now. `act` stays
+-- because it has no hook equivalent in 1.7.6.
 local old_act = _M.act
 function _M:act(...) return afterAct(self, old_act(self, ...)) end
 
