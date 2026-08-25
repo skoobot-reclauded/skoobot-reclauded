@@ -714,7 +714,20 @@ local function SAI_beginRest()
     end
     chan.info("[Action] Beginning to rest.")
     bot.actions = bot.actions + 1
-    game.player:restInit(nil, nil, nil, validateRest)
+    -- restInit is not re-entrant: it sets self.resting, then useEnergy fires
+    -- callbackOnActEnd (mod/class/Player.lua:433), and a callback that damages
+    -- or debuffs reaches restStop (:786, :810), which nils self.resting before
+    -- PlayerRest.lua:53 indexes it. Nothing to do with being inside act() --
+    -- measured from the bridge, outside a turn, with the same result. The
+    -- engine still drives the rest; this stops its bug reaching the player.
+    -- See #114.
+    local ok, err = pcall(game.player.restInit, game.player, nil, nil, nil, validateRest)
+    if not ok then
+        chan.warn("[Action] The engine stopped the rest as it began: %s", tostring(err))
+        -- restStop already ran validateRest and cleared the state; clear it
+        -- here only if the failure came from somewhere that did not.
+        if game.player.resting then game.player:restStop() end
+    end
     return checkForAdditionalAction()
 end
 

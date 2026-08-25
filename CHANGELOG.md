@@ -250,6 +250,11 @@ SkooBot, and no number is ever shared between the two projects.
 
 Defects inherited from 0.0.12, all reported by its users:
 
+- Beginning a rest no longer crashes the game. If something interrupts the rest in the instant
+  it starts — a damage-over-time ticking, a debuff landing — the game's own rest code tripped
+  over itself and threw *attempt to index field 'resting'*. 0.0.12 began a rest exactly the
+  same way and has always been able to hit this; the bot rests far more often, so it hits it
+  far more often (#114).
 - Talents that want a marked or confirmed target (Headshot and its kind) no longer stall the
   rotation; the bot falls through to the next priority (#5).
 - Being pinned, dominated or otherwise unable to move no longer freezes the game while the bot
