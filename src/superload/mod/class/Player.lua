@@ -314,6 +314,7 @@ end
 bot.notice = notice
 local StopDialog   -- required on first use; the overload mounts the dialog tree
 local SetupDialog  -- #96, the same
+local StairsDialog -- #86, the same
 
 --- Stop the bot and tell the player why (#58). `severity` is notice.STOPPED,
 --- HANDED_BACK or CANNOT_ACT; `text` is plain prose with no colour codes.
@@ -1609,6 +1610,73 @@ local function shouldEscort(ctx, hostiles)
     return liveEscortee() ~= nil
 end
 
+--- Take the level change underfoot (#86).
+---
+--- The game's own CHANGE_LEVEL handler (mod/class/Game.lua), so every guard it
+--- applies -- never_move, the detrimental-effects refusal on a wilderness
+--- exit, the grid's own change_level_check -- applies here too instead of
+--- being re-implemented and left to rot.
+---
+--- The bot always stops afterwards, even at "always". A level change
+--- regenerates the level under a running act loop whose scratch still
+--- describes the old one, and #114 is what calling a re-entrant engine routine
+--- from inside act() costs. Resuming on the new level is the player's toggle
+--- for now; see #86 before changing that.
+local function takeLevelChange(what)
+    if bot.do_nothing then
+        game.log("[SkooBot] AI would take " .. what)
+        return
+    end
+    chan.info("[Action] Taking %s", what)
+    bot.actions = bot.actions + 1
+    game.key:triggerVirtual("CHANGE_LEVEL")
+    return stop(notice.HANDED_BACK, "took " .. what)
+end
+
+--- Standing on a level change, on an explored level (#86).
+---
+--- The engine's own auto-explore already walks the character here and prefers
+--- the down stairs (#121 measured it), so the only thing that was missing is
+--- the asking. TAKE_STAIRS says which of the three this is.
+--- Note the argument is the GRID, fetched by the caller. `map:checkEntity`
+--- returns the value of the attribute it was asked about, not the entity
+--- carrying it, so the existing `onLevelChange` is a number and indexing it
+--- raises.
+local function atLevelChange(grid)
+    local zoneExit = (grid and grid.change_zone) and true or false
+    local what = zoneExit and "the way out of this zone" or "the stairs"
+    local mode = tonumber(cfg("TAKE_STAIRS")) or cfgfmt.STAIRS_ASK
+
+    if mode == cfgfmt.STAIRS_NEVER then
+        return stop(notice.HANDED_BACK, "standing on a level change")
+    end
+    if mode == cfgfmt.STAIRS_ALWAYS then
+        return takeLevelChange(what)
+    end
+
+    -- Ask. Query mode answers a question, it does not open things, and an
+    -- offer that stacks on another dialog blocks itself -- both #96's rules.
+    if bot.do_nothing or (game.dialogs and #game.dialogs > 0) then
+        return stop(notice.HANDED_BACK, "standing on a level change")
+    end
+    StairsDialog = StairsDialog or require("mod.dialogs.skoobot_reclauded.StairsDialog")
+    game:registerDialog(StairsDialog.new(
+        ("#GOLD#This level is explored.#WHITE#\n\nYou are standing on %s. Shall I take %s?\n\n")
+            :format(zoneExit and "the way out of this zone" or "a staircase", zoneExit and "it" or "them")
+        .. "\"Always\" and \"Never ask\" set the "
+        .. cfgfmt.title("TAKE_STAIRS") .. " option, which you can change back on the settings screen.",
+        function(choice)
+            if choice == "always" then bot.setSetting("TAKE_STAIRS", cfgfmt.STAIRS_ALWAYS) end
+            if choice == "never" then
+                bot.setSetting("TAKE_STAIRS", cfgfmt.STAIRS_NEVER)
+                game.log("#GOLD#[SkooBot] It will not offer again. The %s option turns it back on.",
+                    cfgfmt.title("TAKE_STAIRS"))
+            end
+            if choice == "take" or choice == "always" then takeLevelChange(what) end
+        end))
+    return stop(notice.HANDED_BACK, "standing on a level change -- asked whether to take it")
+end
+
 --- One loop over the condition list for a site (#12), replacing v1's
 --- checkForDebuffs / checkPowerLevel if-chains: every policy entry with a
 --- detector is evaluated in the list's order, and the first that fires under
@@ -1761,8 +1829,7 @@ function skoobot_act(noAction)
         local onLevelChange = game.level.map:checkEntity(game.player.x, game.player.y,
             engine.Map.TERRAIN, "change_level")
         if onLevelChange and not onActivationStartTile() then
-            stop(notice.HANDED_BACK, "standing on a level change")
-            return
+            return atLevelChange(game.level.map(game.player.x, game.player.y, engine.Map.TERRAIN))
         end
         -- FIXED (T-012). v1 called auto-explore while unable to move, which
         -- cannot progress and spun -- the pin / dominate / entangle freeze

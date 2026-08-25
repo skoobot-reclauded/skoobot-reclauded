@@ -54,6 +54,7 @@ local function fmtValue(name, value)
     if value == nil then return "unset" end
     if cfgfmt.kind(name) == "boolean" then return value and "yes" or "no" end
     if name == "LOG_LEVEL" then return logName(value) end
+    if cfgfmt.CHOICES[name] then return cfgfmt.choiceName(name, tonumber(value)) end
     local n = tonumber(value)
     if n and n == math.floor(n) then return tostring(math.floor(n)) end
     return tostring(value)
@@ -192,10 +193,16 @@ function _M:use(item)
         return
     end
 
-    if kind == "choice" then      -- LOG_LEVEL
-        local choices = {}
-        for n = 0, logMax() do choices[#choices + 1] = { name = logName(n), value = n } end
-        game:registerDialog(PickOneDialog.new(cfgfmt.title(name) .. " -- how much should it print?",
+    if kind == "choice" then
+        -- A fixed list where cfg declares one; otherwise LOG_LEVEL, whose
+        -- names belong to data/log.lua and are built from it (#86).
+        local choices, prompt = cfgfmt.CHOICES[name], " -- pick one"
+        if not choices then
+            choices = {}
+            for n = 0, logMax() do choices[#choices + 1] = { name = logName(n), value = n } end
+            prompt = " -- how much should it print?"
+        end
+        game:registerDialog(PickOneDialog.new(cfgfmt.title(name) .. prompt,
             choices, function(n) self:write(name, n) end))
         return
     end

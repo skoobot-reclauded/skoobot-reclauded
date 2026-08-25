@@ -30,7 +30,7 @@ local PERSISTED = {
     "LOWHEALTH_RATIO", "IGNORE_DAMAGE_HEALTH_RATIO",
     "MAX_INDIVIDUAL_POWER", "MAX_DIFF_POWER", "MAX_COMBINED_POWER", "MAX_ENEMY_COUNT",
     "NORMAL_POWER_RATIO", "ELITES_POWER_RATIO", "BOSS_POWER_RATIO",
-    "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL",
+    "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL", "TAKE_STAIRS",
 }
 for _, name in ipairs(PERSISTED) do
     if type(s[name]) == "nil" then
@@ -69,3 +69,8 @@ if type(s.STOP_POPUP)           == "nil" then s.STOP_POPUP           = false end
 -- #46: a level NUMBER from data/log.lua, not a name -- the settings writer
 -- quotes nothing, so a name would come back as a global read of nil.
 if type(s.LOG_LEVEL)            == "nil" then s.LOG_LEVEL            = 3     end
+
+-- #86: what to do on a staircase once the level is explored. 0 = ask, the
+-- default, because taking the stairs moves the character somewhere the player
+-- did not choose; data/cfg.lua's STAIRS_* name the values.
+if type(s.TAKE_STAIRS)          == "nil" then s.TAKE_STAIRS          = 0     end

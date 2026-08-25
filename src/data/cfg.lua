@@ -77,6 +77,7 @@ M.TITLE = {
     ACTION_DELAY               = "Action Delay",
     STOP_POPUP                 = "Popup when the bot stops",
     LOG_LEVEL                  = "Log level",
+    TAKE_STAIRS                = "Take the stairs",
 }
 
 --- The title, or the key itself: a reason that says "MAX_ENEMY_COUNT" is poor,
@@ -104,7 +105,7 @@ M.ORDER = {
     "LOWHEALTH_RATIO", "IGNORE_DAMAGE_HEALTH_RATIO",
     "MAX_INDIVIDUAL_POWER", "MAX_DIFF_POWER", "MAX_COMBINED_POWER", "MAX_ENEMY_COUNT",
     "NORMAL_POWER_RATIO", "ELITES_POWER_RATIO", "BOSS_POWER_RATIO",
-    "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL",
+    "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL", "TAKE_STAIRS",
 }
 
 --- Every option, in the order the settings screen shows them.
@@ -172,6 +173,11 @@ M.DESC = {
         "one line per action; 'debug' the reasoning behind each decision; 'trace' the " ..
         "talent-by-talent checks. The last two grow the log file quickly. Warnings and " ..
         "errors are also shown in the message log.",
+    TAKE_STAIRS =
+        "What the bot does when it has explored a level and is standing on a staircase or a " ..
+        "zone exit. 'ask' opens a small prompt so you decide each time; 'always' takes it and " ..
+        "keeps going, which is what an unattended run wants; 'never' hands back and leaves the " ..
+        "stairs to you. The stop conditions are checked on the way either way.",
 }
 
 --- The range a numeric option may be set to, where it is not 0..1000000 (#74).
@@ -185,8 +191,33 @@ M.RANGE = {
 
 --- What kind of control an option wants: a number, a yes/no, or a choice.
 M.KIND = {
-    STOP_POPUP = "boolean",
-    LOG_LEVEL  = "choice",
+    STOP_POPUP  = "boolean",
+    LOG_LEVEL   = "choice",
+    TAKE_STAIRS = "choice",
 }
+
+--- What TAKE_STAIRS may be (#86). Numbers, not names: the settings writer
+--- quotes nothing, so a name comes back as a global read of nil -- the same
+--- trap LOG_LEVEL records.
+M.STAIRS_ASK, M.STAIRS_ALWAYS, M.STAIRS_NEVER = 0, 1, 2
+
+--- The choices a "choice" option offers, where they are a fixed list. Absent
+--- means the dialog builds them itself, which is LOG_LEVEL: its names live in
+--- data/log.lua and are that module's to change.
+M.CHOICES = {
+    TAKE_STAIRS = {
+        { name = "ask",    value = M.STAIRS_ASK },
+        { name = "always", value = M.STAIRS_ALWAYS },
+        { name = "never",  value = M.STAIRS_NEVER },
+    },
+}
+
+--- A choice's name, for a message the player reads cold.
+function M.choiceName(name, value)
+    for _, c in ipairs(M.CHOICES[name] or {}) do
+        if c.value == value then return c.name end
+    end
+    return tostring(value)
+end
 function M.kind(name) return M.KIND[name] or "number" end
 return M

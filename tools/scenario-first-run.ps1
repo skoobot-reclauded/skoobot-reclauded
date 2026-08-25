@@ -580,7 +580,7 @@ game:unregisterDialog(d)
 return ("rows=%d empty=%d shouting=%d scrollbar=%s ;; %s"):format(
   rows, empty, shouting, tostring(bar), table.concat(out, " ;; "))
 '@
-    Check ($st -match 'rows=14 ') 'the screen lists all twelve options and the two actions'
+    Check ($st -match 'rows=15 ') 'the screen lists all thirteen options and the two actions'
     Check ($st -match 'empty=0 ') 'every row explains itself'
     Check ($st -match 'shouting=0 ') 'no description shouts in capitals'
     Check ($st -match 'scrollbar=true') 'the description pane scrolls, so nothing is silently clipped'
