@@ -25,12 +25,9 @@ function _M:init(title, optionlist)
 
 	engine.ui.Dialog.init(self, title, 1, 1)
 
-	-- T-014: bound the visible rows and scroll the rest, so a character with many
-	-- talents can still reach the first and last entries. The original gave the
-	-- list one row per entry with no scrollbar, so on a short screen (1366x768 was
-	-- the report) the ends fell off. Rows are sized to ~80%% of the screen height
-	-- from a safe over-estimate of the row height, so the dialog never exceeds the
-	-- screen whatever the font; the full list stays reachable by wheel and arrows.
+	-- T-014: bound the visible rows and scroll the rest. Rows are sized to ~80%%
+	-- of the screen height from a safe over-estimate of the row height, so the
+	-- dialog never exceeds the screen whatever the font.
 	local maxRows = math.max(6, math.floor(game.h * 0.8 / 25))
 	local list = List.new{width=400, nb_items=math.min(#self.list, maxRows),
 		scrollbar=#self.list > maxRows, list=self.list, fct=function(item) self:use(item) end}

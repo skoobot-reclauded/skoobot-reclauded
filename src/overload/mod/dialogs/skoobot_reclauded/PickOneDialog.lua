@@ -8,13 +8,10 @@
 -- Software Foundation, either version 3 of the License, or (at your option)
 -- any later version. See LICENSE.
 --
--- PORTED FROM SkooBot 0.0.12 (D-12), under the addon's own dialog namespace
--- so it cannot shadow the original's mod/dialogs/PickOneDialog.lua when both
--- addons are enabled.
---
--- v1: the list is given one row per entry and no scrollbar, and the dialog
--- sizes itself to its content, so with enough entries it is taller than the
--- screen. That is the talent-picker overflow users reported. T-014.
+-- PORTED FROM SkooBot 0.0.12 (D-12), under the addon's own dialog namespace so
+-- it cannot shadow the original's mod/dialogs/PickOneDialog.lua when both
+-- addons are enabled. v1 sized the list to its content with no scrollbar, so a
+-- long talent list ran off the screen -- the overflow users reported (T-014).
 
 require "engine.class"
 require "engine.ui.Dialog"
@@ -32,12 +29,10 @@ function _M:init(title, optionlist, action)
 
 	engine.ui.Dialog.init(self, title, 1, 1)
 
-	-- T-014: bound the visible rows and scroll the rest, so a character with many
-	-- talents can still reach the first and last entries. The original gave the
-	-- list one row per entry with no scrollbar, so on a short screen (1366x768 was
-	-- the report) the ends fell off. Rows are sized to ~80%% of the screen height
-	-- from a safe over-estimate of the row height, so the dialog never exceeds the
-	-- screen whatever the font; the full list stays reachable by wheel and arrows.
+	-- T-014: bound the visible rows and scroll the rest. Rows are sized to ~80%%
+	-- of the screen height from a safe over-estimate of the row height, so the
+	-- dialog never exceeds the screen whatever the font, and the full list stays
+	-- reachable by wheel and arrows.
 	local maxRows = math.max(6, math.floor(game.h * 0.8 / 25))
 	local list = List.new{width=400, nb_items=math.min(#self.list, maxRows),
 		scrollbar=#self.list > maxRows, list=self.list, fct=function(item) self:use(item) end}
@@ -69,10 +64,9 @@ end
 
 function _M:generateList()
 	-- Build a fresh display list; never mutate the caller's optionlist. The
-	-- key-char prefix used to be written back into each option's `name`
-	-- (`v.name = char .. ") " .. v.name`), so a shared option table -- e.g.
-	-- TalentDialog's USE_TYPES constant, reused for every rule -- accumulated
-	-- "a) a) a) ..." across opens (T-016). Copy the option, prefix the copy.
+	-- key-char prefix used to be written back into each option's `name`, so a
+	-- shared option table -- TalentDialog's USE_TYPES, reused for every rule --
+	-- accumulated "a) a) a) ..." across opens (T-016). Copy, then prefix the copy.
 	local list = {}
 	local chars = {}
 	for i, v in ipairs(self.optionlist) do

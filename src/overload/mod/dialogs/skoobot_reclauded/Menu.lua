@@ -23,12 +23,11 @@ local keys = dofile("/data-skoobot_reclauded/keys.lua")
 
 module(..., package.seeall, class.inherit(engine.ui.Dialog))
 
--- #54: what a player who has never read anything sees first. Under the
--- choices, one short paragraph says how to get the bot doing something and
--- what each key does, with every key looked up from the live binding (#57)
--- so a remap shows here too. It is a text zone, not list rows, so the
--- choices keep their letters and the keybind status rows (#50) stay where
--- the harness expects them.
+-- #54: what a player who has never read anything sees first. One short
+-- paragraph under the choices, with every key looked up from the live binding
+-- (#57) so a remap shows here too. A text zone, not list rows, so the choices
+-- keep their letters and the keybind status rows (#50) stay where the harness
+-- expects them.
 local function helpText()
 	local bot = skoobot_reclauded
 	local function k(virtual)
@@ -63,13 +62,9 @@ function _M:init()
 	-- #54: the help paragraph, wrapped to the list's width.
 	local help = Textzone.new{width=width, auto_height=true, text=helpText()}
 
-	-- T-014: bound the visible rows and scroll the rest, so a character with many
-	-- talents can still reach the first and last entries. The original gave the
-	-- list one row per entry with no scrollbar, so on a short screen (1366x768 was
-	-- the report) the ends fell off. Rows are sized to ~80%% of the screen height
-	-- less the help text, from a safe over-estimate of the row height, so the
-	-- dialog never exceeds the screen whatever the font; the full list stays
-	-- reachable by wheel and arrows.
+	-- T-014: bound the visible rows and scroll the rest. Rows are sized to ~80%%
+	-- of the screen height less the help text, from a safe over-estimate of the
+	-- row height, so the dialog never exceeds the screen whatever the font.
 	local maxRows = math.max(6, math.floor((game.h * 0.8 - help.h) / 25))
 	local list = List.new{width=width, nb_items=math.min(#self.list, maxRows),
 		scrollbar=#self.list > maxRows, list=self.list, fct=function(item) self:use(item) end}
@@ -112,11 +107,11 @@ local menuActions = {
 			dialoglist[#dialoglist + 1] = {name=v.label .. " - " .. v.stoptype, value=v.code}
 		end
 
-		-- #54: the three answers say what they do, in the order v1 had them,
-		-- and the second dialog names the condition by its label rather than
-		-- its code. The semantics are checkStop's (Player superload): WARN
-		-- stops once and is remembered until the condition clears, STOP stops
-		-- on every decision it holds for, IGNORE never stops.
+		-- #54: the three answers say what they do, in v1's order, and the second
+		-- dialog names the condition by its label rather than its code. The
+		-- semantics are checkStop's (Player superload): WARN stops once and is
+		-- remembered until the condition clears, STOP stops on every decision it
+		-- holds for, IGNORE never stops.
 		local d = PickOneDialog.new("Stop conditions: pick one to change", dialoglist,
 			function(code)
 				local cond = conditions.get(code)
@@ -147,11 +142,10 @@ function _M:use(item)
 	if menuActions[item.order] then menuActions[item.order]() end
 end
 
--- #50: the keybind status, recomputed on every open so a rebind made
--- mid-game shows at once. One line -- "Keybinds: OK", or how many
--- collisions -- then one line per collision naming the key and both
--- actions. Orange when there is something to look at, grey when not. The
--- check lives on the runtime table (hooks/load.lua).
+-- #50: the keybind status, recomputed on every open so a rebind made mid-game
+-- shows at once. One line -- "Keybinds: OK", or how many collisions -- then one
+-- line per collision naming the key and both actions; orange when there is
+-- something to look at. The check lives on the runtime table (hooks/load.lua).
 local OK_COLOUR        = {160, 160, 160}
 local COLLISION_COLOUR = {255, 153, 0}
 
@@ -168,16 +162,11 @@ local function keybindRows()
 end
 
 function _M:generateList()
-	-- #73: named by what they do. v1's wording was "Set Skill Usage" and
-	-- "Activate/Deactivate Bot Stop Conditions" -- the first is the talent
-	-- rules screen and the second is neither activating nor deactivating
-	-- anything, it is a WARN / STOP / IGNORE choice. A player migrating from
-	-- the original also sees two menus whose rows read alike (first-run.md
-	-- section 8); these do not.
-	--
-	-- #54 added the help paragraph under the rows rather than rename them,
-	-- because the names were asserted verbatim in another lane's scenario
-	-- that night. The scenarios move with the names here.
+	-- #73: named by what they do. v1's "Set Skill Usage" and
+	-- "Activate/Deactivate Bot Stop Conditions" named neither the talent rules
+	-- screen nor a WARN / STOP / IGNORE choice, and read alike to a player
+	-- migrating from the original (first-run.md section 8). Scenarios assert
+	-- these names verbatim, so they move with them.
 	local raw = {
 		{1,   name="Talent rules -- which talents the bot may use", order="skillconfig"},
 		{2,   name="Stop conditions -- when it hands back",         order="botstopconditions"},
@@ -191,10 +180,9 @@ function _M:generateList()
 	-- positions whatever the keybind state.
 	for _, row in ipairs(keybindRows()) do raw[#raw + 1] = row end
 
-	-- Build a fresh display list rather than prefixing `raw` in place. This
-	-- menu builds its own list each open so it never accumulated, but the same
-	-- non-mutating shape as the other two dialogs keeps one correct pattern
-	-- (see PickOneDialog, T-016).
+	-- Build a fresh display list rather than prefixing `raw` in place: the same
+	-- non-mutating shape as the other two dialogs, one correct pattern
+	-- (PickOneDialog, T-016).
 	local list = {}
 	local chars = {}
 	local choices = 0

@@ -9,24 +9,18 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- The dead end a brand new installation hits on its first toggle: a hostile
--- in view and no Combat talent configured. #71 made the message say which
--- case it is; this offers the way out instead of describing it. The
--- first-run audit measured the path from that message to a working bot at
--- six keypresses (docs/first-run.md section 3); the first button makes it
--- one.
+-- The dead end a brand new installation hits on its first toggle: a hostile in
+-- view and no Combat talent configured. #71 made the message say which case it
+-- is; this offers the way out instead of describing it. The first-run audit
+-- measured six keypresses from that message to a working bot
+-- (docs/first-run.md section 3); the first button makes it one.
 --
--- WHY IT IGNORES THE STOP_POPUP SETTING, which is off by default. That
--- setting answers "do you want a dialog every time the bot stops" -- a
--- preference about noise during play. This is not that: it is the moment a
--- fresh installation cannot start at all, on a run where the player has
--- almost certainly never seen the setting. A popup nobody can reach on the
--- one occasion it would help is not a popup.
---
--- The price is one dialog that ignores a preference, and it is paid for
--- twice over on this dialog itself: "Not now" silences it for the session,
--- "Don't ask again" silences it for this character for good. Both are
--- one keypress, and neither sends the player anywhere to find a setting.
+-- It IGNORES the STOP_POPUP setting, deliberately. That setting answers "do
+-- you want a dialog every time the bot stops" -- noise during play. This is
+-- the moment a fresh installation cannot start at all, on a run where the
+-- player has almost certainly never seen the setting. The price is paid on
+-- this dialog itself: "Not now" silences it for the session, "Don't ask again"
+-- for this character for good, each one keypress.
 
 require "engine.class"
 require "engine.ui.Dialog"

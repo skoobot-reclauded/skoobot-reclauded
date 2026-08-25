@@ -9,18 +9,16 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- #58. Shown for a STOPPED notice only, and only while the STOP_POPUP setting
--- is on -- off by default, because the owner does not like dialogs and the
--- log line plus the big-news banner carry the stop on their own. The checkbox
--- turns the popup off from here, so nobody has to go looking for the option
--- to be rid of it; the option stays in the SkooBot: Reclauded tab so it can
--- be turned on again, the way the game's own quest popup is toggled
--- (tome.quest_popup).
+-- #58. Shown for a STOPPED notice only, and only while STOP_POPUP is on -- off
+-- by default, because the log line and the big-news banner carry the stop on
+-- their own. The checkbox turns it off from here, so nobody has to go looking
+-- for the option; the option stays in the tab so it can be turned back on, the
+-- way the game's own quest popup is (tome.quest_popup).
 --
--- Dialog:simplePopup (engine/ui/Dialog.lua:110) has no checkbox slot, hence
--- a small dialog of its own with the same layout plus a Checkbox between the
--- text and the button. Keyboard: Enter closes (the button has focus), Escape
--- closes, Tab reaches the checkbox and Space ticks it.
+-- Dialog:simplePopup (engine/ui/Dialog.lua:110) has no checkbox slot, hence a
+-- small dialog of its own with the same layout plus a Checkbox between the
+-- text and the button. Enter closes (the button has focus), Escape closes, Tab
+-- reaches the checkbox and Space ticks it.
 
 require "engine.class"
 require "engine.ui.Dialog"

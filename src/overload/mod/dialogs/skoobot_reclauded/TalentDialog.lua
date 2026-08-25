@@ -12,60 +12,38 @@
 -- ---------------------------------------------------------------------------
 --
 -- REBUILT for #56 on the skeleton of the game's own Use Talents screen
--- (mod/dialogs/UseTalents.lua, Nicolas Casalini, GPL-3.0): a sectioned list
--- on the left, the selected talent's description on the right. The four
--- bucket sections hold the rules in priority order; the Available section
--- below them lists everything the character can use, items included, with
--- an "In" column naming the sections each one is already in. A talent may
--- be in several sections -- a healing infusion as both Damage Prevention and
--- Recovery, as v1 allowed -- once per section. Every edit is a move or an
--- add: by mouse drag, by keyboard, or through the action menu. A drag from
--- Available adds; a drag from a section moves. The list logic is
--- data/rules.lua, reached through skoobot_reclauded.rules; this file only
--- draws the rules and turns input into calls on them.
---
--- v1's version was a flat list with an integer priority per rule, filled
--- through three chained dialogs. Its latent bugs went with it: the unstable
--- priority sort, the Priority column sort throwing on the "add" row, and the
--- trailing `1` meant as GetQuantity's min that landed on registerDialog
--- (T-001). #48 and #49 were about dialogs that no longer exist.
+-- (mod/dialogs/UseTalents.lua, Nicolas Casalini, GPL-3.0): a sectioned list on
+-- the left, the selected talent's description on the right. The four bucket
+-- sections hold the rules in priority order; the Available section below them
+-- lists everything the character can use -- items, and the three built-in flee
+-- actions taken generically from data/rules.lua's ACTIONS so a fourth needs
+-- nothing here (#59, #69) -- with an "In" column naming the sections each is
+-- already in. A rule may be in several sections, once per section. Every edit
+-- is a move or an add: a drag from Available adds, a drag from a section
+-- moves. The list logic is data/rules.lua, reached through
+-- skoobot_reclauded.rules; this file only draws the rules and turns input into
+-- calls on them.
 --
 -- Keys: Enter or a row's letter opens the action menu; 1-4 add (from
--- Available) or move (from a section) the selected talent to that section;
--- 0, Delete or Backspace remove it from its section, or from every section
--- when pressed on an Available row; Shift+Up and Shift+Down reorder it;
--- Space toggles "hold while impaired" on a Combat row (#15). Ctrl+Up/Down
--- belong to the list widget itself, which sees every key before this dialog
--- does (engine/ui/Dialog.lua keyEvent). Letters are all taken by the rows
--- (a-z, A-Z), which is why the hold key is Space rather than a letter.
+-- Available) or move (from a section) the selected rule to that section; 0,
+-- Delete or Backspace remove it from its section, or from every section on an
+-- Available row; Shift+Up and Shift+Down reorder it; Space toggles "hold while
+-- impaired" on a Combat row (#15). Hold is Space rather than a letter because
+-- the rows take a-z and A-Z, and Ctrl+Up/Down belong to the list widget, which
+-- sees every key before this dialog does (engine/ui/Dialog.lua keyEvent).
 --
--- BUILT-IN ACTIONS (#59, #69). Available also lists the three flee rows --
--- "Flee but keep sight", "Flee from the nearest hostile", "Flee from the
--- strongest hostile" -- from data/rules.lua's ACTIONS, taken generically, so
--- a fourth needs nothing here. They place like a talent, into Combat only
--- (rules.allowed typing), any of them may be placed, and their description
--- is the module's fixed prose.
+-- A placement is its own table (rules.place copies on an add), so `hold`
+-- belongs to the Combat placement alone and an add into another section does
+-- not carry it.
 --
--- HOLD WHILE IMPAIRED (#15). A Combat row carries a per-placement flag,
--- `hold = true`, shown in the Kind column and described in the pane; the bot
--- skips a held entry while the character is stunned, dazed, confused or
--- frozen. Toggled with Space or from the row's action menu. A placement is
--- its own table (rules.place copies on an add), so the flag belongs to the
--- Combat placement alone; an add into another section clears it there.
---
--- SUGGESTED LOADOUTS (#18). The first row of the list, "Suggest a loadout",
--- carries the count of talents the bot could place that are in no section,
--- and activating it (Enter or a click) swaps the list for a PROPOSAL built by
--- data/loadout.lua from the game's own talent metadata: the four sections
--- with the suggested rows in priority order and the reason for each, then
--- the talents it would not place and why, then the mutually exclusive
--- sustain groups it leaves to the player. Nothing is written while the
--- proposal is shown. Enter on any row offers Merge (the default: add what is
--- new, keep every row placed by hand), Replace (clear everything first --
--- confirmed when the current list is not empty) or Cancel; Escape cancels.
--- Rows the suggestion writes carry `suggested = true`; any hand edit to such
--- a row here clears the mark, so a later Merge never moves a row the player
--- touched.
+-- SUGGESTED LOADOUTS (#18). The first row swaps the list for a PROPOSAL built
+-- by data/loadout.lua: the four sections with the suggested rows and the
+-- reason for each, then what it would not place and why, then the mutually
+-- exclusive sustain groups it leaves to the player. Nothing is written while
+-- the proposal is shown; Enter offers Merge (add what is new, keep every hand
+-- row), Replace (confirmed when the list is not empty) or Cancel. Rows the
+-- suggestion writes carry `suggested = true`, and any hand edit here clears
+-- the mark, so a later Merge never moves a row the player touched.
 
 require "engine.class"
 local Dialog = require "engine.ui.Dialog"
@@ -103,10 +81,8 @@ local TUTORIAL = table.concat({
 		"is written until you choose Merge or Replace.",
 }, "\n") .. "\n"
 
--- #85: the right-hand guide while a proposal is shown. The rules tutorial
--- is about editing and says nothing about a preview, so it was the wrong
--- half of the screen to leave standing there -- and it is the one place
--- with room to explain what the marks mean.
+-- #85: the right-hand guide while a proposal is shown -- the one place with
+-- room to explain what the marks mean. The rules tutorial is about editing.
 local PROPOSAL_GUIDE = table.concat({
 	"#GOLD#PREVIEW -- nothing has been written yet.#WHITE#",
 	"These are the rules the bot would use, read from the game's own talent data. Selecting a " ..
@@ -147,10 +123,9 @@ function _M:init(actor)
 
 	local vsep = Separator.new{dir="horizontal", size=self.ih - 10}
 	local halfwidth = math.floor((self.iw - vsep.w) / 2)
-	-- #85: the guide swaps between the editing tutorial and the proposal
-	-- guide. Its height is frozen at whichever is taller BEFORE the layout is
-	-- built, so swapping cannot reflow the description pane under it --
-	-- auto_height would otherwise resize the panel on every switch.
+	-- #85: the guide swaps between the editing tutorial and the proposal guide.
+	-- Its height is frozen at whichever is taller BEFORE the layout is built, or
+	-- auto_height reflows the description pane under it on every switch.
 	self.c_tut = Textzone.new{width=halfwidth, height=1, auto_height=true, no_color_bleed=true, text=TUTORIAL}
 	local tutH = self.c_tut.h
 	self.c_tut.text = PROPOSAL_GUIDE
@@ -391,28 +366,17 @@ function _M:proposalRow(e, placed, rules)
 		desc = desc .. "\n\nAlready in a section you filled: Merge leaves it where it is; Replace moves it here."
 	end
 
-	-- #85 items 1 and 2. Three states a player has to be able to tell apart
-	-- at a glance, because they are three different answers to "what will
-	-- Merge do with this row":
+	-- #85 items 1 and 2. EVERY row carries a mark, because three states are
+	-- three different answers to "what will Merge do with this row", and an
+	-- unmarked row cannot be told from one nothing has noticed:
 	--
-	--   NEW       -- would be added. What the suggestion is actually for,
-	--                and previously indistinguishable from a row that is
-	--                already in a section.
-	--   declined  -- said no to before, on this character. SHOWN, not
-	--                hidden: hiding it leaves no way to change one's mind
-	--                and quietly drops a talent off a screen whose job is
-	--                to say what the bot would do.
+	--   NEW       -- would be added. What the suggestion is for.
+	--   declined  -- said no to before, on this character. SHOWN, not hidden:
+	--                hiding it leaves no way to change one's mind.
 	--   placed    -- already somewhere the player put it; Merge leaves it.
-	-- EVERY row carries a mark, and that is the point (owner, 2026-08-24):
-	-- "the recommendation screen makes it kinda look like they're all new
-	-- ... I think there should always be a parenthetical". An unmarked row
-	-- is ambiguous -- the reader cannot tell "already yours" from "not
-	-- computed yet" -- and a screen with no marks at all reads as a screen
-	-- that has not noticed anything.
 	--
 	-- `inS` is keyed by SECTION NAME, so #inS is always 0; `next()` is the
-	-- emptiness test. `e.section` is nil for the Not-placed group, the
-	-- talents the suggestion leaves out.
+	-- emptiness test. `e.section` is nil for the Not-placed group.
 	local state
 	if e.declined then state = "declined"
 	elseif next(inS) ~= nil then state = "existing"
@@ -441,10 +405,9 @@ function _M:proposalRow(e, placed, rules)
 
 	return {
 		char="", cname=plain, kind=kind, used=used, inSections=inS,
-		-- :toTString(), which this row never did while the rules view (line
-		-- ~250) always has. A talent's name carries colour codes, so without
-		-- it every proposal row printed "#GOLD#..." at the player -- since
-		-- #18, and the (new) and (declined) marks only made it obvious.
+		-- :toTString(), which this row never did while the rules view always has.
+		-- A talent's name carries colour codes, so without it every proposal row
+		-- printed "#GOLD#..." at the player.
 		name=((e.priority and (tostring(e.priority) .. "  ") or "") .. tostring(info.name) ..
 			(#marks > 0 and (" (" .. table.concat(marks, ", ") .. ")") or "") .. suffix):toTString(),
 		-- The decline key: rules.key for every shape, so an action row can
@@ -486,11 +449,10 @@ end
 
 --- #85: one row for a rule the proposal would TAKE AWAY.
 ---
---- Merge prunes the rows this addon wrote before (suggested = true) that
---- the suggestion no longer makes, and keeps every row the player placed by
---- hand. Nothing on the screen said so, so a suggestion that quietly
---- dropped a talent looked exactly like one that changed nothing -- the
---- owner only caught it by comparing the two lists themselves.
+--- Merge prunes the rows this addon wrote before (suggested = true) that the
+--- suggestion no longer makes, and keeps every row the player placed by hand.
+--- Without this row a suggestion that quietly dropped a talent looked exactly
+--- like one that changed nothing.
 function _M:removalRow(entry, section, rules)
 	local info = self.R.describe(self.actor, entry)
 	local plain = (tostring(info.name):gsub("#[^#]*#", ""))
@@ -514,11 +476,11 @@ function _M:generateProposalList()
 	local tree, chars = {}, {}
 
 	-- Talents the player has placed by hand anywhere: Merge leaves those alone.
-	-- #98: keyed with rm.key, not e.tid. A proposal can carry an ACTION row
-	-- now, which has no tid, and `proposed[e.tid] = true` is a write with a
-	-- nil key -- which is not nil-safe like a read, and threw
-	-- "table index is nil" out of generateList, leaving the screen half
-	-- rebuilt. rm.key answers for every entry shape there is.
+	-- #98: keyed with rm.key, not e.tid. A proposal can carry an ACTION row,
+	-- which has no tid, and `proposed[e.tid] = true` is a write with a nil key --
+	-- not nil-safe like a read -- which threw "table index is nil" out of
+	-- generateList and left the screen half rebuilt. rm.key answers for every
+	-- entry shape there is.
 	local hand = {}
 	for _, s in ipairs(rm.SECTIONS) do
 		for _, e in ipairs(rules[s]) do
@@ -527,12 +489,10 @@ function _M:generateProposalList()
 		end
 	end
 
-	-- #85 item 3: say it is a preview at the top, in the apply row, and
-	-- nowhere else is needed -- these two are what a player looks at.
-	-- Short on purpose. This column is half of half the dialog, and the long
-	-- version was clipped to "PREVIEW -- nothing is written yet. App" at
-	-- 1440p and worse below it -- a warning nobody could read. The preview
-	-- state is said in the guide panel, which has the room for it.
+	-- #85 item 3: say it is a preview at the top and in the apply row. Short on
+	-- purpose -- this column is half of half the dialog, and the long version
+	-- clipped to "PREVIEW -- nothing is written yet. App" at 1440p and worse
+	-- below it. The guide panel has the room to say it properly.
 	tree[#tree + 1] = actionRow("apply", "Apply or cancel...  (Enter)", PROPOSAL_INTRO)
 
 	for i, section in ipairs(rm.SECTIONS) do
@@ -918,10 +878,9 @@ function _M:use(item, button)
 	end
 	if self.proposal then
 		self:selectItem(item)
-		-- #85: the apply row is the one that commits; a talent row is a
-		-- thing to argue with. Clicking one declines it, and clicking it
-		-- again takes that back -- which is what "click to darken" has to
-		-- mean if it is to be safe to try.
+		-- #85: the apply row is the one that commits; a talent row is a thing to
+		-- argue with. Clicking one declines it and clicking again takes that back,
+		-- which is what "click to darken" has to mean if it is safe to try.
 		if item.action == "apply" then return self:applyMenu() end
 		if item.ptid then return self:toggleDeclined(item.ptid) end
 		return

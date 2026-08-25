@@ -21,23 +21,23 @@
 --
 -- SkooBot: Reclauded -- key bindings. Adapted from SkooBot 0.0.12's
 -- overload/data/keybinds/toggle-skoobot.lua (SkoobyDoo, 2018-2020), which
--- adapted ToME's own keybind definitions; Casalini's header above is kept
--- for that reason.
+-- adapted ToME's own keybind definitions; Casalini's header above is kept for
+-- that reason.
 --
 -- Deliberately NOT the original's keys (Alt+F1, Shift+F1, Alt+F2, Alt+F3,
--- Shift+F2). The original SkooBot is still published and still installed by
--- real people, and two addons answering the same key would be a genuine way
--- for this project to interfere with the one it promises not to touch. ToME
--- itself owns bare F1-F8 and Ctrl+F1-F8 (party switching and orders), and
--- Alt+F4 closes the window on Windows; Shift+F3..F7 belong to nobody (checked
--- against every keybind file in the 1.7.6 engine and module). Anyone who
--- wants the old keys can set them in Game Options -> Keybindings.
+-- Shift+F2): the original SkooBot is still published and still installed by
+-- real people, and two addons answering one key would be a genuine way for
+-- this project to interfere with the one it promises not to touch. ToME itself
+-- owns bare F1-F8 and Ctrl+F1-F8, Alt+F4 closes the window on Windows, and
+-- Shift+F3..F7 belong to nobody -- checked against every keybind file in the
+-- 1.7.6 engine and module. Anyone who wants the old keys can set them under
+-- Game Options -> Keybindings.
 --
--- "Belong to nobody" is true of the base game on the day this was written
--- and of nothing else: another addon can define any of these keys, and the
--- player can remap onto them. hooks/load.lua checks all five against what
--- the engine actually has bound, at ToME:runDone and on every menu open,
--- and says so when they collide -- advisory only; it never rebinds (#50).
+-- "Belong to nobody" is true of the base game on the day this was written and
+-- of nothing else: another addon can define any of these, and the player can
+-- remap onto them. hooks/load.lua checks all five against what the engine
+-- actually has bound, at ToME:runDone and on every menu open, and says so when
+-- they collide -- advisory only; it never rebinds (#50).
 
 defineAction{
 	default = { "sym:_F3:false:true:false:false" },   -- Shift+F3

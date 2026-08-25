@@ -9,31 +9,27 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- Owner's decision, 2026-08-24: one dialog of the addon's own, reached from
--- the menu, with the game's Options tab reduced to a pointer at it. The tab
--- could hold the numbers, but it cannot express the thing this screen is
--- actually about -- that a threshold belongs to THIS CHARACTER and a
--- preference belongs to the player -- and a configuration split over three
--- places was the complaint that opened #95.
+-- One dialog of the addon's own, reached from the menu, with the game's
+-- Options tab reduced to a pointer at it (#95). The tab could hold the
+-- numbers; it cannot express what this screen is about -- that a threshold
+-- belongs to THIS CHARACTER and a preference to the player.
 --
--- Two kinds of row, and the difference is stated on every one of them:
+-- Two kinds of row, and the difference is stated on every one:
 --
---   * a SAFETY THRESHOLD is the character's. A level 3 Alchemist and a
---     level 30 Bulwark do not want the same answer to "how dangerous is
---     this". Editing one writes it on the character, where the engine saves
---     it. Until it is edited the character simply uses the default, which is
---     what every existing save does and why none of this needs migrating.
---   * a PREFERENCE -- the delay, the popup, the log level -- is the
---     player's, has one value, and is written to the settings files.
+--   * a SAFETY THRESHOLD is the character's, and editing one writes it on the
+--     character where the engine saves it. Until then the character uses the
+--     default, which is what every existing save does and why none of this
+--     needs migrating.
+--   * a PREFERENCE -- the delay, the popup, the log level -- is the player's,
+--     has one value, and is written to the settings files.
 --
--- And the action the owner asked for by name: "save as default for future
--- characters", which copies this character's thresholds onto the account, so
--- the global settings can be configured FROM a character just tuned rather
--- than in the abstract.
+-- "Save as default for future characters" copies this character's thresholds
+-- onto the account, so the globals can be set FROM a character just tuned
+-- rather than in the abstract.
 --
 -- data/cfg.lua owns which is which, the titles, the descriptions, the ranges
--- and the control kinds; this file draws them. Adding a thirteenth option
--- means adding it there and nowhere else.
+-- and the control kinds; this file draws them. A thirteenth option is added
+-- there and nowhere else.
 
 require "engine.class"
 require "engine.ui.Dialog"
@@ -46,15 +42,14 @@ local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 
 module(..., package.seeall, class.inherit(engine.ui.Dialog))
 
--- #46: the log level by name. The number is what is stored; the name is
--- what a player reads, and data/log.lua owns the mapping -- `module.name(n)`,
--- which is what the options tab called before #95 moved this here.
+-- #46: the log level by name. The number is what is stored, the name is what a
+-- player reads, and data/log.lua owns the mapping (`module.name(n)`).
 --
 -- The literal table is a fallback for a runtime table that has not finished
--- loading, and it cost a scenario failure to get right: it first said 1 was
+-- loading, and it cost a scenario failure to get right: it first called 1
 -- "warn", which is data/log.lua's 2, so the row label and the stored number
--- disagreed and stepping through the levels skipped one. Names in one place
--- or they drift; this copy exists only so a missing module cannot error.
+-- disagreed and stepping through the levels skipped one. This copy exists only
+-- so a missing module cannot error.
 local LOG_LEVELS = { [0] = "off", [1] = "error", [2] = "warn", [3] = "info", [4] = "debug", [5] = "trace" }
 local LOG_MAX = 5
 local function logName(n)
@@ -136,11 +131,10 @@ function _M:init()
 
     -- The description of whatever is selected, under the list.
     --
-    -- TextzoneList, not Textzone: it is the widget with switchItem, which is
-    -- how ToME's own Birther swaps a description as the selection moves, and
-    -- it takes a scrollbar. The scrollbar is not decoration -- a Textzone
-    -- without one CLIPS silently (#54), and Maximum Enemy Power's
-    -- description is the longest thing this addon shows anywhere.
+    -- TextzoneList, not Textzone: it is the widget with switchItem, the way
+    -- ToME's own Birther swaps a description as the selection moves, and it
+    -- takes a scrollbar. The scrollbar is not decoration -- a Textzone without
+    -- one CLIPS silently (#54).
     self.c_desc = TextzoneList.new{width=width, height=math.max(90, math.floor(game.h * 0.20)),
         scrollbar=true, no_color_bleed=true}
 
