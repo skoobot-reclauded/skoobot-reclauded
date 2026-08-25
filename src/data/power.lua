@@ -18,11 +18,19 @@
 --
 -- PURE function of the actor it is given: no globals, and no ToME API beyond
 -- the methods it calls on the actor. That is what lets spec/power_spec.lua
--- check the formulas against the original with no running game; keep it that
--- way when T-020 changes them.
+-- check the formulas with no running game; keep it that way when #100 changes
+-- them.
 --
--- The formulas are the original's, unchanged, including two oddities kept on
--- purpose so the numbers still match. Both belong to T-020, not to the port:
+-- The formulas are the original's apart from the offence terms, which #115
+-- corrected: v1's arithmetic left all three pinned near 1.0, so a power level
+-- was life, defence, stats and weapon damage with offence absent. That change
+-- raised every power level by roughly five times and the four MAX_* defaults
+-- did NOT move with it (maintainer's ruling, 2026-08-24) -- they are v1's
+-- numbers against a formula that now has offence in it, and #101 is where
+-- measured ones come from.
+--
+-- Two of the original's oddities are kept on purpose so the rest still
+-- matches. Both belong to #100, not to the port:
 --
 -- * global_speed is a parameter because the original read
 --   game.player.global_speed for EVERY actor scored, enemies included.
@@ -57,8 +65,34 @@ local function recSum(list)
 end
 M.sum = recSum
 
+--- A school's crit chance as a FRACTION. ToME keeps these as percentages and
+--- ADDS combat_generic_crit to the school's own (Combat.lua:1454, :1888,
+--- :1901); v1 wrote `generic or school`, and 0 is truthy in Lua, so any actor
+--- carrying the field at all scored a crit chance of exactly zero. `base` is
+--- v1's stand-in for ToME's own base terms (cunning, luck, the weapon), kept
+--- as it was -- reproducing those is #100, not this. See #115.
+local function critFraction(school, generic, base)
+    return ((tonumber(school) or 0) + (tonumber(generic) or 0) + base) / 100
+end
+
+--- Expected damage per hit, allowing for crits, times speed.
+---
+--- v1 wrote `power * (critChance/100 * critMult)`, which is wrong twice: the
+--- caller had already turned the percentage into a fraction, so the crit term
+--- was 100x too small, and multiplying BY the crit term rather than weighting
+--- with it made a character with no crit worth no damage at all. Both together
+--- pinned all three offence scores at ~1.0, so offence was absent from a power
+--- level: on the spec's own fixture, multiplying mind power by ten moved the
+--- total 4.6%. See #115.
+---
+--- critBonus is combat_critical_power, an additive percentage on ToME's base
+--- 150% multiplier, so critBonus/100 + 1.5 IS the multiplier -- v1 had that
+--- part right. The `+ 1` floor and the speed factor are v1's and stay.
 local function offensePowerLevel(power, critChance, critBonus, speed)
-    return (power * (critChance / 100 * ((critBonus / 100 or 0) + 1.5)) + 1) * speed or 1
+    local mult = (tonumber(critBonus) or 0) / 100 + 1.5
+    local c = tonumber(critChance) or 0
+    if c < 0 then c = 0 elseif c > 1 then c = 1 end
+    return ((tonumber(power) or 0) * (1 + c * (mult - 1)) + 1) * (tonumber(speed) or 1)
 end
 
 local function weaponPowerLevels(actor)
@@ -95,13 +129,13 @@ function M.scores(actor, global_speed)
     local scores = {}
     scores.survivalScore = actor.life / 10 * actor.life / actor.max_life
     scores.physScore = offensePowerLevel(actor.combat_dam,
-        actor.combat_generic_crit or actor.combat_physcrit and (actor.combat_physcrit + 9) / 100,
+        critFraction(actor.combat_physcrit, actor.combat_generic_crit, 9),
         actor.combat_critical_power or 0, actor.combat_physspeed * global_speed)
     scores.spellScore = offensePowerLevel(actor.combat_spellpower,
-        actor.combat_generic_crit or actor.combat_spellcrit and (actor.combat_spellcrit + 4) / 100,
+        critFraction(actor.combat_spellcrit, actor.combat_generic_crit, 4),
         actor.combat_critical_power or 0, actor.combat_spellspeed * global_speed)
     scores.mindScore = offensePowerLevel(actor.combat_mindpower,
-        actor.combat_generic_crit or actor.combat_mindcrit and (actor.combat_mindcrit + 4) / 100,
+        critFraction(actor.combat_mindcrit, actor.combat_generic_crit, 4),
         actor.combat_critical_power or 0, actor.combat_mindspeed * global_speed)
     scores.defenseScore = actor.combat_def / 2 + actor.combat_armor
     scores.statScore = reduce(actor.inc_stats, function(a, b) return a + b end)

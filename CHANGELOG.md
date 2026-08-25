@@ -250,6 +250,15 @@ SkooBot, and no number is ever shared between the two projects.
 
 Defects inherited from 0.0.12, all reported by its users:
 
+- **Power levels now count what a creature can do to you, not just what it can survive.** The
+  crit arithmetic inherited from 0.0.12 was wrong twice over, which left damage, spellpower and
+  mindpower contributing almost nothing: a power level was effectively life, defence, stats and
+  weapon damage. So a caster read as weak however hard it hit, and an ordinary melee enemy read
+  as dangerous. **Power levels are now several times larger**, and the five limits on the
+  options tab have deliberately not moved with them — they are still 0.0.12's numbers, and are
+  known to be uncalibrated against the corrected figures. If the bot now stops more or less
+  than you would like, tune *Maximum Enemy Power*, *Maximum Enemy Power Above Yours* and
+  *Maximum Combined Enemy Power* to taste; measured defaults are coming (#115).
 - Beginning a rest no longer crashes the game. If something interrupts the rest in the instant
   it starts — a damage-over-time ticking, a debuff landing — the game's own rest code tripped
   over itself and threw *attempt to index field 'resting'*. 0.0.12 began a rest exactly the

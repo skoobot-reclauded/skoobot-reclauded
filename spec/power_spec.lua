@@ -1,18 +1,25 @@
 -- luacheck: std luajit+busted
 
 -- data/power.lua is the original SkooBot's threat heuristic, ported as a
--- pure module. These tests pin the port to the original's NUMBERS, worked
--- by hand from SkooBot 0.0.12's superload/mod/class/Actor.lua, so that a
--- later change to the formula (T-020) is a deliberate change to a test and
--- not an accident of porting.
+-- pure module. These tests pin the port to worked-by-hand NUMBERS so that a
+-- change to the formula is a deliberate change to a test and not an accident.
 --
--- Two of the original's oddities are part of what is pinned, on purpose:
---   * the crit chance is divided by 100 twice (once by the caller, once in
---     offensePowerLevel), so it contributes far less than it reads as;
---   * `melee` is always computed, even when `ranged` is present, because
---     `not ranged and ... or combatDamage()` falls through to the `or`.
--- Fixing either is T-020's decision, with the tooltip and the stop
--- thresholds re-tuned to match.
+-- THE OFFENCE NUMBERS ARE NO LONGER v1's, and that was the point of #115.
+-- v1's crit arithmetic was wrong twice over -- the caller had already turned
+-- the percentage into a fraction and offensePowerLevel divided by 100 again,
+-- and it multiplied BY the crit term instead of weighting with it -- which
+-- pinned physScore, spellScore and mindScore at ~1.0 whatever the actor's
+-- power stats. A power level was life, defence, stats and weapon damage.
+-- v1 also wrote `combat_generic_crit or <school>`, and 0 is truthy in Lua, so
+-- an actor carrying that field scored no crit at all.
+--
+-- The fixture's level went 32.46 -> 185 as a result. The four MAX_* defaults
+-- did NOT move with it (maintainer, 2026-08-24: ship as-is), so they are v1's
+-- numbers against a corrected formula until #101 measures new ones.
+--
+-- One of the original's oddities is still pinned on purpose: `melee` is always
+-- computed, even when `ranged` is present, because `not ranged and ... or
+-- combatDamage()` falls through to the `or`. Fixing that is #100's call.
 
 local manifest = require "spec.support.manifest"
 
@@ -65,17 +72,17 @@ describe("data/power.lua", function()
       assert.is_near(5, s.survivalScore, 1e-9)              -- 100/10 * 100/200
     end)
 
-    it("phys = (dam * (crit/100 * (critpower/100 + 1.5)) + 1) * speed, crit already /100 once", function()
-      -- crit chance (11+9)/100 = 0.2, then /100 again = 0.002; 0.002 * 2.0 = 0.004
-      assert.is_near(1.08, s.physScore, 1e-9)               -- (20 * 0.004 + 1) * 1
+    it("phys = (dam * (1 + crit * (critmult - 1)) + 1) * speed", function()
+      -- crit (11+9)/100 = 0.20; critmult 50/100 + 1.5 = 2.0; 20 * (1 + 0.20) = 24
+      assert.is_near(25, s.physScore, 1e-9)                 -- (24 + 1) * 1
     end)
 
     it("spell uses a +4 crit offset", function()
-      assert.is_near(1.06, s.spellScore, 1e-9)              -- (30 * 0.002 + 1) * 1
+      assert.is_near(34, s.spellScore, 1e-9)                -- crit (6+4)/100 = 0.10; (30 * 1.10 + 1) * 1
     end)
 
     it("mind is scaled by mind speed", function()
-      assert.is_near(2.32, s.mindScore, 1e-9)               -- (40 * 0.004 + 1) * 2
+      assert.is_near(98, s.mindScore, 1e-9)                 -- crit 0.20; (40 * 1.20 + 1) * 2
     end)
 
     it("defense = def/2 + armor", function()
@@ -93,21 +100,42 @@ describe("data/power.lua", function()
   end)
 
   it("level is the recursive sum of every score", function()
-    assert.is_near(32.46, power.level(fakeActor(), 1), 1e-9)   -- 5 + 1.08 + 1.06 + 2.32 + 10 + 6 + 7
+    assert.is_near(185, power.level(fakeActor(), 1), 1e-9)     -- 5 + 25 + 34 + 98 + 10 + 6 + 7
   end)
 
   it("takes the speed multiplier from the caller, not from the actor", function()
     local fast = power.scores(fakeActor(), 2)
-    assert.is_near(2.16, fast.physScore, 1e-9)
-    assert.is_near(2.12, fast.spellScore, 1e-9)
-    assert.is_near(4.64, fast.mindScore, 1e-9)
+    assert.is_near(50, fast.physScore, 1e-9)               -- (24 + 1) * 2
+    assert.is_near(68, fast.spellScore, 1e-9)              -- (33 + 1) * 2
+    assert.is_near(196, fast.mindScore, 1e-9)              -- (48 + 1) * 2 * 2
     assert.is_near(5, fast.survivalScore, 1e-9)            -- unaffected
   end)
 
-  it("a generic crit chance replaces the per-school one", function()
-    local s = power.scores(fakeActor({ combat_generic_crit = 0.5 }), 1)
-    -- 0.5 / 100 = 0.005; 0.005 * 2.0 = 0.01; 20 * 0.01 + 1 = 1.2
-    assert.is_near(1.2, s.physScore, 1e-9)
+  -- #115: ADDS to the per-school chance, as ToME does (Combat.lua:1454), where
+  -- v1 wrote `generic or school` and 0 is truthy in Lua -- so an actor carrying
+  -- the field at all scored a crit chance of exactly zero.
+  it("a generic crit chance adds to the per-school one", function()
+    local s = power.scores(fakeActor({ combat_generic_crit = 10 }), 1)
+    -- crit (11 + 10 + 9)/100 = 0.30; 20 * (1 + 0.30) = 26
+    assert.is_near(27, s.physScore, 1e-9)
+  end)
+
+  it("a generic crit of zero does not wipe the per-school one", function()
+    local s = power.scores(fakeActor({ combat_generic_crit = 0 }), 1)
+    assert.is_near(25, s.physScore, 1e-9)                  -- unchanged from the fixture
+  end)
+
+  -- The whole point of #115: offence must move the figure. On v1's arithmetic
+  -- these two differed by 4.6%.
+  it("offence responds to the actor's power stats", function()
+    local base = power.level(fakeActor(), 1)
+    local hard = power.level(fakeActor({ combat_mindpower = 400 }), 1)
+    assert.is_true(hard > base * 3)
+  end)
+
+  it("a character with no crit at all is still worth its damage", function()
+    local s = power.scores(fakeActor({ combat_physcrit = -9, combat_critical_power = 0 }), 1)
+    assert.is_near(21, s.physScore, 1e-9)                  -- crit 0; (20 * 1 + 1) * 1
   end)
 
   it("scores a ranged weapon from its ammo, and still computes melee", function()
@@ -184,7 +212,7 @@ describe("data/power.lua", function()
     end)
 
     it("does not change scores or level", function()
-      assert.is_near(32.46, power.level(fakeActor({ rank = 4 }), 1), 1e-9)
+      assert.is_near(185, power.level(fakeActor({ rank = 4 }), 1), 1e-9)
     end)
   end)
 end)
