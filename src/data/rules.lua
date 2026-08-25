@@ -10,11 +10,10 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- A PURE MODULE (#56): no globals, no ToME API. Every function takes the
--- rules table -- the saved `player.skoobot_reclauded.autotalents` -- and
--- plain values, so spec/rules_spec.lua can test it without a running game.
--- Anything that needs the actor (is this talent sustained? which item does
--- this name resolve to?) is passed in as a value or a function.
+-- A PURE MODULE (#56): no globals, no ToME API. Every function takes the rules
+-- table -- the saved `player.skoobot_reclauded.autotalents` -- and plain
+-- values, so spec/rules_spec.lua can test it without a running game. Anything
+-- that needs the actor arrives as a value or a function.
 --
 -- Shape:
 --
@@ -22,20 +21,18 @@
 --     Recovery = { ... },      Sustain = { ... } }
 --
 -- An entry is {tid = "T_..."} for a talent, {object = "<item name>"} for an
--- activatable item -- items are keyed by name, the way ToME's own inventory
--- hotkeys are, because their talent id is a rotating slot (#55) -- or
--- {action = "flee", from = "nearest" | "strongest", keep_los = true?} for a
--- built-in action (#59, #69): a move the bot itself knows, placed in the
--- rotation like a talent, with `from` as its one parameter and `keep_los`
--- as a variant of the step. The kind is discriminated by which field
--- is set, so a later built-in action needs no migration either. Order within
--- a section IS priority: the first entry is tried first. A rule appears at
--- most once in a section, but may be in several sections -- a healing
--- infusion as both Damage Prevention and Recovery, as v1 allowed (owner test
--- of #56). Each placement is its own table -- place() copies on an add --
--- so extra fields on an entry stay with that placement: the per-rule flag
--- `hold = true` (#15, "hold while impaired") is such a field, needed no
--- migration, and means something only in Combat.
+-- activatable item -- keyed by NAME, the way ToME's own inventory hotkeys are,
+-- because the talent id is a rotating slot (#55) -- or {action = "flee",
+-- from = "nearest" | "strongest", keep_los = true?} for a built-in action
+-- (#59, #69). The kind is discriminated by which field is set, so a later
+-- built-in action needs no migration either.
+--
+-- Order within a section IS priority: the first entry is tried first. A rule
+-- appears at most once in a section, but may be in several -- a healing
+-- infusion as both Damage Prevention and Recovery, as v1 allowed. Each
+-- placement is its own table, since place() copies on an add, so extra fields
+-- stay with that placement: `hold = true` (#15, "hold while impaired") is such
+-- a field and means something only in Combat.
 --
 -- v1, and the port until #56, saved a flat list of {tid=, usetype=, priority=}
 -- in the same field. normalize() migrates that in place, once.
@@ -225,15 +222,13 @@ end
 --- Bring a saved table to the current shape, IN PLACE, so that anything
 --- already holding it sees the result. Idempotent.
 --
--- Handles: nil or a non-table (a fresh table is returned); a fresh or current
--- table (untouched); a v1 flat list; and a current table with v1-shaped
--- entries pushed into its array part, which is what a scenario that predates
--- #56 does. v1 entries are placed by their usetype, highest priority first
--- (ties keep their saved order), minus usetype and priority. Within a section
--- a rule is kept once -- the first occurrence, i.e. the highest priority --
--- and a rule may land in several sections. Entries with no identity, an
--- unknown usetype, or the add chain's `usetype=""` placeholder are dropped.
---
+-- Handles nil or a non-table, a fresh or current table, a v1 flat list, and a
+-- current table with v1-shaped entries pushed into its array part (what a
+-- scenario predating #56 does). v1 entries are placed by their usetype,
+-- highest priority first, ties keeping their saved order, minus usetype and
+-- priority. Within a section a rule is kept once -- the first occurrence --
+-- and may land in several sections. Entries with no identity, an unknown
+-- usetype, or the add chain's `usetype=""` placeholder are dropped.
 -- @return the table, and {migrated = n, dropped = n}
 function M.normalize(t)
     local report = { migrated = 0, dropped = 0 }
@@ -318,15 +313,13 @@ local function copyEntry(entry)
 end
 
 --- Put a rule in `section`: before `before` (an entry of that section), or at
---- the end. If `from` names a section, the rule leaves it -- a move; without
---- `from` the rule keeps its other placements -- an add, which is how the
---- same talent gets into two sections. Within `section` a rule is placed
---- once: if it is already there and no position is asked for, it stays where
---- it is; with `before` it is repositioned. The stored table is what moves,
---- so extra fields on it survive a move; an add stores a COPY of what it was
---- given, so two placements never share a table (the talent screen's "Also
---- add to" hands over the stored entry of another section, and a per-entry
---- field set in one section must not appear in the other).
+--- the end. If `from` names a section the rule leaves it -- a move; without
+--- `from` it keeps its other placements -- an add. Within `section` a rule is
+--- placed once: already there with no position asked for, it stays; with
+--- `before`, it is repositioned. The stored table is what moves, so extra
+--- fields survive a move, and an add stores a COPY so two placements never
+--- share a table -- the talent screen's "Also add to" hands over another
+--- section's stored entry, and a field set in one must not appear in the other.
 -- @return the index it is at; or nil and a reason
 function M.place(t, entry, section, before, from)
     if not SECTION_SET[section] then return nil, "No such section." end

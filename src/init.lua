@@ -23,17 +23,12 @@ tags = { 'bot', 'ai', 'auto', 'autoplay', 'skoobot' }
 
 -- Directories this addon contributes.
 --
--- These are not cosmetic. `hooks = true` makes the engine loadfile()
+-- Not cosmetic: `hooks = true` makes the engine loadfile()
 -- <addon>/hooks/load.lua and error(err) on failure, outside any pcall
--- (engine/Module.lua:697-698) -- so declaring a directory that holds no
--- load.lua aborts module load the first time the addon is enabled.
--- data/overload/superload over an empty directory are mount-only and
--- harmless, but they are kept honest too so the manifest describes the
--- tree rather than an intention.
---
--- Flip each one on in the same commit that gives its tree real content.
--- spec/manifest_spec.lua enforces that: a flag may be true only if the
--- matching directory holds a file that is not .gitkeep.
+-- (engine/Module.lua:697-698), so declaring a directory that holds no load.lua
+-- aborts module load the first time the addon is enabled. Flip each one on in
+-- the same commit that gives its tree real content; spec/manifest_spec.lua
+-- enforces that.
 hooks = true
 overload = true
 superload = true

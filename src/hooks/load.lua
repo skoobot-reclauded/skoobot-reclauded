@@ -24,24 +24,22 @@ local KeyBind = require "engine.KeyBind"
 -- Keybind collisions (#50)
 --
 -- Another addon, or the player's own remap, can put a second action on one of
--- this addon's keys. The engine then fires whichever of the two pairs()
--- yields first (engine/KeyBind.lua:228-233) and says nothing. This detects
--- that state and tells the player; it never rebinds anything.
+-- this addon's keys; the engine then fires whichever of the two pairs() yields
+-- first (engine/KeyBind.lua:228-233) and says nothing. This detects that and
+-- tells the player, and never rebinds anything.
 --
--- Where the check can run is decided by three engine facts, found in the
--- 1.7.6 source rather than assumed:
---   * every addon's defineAction lands in the one class-level table,
---     KeyBind.binds_def, and every remap in KeyBind.binds_remap -- so the
---     check reads those two, never game.key.binds, which is built once in
---     Game:init/loaded and is stale until UserChat's bindKeys() after run();
+-- Three engine facts decide WHERE it can run:
+--   * every defineAction lands in the class-level KeyBind.binds_def and every
+--     remap in KeyBind.binds_remap, so the check reads those two and never
+--     game.key.binds, which is stale until UserChat's bindKeys() after run();
 --   * ToME:run hooks fire in addon weight order, so an addon that loads its
 --     keybinds in its own ToME:run hook -- the original SkooBot does, at the
---     same weight as this one -- may not have done so when ours runs. All
---     of them have by ToME:runDone;
+--     same weight -- may not have done so when ours runs. All have by
+--     ToME:runDone;
 --   * game.log is a no-op (engine/Game.lua:56) until uiset:activate() inside
 --     runReal, so a message-log line from ToME:run is silently dropped.
--- Hence the notice is raised from ToME:runDone, and the menu's status line
--- recomputes on every open, so a rebind made mid-game shows at once.
+-- Hence the notice comes from ToME:runDone, and the menu's status line
+-- recomputes on every open so a mid-game rebind shows at once.
 -- ---------------------------------------------------------------------------
 
 local keys = dofile("/data-skoobot_reclauded/keys.lua")
@@ -160,16 +158,14 @@ end)
 -- ---------------------------------------------------------------------------
 -- The power level in every creature's tooltip (#14)
 --
--- 0.1 superloaded mod.class.Actor for this one line. It never needed to: the
--- engine fires "Actor:tooltip" from inside Actor:tooltip with the very
--- tstring it is about to return (mod/class/Actor.lua:2133) -- after the
--- stats block, before the weapons and the effects -- for every actor,
--- the player included (Player:tooltip reaches Actor.tooltip by explicit
--- class reference, mod/class/Player.lua:442), and not at all for an actor
--- the viewer cannot see, which is exactly when the wrapper returned nil.
--- The line's wording and figure are the runtime table's (bot.tooltip, kept
--- beside bot.power in the Player superload), so the number the tooltip
--- shows and the one the stop conditions compare live in one file.
+-- No Actor superload needed for this: the engine fires "Actor:tooltip" from
+-- inside Actor:tooltip with the very tstring it is about to return
+-- (mod/class/Actor.lua:2133), for every actor including the player
+-- (Player:tooltip reaches Actor.tooltip by explicit class reference,
+-- mod/class/Player.lua:442), and not at all for an actor the viewer cannot see
+-- -- which is exactly when a wrapper returned nil. The wording and the figure
+-- are the runtime table's (bot.tooltip, beside bot.power in the Player
+-- superload), so the tooltip's number and the stop conditions' are one file.
 -- ---------------------------------------------------------------------------
 class:bindHook("Actor:tooltip", function(self, data)
     skoobot_reclauded.tooltip(self, data.ts)
@@ -188,22 +184,13 @@ end)
 local addonTitle = "SkooBot: Reclauded"
 local addonShort = "Reclauded"
 -- list=self.list, kind=kind
--- #95: the tab is a pointer now, not a control panel.
---
--- Owner's decision, 2026-08-24: one settings screen, the addon's own,
--- reached from its menu. Everything that used to live here -- eleven
--- numeric options, the popup toggle and the log level -- is on that screen,
--- which can say the thing this dialog cannot: that a threshold belongs to
--- THIS CHARACTER and a preference belongs to the player.
---
--- The tab is kept rather than removed, and that is deliberate. A player
--- looking for an addon's settings looks in Options; an addon with no
--- presence there is one they conclude has none. So this row exists to be
--- found, and to say where to go.
---
--- The titles, descriptions, ranges and the per-character split all live in
--- data/cfg.lua and are read by the settings screen. Nothing about an option
--- is written here any more, so the two cannot disagree.
+-- #95: the tab is a pointer, not a control panel. Everything that used to live
+-- here is on the addon's own settings screen, which can say what this dialog
+-- cannot -- that a threshold belongs to THIS CHARACTER and a preference to the
+-- player. The row is kept deliberately: a player looking for an addon's
+-- settings looks in Options, and an addon with no presence there is one they
+-- conclude has none. Titles, descriptions, ranges and the per-character split
+-- live in data/cfg.lua, so nothing about an option is written here.
 class:bindHook("GameOptions:generateList", function(self, data)
     if data.list.skoobot_reclauded_options then
         local list = data.list

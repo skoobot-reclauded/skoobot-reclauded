@@ -10,30 +10,25 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- One option, one file under the engine's settings directory, holding Lua
--- the engine runs at startup. That is ToME's own mechanism (Game:saveSettings
+-- One option, one file under the engine's settings directory, holding Lua the
+-- engine runs at startup. That is ToME's own mechanism (Game:saveSettings
 -- writes /settings/<file>.cfg) and v1 used it under `tome.SkooBot`.
 --
--- THE TRAP, and why this module exists (#90). The engine runs every one of
--- those files LONG BEFORE any addon is loaded -- the config is read to decide
+-- THE TRAP this module exists for (#90): the engine runs every one of those
+-- files LONG BEFORE any addon is loaded, because the config is read to decide
 -- what to load. So a file saying
 --
 --     tome.skoobot_reclauded.MAX_ENEMY_COUNT = 77
 --
--- indexes a field that does not exist yet, dies, and is swallowed; the addon
--- then seeds its defaults over nothing and the player's choice is gone. It
--- looked like it worked, because the file on disk is correct and the live
--- table is correct for the rest of that session -- the loss is only visible
--- across a restart, which nothing tested. Every setting the owner chose in
--- every playtest before this was silently the default.
+-- indexes a field that does not exist yet, dies, and is swallowed. It looks
+-- like it works: the file on disk is right and the live table is right for the
+-- rest of the session, and only a restart shows the loss.
 --
--- Two halves to the repair, and this module is the shared half:
---
---   * `line()` writes a form that creates the table first, so the engine's
---     own startup load works from now on;
---   * `parse()` reads a value back out of a file's text, so values written
---     by an older build -- which are all of them -- are recovered rather
---     than lost. data/settings.lua does that before it seeds any default.
+-- Two halves to the repair, and this module is the shared half: `line()`
+-- writes a form that creates the table first, so the engine's own startup load
+-- works from now on, and `parse()` reads a value back out of a file's text, so
+-- values written by an older build -- which is all of them -- are recovered.
+-- data/settings.lua does that before it seeds any default.
 --
 -- Pure: no engine, no filesystem, no globals. The file IO is the caller's,
 -- which is what lets busted hold this to its shape.
@@ -55,14 +50,13 @@ end
 --- The contents to write for one option.
 ---
 --- Two lines, and the first is the whole point: `= x or {}` creates the
---- namespace table if the engine has not got round to the addon yet, which
---- at config-load time it never has. Without it the second line is a nil
---- index and the value is lost on the next start.
+--- namespace table, which at config-load time the engine has never got round
+--- to. Without it the second line is a nil index and the value is lost on the
+--- next start.
 ---
---- Numbers and booleans only, which is every setting this addon has. A
---- string would need quoting and there is no reason to invent that here;
---- anything else is refused rather than written badly (LOG_LEVEL is a
---- number for exactly this reason).
+--- Numbers and booleans only, which is every setting this addon has; anything
+--- else is refused rather than written badly (LOG_LEVEL is a number for
+--- exactly this reason).
 function M.line(name, value)
     local t = type(value)
     if t ~= "number" and t ~= "boolean" then
@@ -74,16 +68,14 @@ end
 
 --- The value one option's file sets, or nil if the text does not set it.
 ---
---- Reads the assignment rather than executing the file: the caller is the
---- game, the file is on the player's disk, and running it would be running
---- whatever is in it. Numbers and booleans only, matching `line()`.
+--- Reads the assignment rather than executing the file: the file is on the
+--- player's disk, and running it would be running whatever is in it. Numbers
+--- and booleans only, matching `line()`.
 ---
---- Tolerates what real files contain: the guarded two-line form and the old
---- one-line form; a UTF-8 BOM (the engine writes none, but anything that has
---- edited the file might); CRLF; and whitespace anywhere reasonable. The
---- pattern is anchored on the option's own name, so the guard line -- which
---- assigns the NAMESPACE and not a name under it -- cannot be mistaken for
---- a value.
+--- Tolerates what real files contain -- the guarded two-line form and the old
+--- one-line form, a UTF-8 BOM, CRLF, whitespace anywhere reasonable. The
+--- pattern is anchored on the option's own name, so the guard line, which
+--- assigns the NAMESPACE and not a name under it, cannot be read as a value.
 function M.parse(text, name)
     if type(text) ~= "string" or type(name) ~= "string" or name == "" then return nil end
     local ns  = M.NAMESPACE:gsub("%.", "%%.")
@@ -97,15 +89,10 @@ function M.parse(text, name)
 end
 
 
---- What each setting is CALLED where the player meets it (#71).
----
---- The options tab titles them; the stop reasons used to name the setting
---- key instead -- "life is below LOWHEALTH_RATIO" -- and nothing on screen
---- mapped one to the other. A player reading a stop had no way to find the
---- knob it was talking about.
----
---- One table, read by the tab that draws the titles and by the reasons that
---- quote them, so the two cannot drift into naming the same knob differently.
+--- What each setting is CALLED where the player meets it (#71). One table,
+--- read by the tab that draws the titles and by the reasons that quote them,
+--- so the two cannot name the same knob differently. A stop that named the
+--- setting key instead left the player nothing on screen to match it to.
 M.TITLE = {
     LOWHEALTH_RATIO            = "Low Health Ratio",
     IGNORE_DAMAGE_HEALTH_RATIO = "Ignore Damage Above Life Ratio",
@@ -130,14 +117,11 @@ end
 
 --- Which settings belong to the CHARACTER, and which to the account (#95).
 ---
---- The split is not arbitrary. A threshold answers "how dangerous is this
---- character's situation" -- and a level 3 Alchemist and a level 30 Bulwark
---- do not want the same answer, which is the whole reason #90's title calls
---- these safety settings per character. The three left out answer "how do I
---- like this addon to behave": how fast it steps, whether it opens a popup,
---- how much it prints. Those are the player's, not the character's, and
---- copying them onto every new character would be an irritation rather than
---- a feature.
+--- A threshold answers "how dangerous is this character's situation", and a
+--- level 3 Alchemist and a level 30 Bulwark do not want the same answer. The
+--- three left out answer "how do I like this addon to behave" -- how fast it
+--- steps, whether it opens a popup, how much it prints -- which is the
+--- player's, not the character's.
 ---
 --- A character with no value of its own uses the account default, which is
 --- what every existing save has and why this needs no migration.
@@ -163,12 +147,9 @@ M.ORDER = {
     "ACTION_DELAY", "STOP_POPUP", "LOG_LEVEL",
 }
 
---- What each option does, in the words the stops use (#54, #82, #95).
----
---- These lived as literals at the options-tab call sites in hooks/load.lua,
---- which was fine while the tab was the only place they appeared. #95 gives
---- them a second reader -- the settings screen -- and two copies of a
---- paragraph is two paragraphs that drift. One map, both readers.
+--- What each option does, in the words the stops use (#54, #82, #95). One map,
+--- read by the options tab and by the settings screen, so two copies of a
+--- paragraph cannot drift into two paragraphs.
 M.DESC = {
     LOWHEALTH_RATIO =
         "A fraction of your life pool (0.5 is half) -- your maximum life, plus whatever " ..

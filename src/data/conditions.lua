@@ -10,52 +10,35 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- One entry per condition is the single source of truth for its name in the
--- menu, its default policy, how it is detected, where in the act loop it is
--- consulted, what it says when it fires, and what it stops the character
--- doing (#12; docs/design-stop-conditions.md 3.1). v1 kept the list and the
--- detection apart -- a table of labels in one function and an if-chain of
--- `p.stunned == 1` tests in another -- and the two drifted: DEBUFF_ASLEEP
--- rendered as a working toggle while its test was dead code, and nothing
--- could notice. Here the act loop walks this list; an entry with no
--- detector cannot fire, and a detector with no entry cannot exist.
+-- One entry per condition is the single source of truth for its name, default
+-- policy, detection, site, message and what it blocks (#12;
+-- docs/design-stop-conditions.md 3.1). The act loop walks this list, so an
+-- entry with no detector cannot fire and a detector with no entry cannot exist.
 --
 -- Two kinds of entry share the list, told apart by `default`:
 --
---   * POLICY entries have a default of WARN, STOP or IGNORE. They are what
---     the player sees under "Stop conditions" in the SkooBot menu, and what
---     the save keeps (code and chosen stoptype only; everything else is
---     read from here on every access). Their order IS the menu's order and
---     the saved list's order, and their codes and labels are the save's --
---     rename nothing. They are the model-validity boundary of the design's
---     2: "my risk model is not meaningful here, the player's is".
---   * LIVENESS entries have no default and no policy. The player cannot
---     configure them, because they are not policy: attempting to path while
---     unable to move is a bug, not a risk appetite (design 1.1). They exist
---     so that the capability they take away is declared once, with its
---     detector, and consulted by the act loop through capabilities().
+--   * POLICY entries have a default of WARN, STOP or IGNORE. Their order IS
+--     the menu's order and the saved list's, and their codes and labels are
+--     what the save holds -- rename nothing.
+--   * LIVENESS entries have no default because they are not policy:
+--     attempting to path while unable to move is a bug, not a risk appetite
+--     (design 1.1). The act loop reads them through capabilities().
 --
--- Detection is by CAPABILITY, never by effect name: `attr("never_move")` is
--- the one predicate ToME's own move() gates on and covers sixteen effects
--- plus encumbrance, where an effect list could never be complete. The
--- status attributes are additive counters (two sources of stun make 2;
--- confused is a 0-50 percentage), so every test is on truthiness or > 0,
--- never `== 1` -- v1's `== 1` read a doubly stunned or a 30%-confused
--- character as unafflicted (docs/api-surface-1.7.6.md, value-domain notes).
+-- Detection is by CAPABILITY, never by effect name: `attr("never_move")` is the
+-- one predicate ToME's own move() gates on, and it covers sixteen effects plus
+-- encumbrance where an effect list could never be complete. The status
+-- attributes are additive counters (two sources of stun make 2; confused is a
+-- 0-50 percentage), so every test is on truthiness or > 0, never `== 1` --
+-- v1's `== 1` read a doubly stunned or a 30%-confused character as unafflicted
+-- (docs/api-surface-1.7.6.md, value-domain notes).
 --
--- `blocks` says what a detected condition takes away -- move, act, target --
--- and the act loop's response is defined by the union over everything that
--- is detected: in EXPLORE a move-blocked character hands back rather than
--- calling auto-explore (the T-012 freeze); in FIGHT it still fires the
--- talents that reach (a pinned character can attack), and hands back only
--- when none does, saying why. The policy and the block are two consumers of
--- one signal: DEBUFF_DAZED at IGNORE still cannot path, because dazed sets
--- never_move and the loop consults the block whatever the policy says.
+-- Policy and block are two consumers of one signal: DEBUFF_DAZED at IGNORE
+-- still cannot path, because dazed sets never_move and the act loop consults
+-- the block whatever the policy says.
 --
--- Pure: no globals, no ToME API beyond the actor methods a detector calls,
--- and everything else about the situation arrives in `ctx` from the act
--- loop (see detect below), so spec/conditions_spec.lua covers every
--- predicate, message and the reconciliation without a running game.
+-- Pure: everything about the situation arrives in `ctx`, so
+-- spec/conditions_spec.lua covers every predicate, message and the
+-- reconciliation without a running game.
 
 local M = {}
 
@@ -147,12 +130,11 @@ end
 
 M.LIST = {
     -- Debuffs. The five of v1, in its order. Stunned and confused take no
-    -- capability away in 1.7.6 -- a stunned character acts and moves, at
-    -- half damage and half speed with three talents on cooldown; a confused
-    -- one has a percentage chance to act randomly -- so they block nothing
-    -- here: they are the model-validity boundary, a stop because the threat
-    -- estimate cannot be trusted while they hold (design 2.1). Not demoted
-    -- to score inputs (the body's retraction).
+    -- capability away in 1.7.6 -- a stunned character acts and moves at half
+    -- damage and half speed, a confused one has a percentage chance to act
+    -- randomly -- so they block nothing here. They are policy because the
+    -- threat estimate cannot be trusted while they hold (design 2.1), not
+    -- because the character is stopped.
     { code = "DEBUFF_STUNNED", label = "Stunned", default = "WARN",
       category = "debuff", site = M.SITE_TURN, blocks = {},
       detect = function(p) return counter(p, "stunned") > 0 end,
@@ -194,22 +176,16 @@ M.LIST = {
       detect = function(p) return (p:attr("sleep") and not p:attr("lucid_dreamer")) and true or false end,
       message = "you are asleep" },
 
-    -- #77: the turns that went by while the character could not act at all
-    -- -- paralysis, stoning, a time stun. Not a state the bot can observe
-    -- while it lasts: the engine gives the player no turn, so nothing runs
-    -- and there is nothing to detect. What is observable is the gap
-    -- afterwards, on the first turn it gets back, and a player who looks up
-    -- to find the fight has moved on wants to be told why.
+    -- #77: the turns that went by while the character could not act at all --
+    -- paralysis, stoning, a time stun. There is nothing to detect while it
+    -- lasts: the engine gives the player no turn, so nothing of the bot's
+    -- runs. What is observable is the gap afterwards, on the first turn back.
     --
-    -- ctx.turnsLost is WHOLE TURNS the character never got, counted by the
-    -- act wrapper against the engine's clock and normalised for the
-    -- character's own speed. It is deliberately not a game.turn figure: the
-    -- first build read one off the BOT's decision clock, which does not move
-    -- during a rest or an auto-explore run, and so announced a blackout
-    -- after every single rest.
-    --
-    -- WARN by default -- it is news, not danger, and the thing that caused
-    -- it is over by the time this fires.
+    -- ctx.turnsLost is WHOLE TURNS the character never got, counted by the act
+    -- wrapper against the ENGINE's clock and normalised for the character's own
+    -- speed. Not a figure off the bot's own decision clock: that does not move
+    -- during a rest or an auto-explore run, so the first build announced a
+    -- blackout after every single rest. WARN, because it is news, not danger.
     { code = "TURNS_BLACKOUT", label = "Turns lost while unable to act", default = "WARN",
       category = "turns", site = M.SITE_TURN, blocks = {}, severity = M.HANDED_BACK,
       detect = function(_, ctx) return (ctx.turnsLost or 0) >= M.BLACKOUT_TURNS end,
@@ -258,20 +234,15 @@ M.LIST = {
       message = "a glowing chest is nearby -- open it yourself, they can be guarded" },
 
     -- Power level: the four thresholds of v1, read off the situation score
-    -- (#11). The score makes v1's comparisons over the rank-weighted enemy
-    -- figures (#62) and the player's life-scaled own power, and carries
-    -- the figures in its wording -- which is what the salvage scenario
-    -- reads back -- with the threat score appended. The policy here still
-    -- decides whether a flag stops the bot; the posture the score
-    -- recommends is what the fight branch does when it does not.
+    -- (#11), which makes v1's comparisons over rank-weighted enemy figures
+    -- (#62) and the player's life-scaled own power. The policy here decides
+    -- whether a flag stops the bot; when it does not, the fight branch follows
+    -- the posture the score recommends.
     --
-    -- SCOUTER_CROWDPOWER, #62 (salvage-mishander.md item 4): the crowd
-    -- threshold is relative to the character, not a constant. v1 compared
-    -- the sum with MAX_COMBINED_POWER alone, so the same crowd stopped a
-    -- level-30 and a level-3 character alike; now the sum has to exceed
-    -- the character's own (life-scaled) power by that much. The default
-    -- stays 500, so the setting's meaning changed under it: it is the
-    -- margin above yours.
+    -- SCOUTER_CROWDPOWER's setting changed meaning under its own default (#62):
+    -- the sum must now exceed the character's own life-scaled power by
+    -- MAX_COMBINED_POWER, where v1 compared it with that constant alone. Still
+    -- 500, and it is now a margin above yours, not a cutoff.
     scored("SCOUTER_ENEMYCOUNT",    "Too many enemies in view"),
     scored("SCOUTER_BIGENEMY",      "An enemy above Maximum Enemy Power"),
     scored("SCOUTER_STRONGERENEMY", "An enemy too far above your power"),

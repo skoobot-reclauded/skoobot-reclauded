@@ -9,68 +9,23 @@
 --
 -- ---------------------------------------------------------------------------
 --
--- The flat stop list can say warn / stop / ignore per named condition. It
--- cannot say how bad a situation is, or what to do about it short of
--- stopping (#11). This module says both, from the inputs the four
--- power-level conditions compared one at a time:
+-- How bad the situation is, and what to do about it short of stopping (#11).
 --
---   * the player's own power, scaled by the life left (#62, item 3) --
---     the life POOL the game kills at, since #91;
---   * each visible hostile's power, weighted by its rank band (#62, item 2),
---     with its rank and its distance;
---   * how many there are;
---   * what the condition list says the player cannot do (move / act /
---     target, data/conditions.lua);
---   * the life and air fractions, and whether damage arrived this turn;
---   * which of the power conditions the player has told the bot to live
---     with -- set to IGNORE, or a WARN already acknowledged.
+-- Each of the player's knobs is the DENOMINATOR of one term, so a term of 1 is
+-- exactly that knob's limit, 0.5 is half-way to it and 3 is three times over;
+-- the score is the largest term. The list stays the input, the score is the
+-- evaluation (design-stop-conditions.md 5).
 --
--- The player's four knobs -- MAX_INDIVIDUAL_POWER, MAX_DIFF_POWER,
--- MAX_COMBINED_POWER, MAX_ENEMY_COUNT -- and IGNORE_DAMAGE_HEALTH_RATIO are
--- the parameters, replaced by nothing: each is the denominator of one
--- TERM, so a term of 1 is exactly that knob's limit, 0.5 is half-way to it
--- and 3 is three times over. The design principle (design-stop-conditions.md
--- 5): the list stays the input, the score is the evaluation.
+-- The flags are the same comparisons v1 made, so a knob means exactly what it
+-- says, and WARN / STOP / IGNORE still decides whether one stops the bot.
+-- Distance changes no term: a boss at the edge of view is the same boss two
+-- turns later with less room, and the stop should come at the edge.
 --
---   individual  strongest weighted enemy / MAX_INDIVIDUAL_POWER
---   stronger    strongest weighted enemy / (own + MAX_DIFF_POWER)
---   crowd       weighted sum / (own + MAX_COMBINED_POWER)
---   count       hostiles / MAX_ENEMY_COUNT
---   unseen      (1 - life) / (1 - IGNORE_DAMAGE_HEALTH_RATIO), only when
---               damage arrived with nothing in view: the one threat the
---               explore branch faces, and the T-011 threshold as a term
+-- Stunned and confused are deliberately NOT inputs (design 2.1): the model does
+-- not know what they cost, so they stay a stop, not a term.
 --
--- The SCORE is the largest term: how far past the worst of the player's
--- limits the situation is, in [0, inf). The FLAGS are the four SCOUTER_*
--- conditions and the explore-damage stop, computed from the same
--- comparisons v1 made so that a knob means exactly what it says; the
--- condition list reads them, and WARN / STOP / IGNORE still decides whether
--- a flag stops the bot. Distance changes no term: a boss at the edge of
--- view is the same boss two turns later with less room, and the stop
--- should come at the edge.
---
--- The POSTURE is the recommendation, with its reasons:
---
---   handback  a flag the player has not accepted is set -- the reason
---             names the figure, the knob and the score -- or the model has
---             nothing to say: the player cannot act or target, has no
---             power left, or is nearly out of air
---   retreat   an accepted single-enemy flag: the enemy is not adjacent yet
---             and the player can move, so step away first -- up to
---             RETREAT_LIMIT steps in a row, after which the chase is not
---             working and the posture is fight
---   hold      an accepted crowd or count flag and no single-enemy one:
---             fight what comes into reach, wait for the rest rather than
---             walk into it
---   fight     nothing is over a limit, or what is over is adjacent and
---             accepted -- a step away from something next to you gives it
---             a free hit
---
--- Stunned and confused are deliberately NOT inputs (design 2.1): the
--- model does not know what they cost, so they stay a stop, not a term.
---
--- Pure: no globals, no ToME API. spec/score_spec.lua pins every term, flag
--- and posture without a running game.
+-- Pure: no globals, no ToME API. spec/score_spec.lua pins every term, flag and
+-- posture without a running game.
 
 local M = {}
 
@@ -81,12 +36,11 @@ M.FIGHT, M.HOLD, M.RETREAT, M.HANDBACK = "fight", "hold", "retreat", "handback"
 -- 0.5, so this is the last line, for a fight the other two never saw.
 M.LOW_AIR = 0.25
 
--- How many retreat steps in a row are worth taking from one threat. A
--- step away buys a turn only if the enemy is slower, or the step breaks
--- its line of sight; against something as fast as the player the chase
--- holds its distance for ever, and every step is a turn not spent
--- fighting. Five is enough for the first case to show and cheap enough
--- to waste in the second.
+-- How many retreat steps in a row are worth taking from one threat. A step
+-- buys a turn only if the enemy is slower or the step breaks its line of
+-- sight; against something as fast as the player the chase holds its distance
+-- for ever. Five is enough for the first case to show, cheap enough to waste
+-- in the second.
 M.RETREAT_LIMIT = 5
 
 -- The flags, in the order their reasons are given.
@@ -100,30 +54,23 @@ local function term(value, limit)
 end
 
 --- A ratio, to one decimal: "1.5x your limit", the threat score. The tenth
---- carries meaning here -- 1.0 IS the limit, and 1.4 against 0.9 is the
---- difference between over and under.
+--- carries meaning here -- 1.0 IS the limit.
 --- Rounds before formatting: `%.1f` resolves an exact .x5 tie in the C
---- library, and glibc gives "0.2" for 0.25 where the MSVC runtime gives
---- "0.3" -- so the same fight read differently on Linux and Windows. See #30.
+--- library, and glibc gives "0.2" for 0.25 where the MSVC runtime gives "0.3",
+--- so the same fight read differently on Linux and Windows. See #30.
 local function fmt1(x)
     if x ~= x or x == math.huge or x == -math.huge then return ("%.1f"):format(x) end
     local tenths = x >= 0 and math.floor(x * 10 + 0.5) or -math.floor(-x * 10 + 0.5)
     return ("%.1f"):format(tenths / 10)
 end
 
---- A POWER LEVEL, whole (#84). These are three- and four-figure numbers
---- built from a heuristic over a creature's life, damage, crits, speed,
---- defence, stats and weapons; the tenth of one is noise the player cannot
---- act on and cannot check, and "1080.1" reads as a precision the figure
---- does not have. Owner's call from the 2026-08-23 playtest.
----
---- Only the RENDERING rounds. Every comparison stays on the unrounded value,
---- so a stop still fires exactly where the knob says it does -- which does
---- mean a figure can read equal to a limit it is a fraction over. That is
---- the right way round: the alternative is rounding the comparison, and a
---- threshold that moves by half a point depending on how it is printed.
----
---- Power levels are sums of non-negative parts, so nearest is floor(x + 0.5).
+--- A POWER LEVEL, whole (#84). Only the RENDERING rounds: every comparison
+--- stays on the unrounded value, so a stop fires exactly where the knob says
+--- it does, which does mean a figure can read equal to a limit it is a
+--- fraction over. That is the right way round -- rounding the comparison
+--- instead gives a threshold that moves by half a point depending on how it is
+--- printed. Power levels are sums of non-negative parts, so nearest is
+--- floor(x + 0.5).
 local function fmt0(x)
     return ("%d"):format(math.floor((tonumber(x) or 0) + 0.5))
 end
@@ -141,37 +88,27 @@ function M.enemyPower(raw, weight)
     return (raw or 0) * (tonumber(weight) or 1)
 end
 
---- How much of the life scaling is quadratic (#79). 0 is the linear form
---- #62 shipped, `raw * life/max_life`; 1 makes it `raw * (life/max_life)^2`,
---- so half life counts for a quarter. In between it interpolates.
+--- How much of the life scaling is quadratic (#79). 0 is the linear form #62
+--- shipped, `raw * life/max_life`; 1 makes it `raw * (life/max_life)^2`, so
+--- half life counts for a quarter; in between it interpolates.
 ---
---- 0.5, chosen deliberately mild. mishander's own note and
---- design-stop-conditions.md 5.5 both say the linear form is wrong -- a
---- character at 51% life is worse off than half-strength, because it has
---- fewer turns of margin, must spend some of them healing, and cannot take
---- the risk that a crit ends the run. But this figure is the denominator of
---- the `stronger` and `crowd` terms, so a steep curve would make the bot
---- markedly more cautious at every wound, under every player, at once.
+--- 0.5, deliberately mild: the linear form is wrong (design-stop-conditions.md
+--- 5.5), but this figure is the denominator of the `stronger` and `crowd`
+--- terms, so a steep curve would make the bot markedly more cautious at every
+--- wound, under every player, at once.
 M.LIFE_CURVE = 0.5
 
 --- The fraction of its power a character at this much life counts for.
 ---
---- f(x) = x * (1 - LIFE_CURVE * (1 - x)), which is x at LIFE_CURVE 0 and
---- x^2 at 1. Properties that matter and are asserted in the spec:
+--- f(x) = x * (1 - LIFE_CURVE * (1 - x)), which is x at LIFE_CURVE 0 and x^2
+--- at 1. Three properties the spec asserts: f(1) = 1 EXACTLY whatever the
+--- curve, so nothing the player tuned changes until they are hurt -- which is
+--- why #79 needed no migration of MAX_DIFF_POWER or MAX_COMBINED_POWER; f(0)
+--- = 0 and monotonic between, so more life is never worth less; and f(x) <= x,
+--- so the curve only ever makes a hurt character read weaker.
 ---
----   * f(1) = 1 EXACTLY, whatever the curve. A character at full life
----     counts for its whole power level, so nothing the player has tuned
----     changes until they are hurt -- which is why #79 needed no migration
----     of MAX_DIFF_POWER or MAX_COMBINED_POWER.
----   * f(0) = 0, and f is monotonic in between, so more life is never worth
----     less.
----   * f(x) <= x for x in [0, 1]: the curve only ever makes a hurt
----     character read as weaker, never stronger.
----
---- #91: the two arguments are the life POOL and its maximum -- what
---- data/life.lua returns, `life - die_at` over `max_life - die_at` -- not
---- the raw pair. For a character with no die_at they are the same numbers;
---- for a Lich they are not remotely.
+--- #91: the arguments are the life POOL and its maximum -- `life - die_at`
+--- over `max_life - die_at`, what data/life.lua returns -- not the raw pair.
 function M.lifeFactor(pool, max)
     if not (max and max > 0) then return 1 end
     local x = pool / max
@@ -257,17 +194,11 @@ function M.evaluate(input, knobs)
         if v > score then score = v end
     end
 
-    -- What the player sees when the bot hands back. The figures it compared,
-    -- and the KNOB it compared them against -- named as the options tab
-    -- names it, with the limit itself, so a reason can be acted on without
-    -- reading the docs first (#71). It used to say "is above
-    -- MAX_INDIVIDUAL_POWER": a setting key, which nothing on screen mapped
-    -- to a title, and no number at all.
-    --
-    -- POWER LEVELS are whole (#84): three- and four-figure heuristic sums
-    -- whose tenth is noise. The ratios below -- "1.5x your limit", the
-    -- threat score -- keep their decimal, where 1.0 is the limit and the
-    -- tenth is the whole point.
+    -- What the player sees when the bot hands back: the figures it compared,
+    -- and the KNOB it compared them against, named as the options tab names it
+    -- and with the limit itself, so a reason can be acted on without reading
+    -- the docs first (#71). Power levels are whole and the ratios keep their
+    -- decimal -- see fmt0 and fmt1.
     local function knob(name)
         local t = knobs.titles
         return (t and t[name]) or name
