@@ -14,11 +14,14 @@ rests, explores and fights, and hands control back when it judges the situation 
 > **[Download from the releases page](https://github.com/skoobot-reclauded/skoobot-reclauded/releases)**,
 > and see [Installing](#installing) — the `.teaa` ships inside a zip, and the file name matters.
 >
-> **No numbered release has been cut yet.** What is there today is **`latest-dev`**: a
-> development snapshot of `main`, rebuilt whenever there is something worth testing and deleted
-> without notice. Every build is checked to load and run in a clean game before it is posted,
-> and none of them has been play tested. Numbered `0.x` betas will appear beside it, and those
-> are the ones that keep their download link.
+> **The current release is [0.1.0](https://github.com/skoobot-reclauded/skoobot-reclauded/releases/tag/v0.1.0)**,
+> the first beta. Take that one unless you have a reason not to: it is the build that was play
+> tested, and its download link is permanent.
+>
+> Beside it sits **`latest-dev`**: a development snapshot of `main`, rebuilt whenever there is
+> something worth testing and deleted without notice. Every build is checked to load and run in
+> a clean game before it is posted, and **`latest-dev` builds have had no play testing** — that
+> is what the channel is for.
 >
 > If you want a finished, published addon today, you want
 > **[the original SkooBot](https://github.com/SkoobyDoo/tome4-SkooBot)**, which remains
