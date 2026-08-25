@@ -259,6 +259,10 @@ Defects inherited from 0.0.12, all reported by its users:
   known to be uncalibrated against the corrected figures. If the bot now stops more or less
   than you would like, tune *Maximum Enemy Power*, *Maximum Enemy Power Above Yours* and
   *Maximum Combined Enemy Power* to taste; measured defaults are coming (#115).
+- An enemy standing somewhere you cannot walk — a creature that moves through walls, sitting
+  inside a pillar — no longer stops the bot with *"no path to …"*. It now walks to the closest
+  free square beside the thing instead. Standing next to one it still cannot reach says so
+  plainly rather than blaming the path (#120).
 - Beginning a rest no longer crashes the game. If something interrupts the rest in the instant
   it starts — a damage-over-time ticking, a debuff landing — the game's own rest code tripped
   over itself and threw *attempt to index field 'resting'*. 0.0.12 began a rest exactly the

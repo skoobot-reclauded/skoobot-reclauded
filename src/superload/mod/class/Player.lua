@@ -2205,12 +2205,44 @@ function skoobot_act(noAction)
             -- each candidate grid; a sealed door sets no block_move, so without
             -- this the path runs through it and the bot walks into a popup it
             -- can only hand back on.
-            local path = a:calc(game.player.x, game.player.y, targets[1].x, targets[1].y,
-                nil, nil, function(x, y) return not needsConsent(x, y) end)
+            local function pathTo(tx, ty)
+                return a:calc(game.player.x, game.player.y, tx, ty,
+                    nil, nil, function(x, y) return not needsConsent(x, y) end)
+            end
+            local path = pathTo(targets[1].x, targets[1].y)
+            -- #120: a creature that walks through walls stands in a grid A*
+            -- will not enter, so the walk fails with every neighbouring grid
+            -- free -- a golem inside an arena pillar with eight open sides.
+            -- Only ON that failure aim beside it instead: the target's OWN
+            -- grid has to stay the first choice, because the last step into it
+            -- is how a melee attack happens (#81).
+            -- Standing beside it already is the one case the fallback must not
+            -- run: every remaining neighbour is one step away, so it would pick
+            -- one, step across, and shuffle around the pillar for ever.
+            local beside = core.fov.distance(game.player.x, game.player.y, targets[1].x, targets[1].y) <= 1
+            if not path and not beside then
+                local best
+                for _, dir in ipairs(util.adjacentDirs()) do
+                    local sx, sy = util.coordAddDir(targets[1].x, targets[1].y, dir)
+                    if game.player:canMove(sx, sy) and not needsConsent(sx, sy) then
+                        local p2 = pathTo(sx, sy)
+                        if p2 and #p2 > 0 and (not best or #p2 < #best) then best = p2 end
+                    end
+                end
+                if best then
+                    chan.debug("[Combat] [Movement] %s is in an unreachable grid; closing on a neighbour instead",
+                        tostring(targets[1].name))
+                    path = best
+                end
+            end
             chan.debug("[Combat] [Movement] Pathing towards %s", tostring(targets[1].name))
             getDirNum(game.player, targets[1])  -- v1 computed this and never used it
 
-            if not path then
+            if not path or #path == 0 then
+                if beside then
+                    return stop(notice.CANNOT_ACT, "standing next to " .. targets[1].name
+                        .. ", which is in a grid you cannot enter, and nothing in the rotation reaches it")
+                end
                 return stop(notice.CANNOT_ACT, "no path to " .. targets[1].name)
             else
                 local moved = SAI_movePlayer(path[1].x, path[1].y)
