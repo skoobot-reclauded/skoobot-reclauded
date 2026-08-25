@@ -16,6 +16,8 @@ SkooBot, and no number is ever shared between the two projects.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-24
+
 ### Added
 
 - **The addon itself**: SkooBot 0.0.12 ported to Tales of Maj'Eyal 1.7.6 as a separate addon,
@@ -312,4 +314,20 @@ And three that are not in the complaint record, because they were found here rat
 
 ### Not in this version
 
-- Walking to a glowing chest as a scored objective, and a non-linear life curve for your own power, are after 0.1 (#11, follow-ups).
+This is a **beta**, and the bot does not play a whole game unattended. What it does not do yet:
+
+- **Healing talents you put in Recovery or Damage Prevention are aimed at whatever you are
+  fighting, not at you.** A known defect, and the reason it is not fixed here is that aiming
+  them at yourself is what would make a *damaging* talent in those lists dangerous — the fix
+  ships with the guard against that, together, after 0.1 (#118).
+- **Nothing clears a debuff.** The bot stops for one, or fights through it; it will not use a
+  cure you have (#92).
+- **It stays on one level.** No taking stairs, no routing between zones (#86).
+- **It does not touch your inventory or your character sheet.** Nothing is equipped, nothing is
+  transmogrified, and level-up points are left for you — the bot hands back when you have
+  points to spend (#87, #88).
+- **Escorts are not handled** (#93), and **ranged characters have no range discipline** — the
+  bot closes to melee distance whatever you are holding (#108).
+- **The power-level limits are not calibrated.** See the note above about power levels growing;
+  measured defaults come from running characters to death, which needs the automation above
+  (#101).
