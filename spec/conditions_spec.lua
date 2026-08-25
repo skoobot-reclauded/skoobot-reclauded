@@ -64,6 +64,7 @@ local V1 = {
   { "LIFE_LOWLIFE",          "Low life with enemies in view",              "STOP"   },
   { "DIALOG_LORE",           "A lore dialog opened",                       "IGNORE" },
   { "TERRAIN_GLOWING_CHEST", "Glowing chest in view",                      "WARN"   },
+  { "ESCORT_ACTIVE",         "Escorting someone",                          "WARN"   },
   { "SCOUTER_ENEMYCOUNT",    "Too many enemies in view",                   "STOP"   },
   { "SCOUTER_BIGENEMY",      "An enemy above Maximum Enemy Power",         "STOP"   },
   { "SCOUTER_STRONGERENEMY", "An enemy too far above your power",          "STOP"   },
@@ -138,10 +139,11 @@ describe("data/conditions.lua", function()
     end)
 
     -- HANDED_BACK is for the entries that are news rather than danger: the
-    -- chest the player may want to open (#8) and the turns they lost while
-    -- unable to act (#77). Everything else stops at STOPPED.
+    -- chest the player may want to open (#8), the turns they lost while unable
+    -- to act (#77), and the escort that has switched exploring off (#93).
+    -- Everything else stops at STOPPED.
     it("the news conditions hand back rather than stopping", function()
-      local handsBack = { TERRAIN_GLOWING_CHEST = true, TURNS_BLACKOUT = true }
+      local handsBack = { TERRAIN_GLOWING_CHEST = true, TURNS_BLACKOUT = true, ESCORT_ACTIVE = true }
       for _, def in ipairs(C.LIST) do
         if handsBack[def.code] then
           assert.equals(C.HANDED_BACK, def.severity, def.code)

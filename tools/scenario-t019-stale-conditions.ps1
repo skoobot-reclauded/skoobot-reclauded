@@ -153,7 +153,7 @@ return "installed"
     Write-Host ''
     Write-Host '  --- the list came out reconciled'
     $after = Probe 'return bl.describeList()'
-    Check ($after -match 'entries=14 ')              'the list has exactly this version''s fourteen conditions'
+    Check ($after -match 'entries=15 ')              'the list has exactly this version''s fifteen conditions'
     Check ($after -match 'chest=WARN')               'the added condition is present with its default'
     Check ($after -match 'lowlife=IGNORE')           'the user''s own setting survived'
     Check ($after -match 'retired=false')            'a retired code was dropped'
@@ -163,7 +163,7 @@ return "installed"
     Write-Host '  --- an unknown code fails closed'
     $unknown = Probe 'return bl.unknownCode()'
     Check ($unknown -match 'get_ok=true stoptype=STOP') 'get() of an unknown code returns a STOP entry, never nil'
-    Check ($unknown -match 'set_ok=true entries=14')  'set() of an unknown code neither throws nor adds'
+    Check ($unknown -match 'set_ok=true entries=15')  'set() of an unknown code neither throws nor adds'
 }
 finally {
     Stop-Game

@@ -13,12 +13,13 @@
     a power stop; the DEBUFF_* policies are set per probe and every one of
     them is put back; the spawn is removed; the save is never written.
 
-      0. The list: fourteen policy entries -- v1's thirteen codes in v1's
-         order plus TURNS_BLACKOUT (#77) after the debuffs -- in
-         the saved list and the menu; the liveness entries (CANNOT_MOVE,
-         ENCASED) are in the definition list and in neither.
+      0. The list: fifteen policy entries -- v1's thirteen codes in v1's
+         order, plus TURNS_BLACKOUT (#77) after the debuffs and ESCORT_ACTIVE
+         (#93) after the chest -- in the saved list and the menu; the liveness
+         entries (CANNOT_MOVE, ENCASED) are in the definition list and in
+         neither.
      0b. BLACKOUT (#77), after the quiet spot is found so nothing is in view:
-         the fourteenth entry, staged by writing the lost-turn count onto the
+         the blackout entry, staged by writing the lost-turn count onto the
          activation -- query mode takes no turn, so the act wrapper that
          counts the loss never runs. Nothing lost is not a blackout; one or
          more hands back with "lost N turns while unable to act", singular at
@@ -260,7 +261,7 @@ end
 --
 -- What this does not cover is the driver's own subtraction, one line at the
 -- point last_turn is refreshed. What it does cover is everything after it:
--- that conditionContext carries turnGap, that the fourteenth entry reads it,
+-- that conditionContext carries turnGap, that the blackout entry reads it,
 -- and that the wording reaches the player.
 function cd.blackout(lost)
   local p = game.player
@@ -316,10 +317,10 @@ return "installed"
 
     # ----- 0: the list ----------------------------------------------------------
     Write-Host ''
-    Write-Host '  --- 0. the list: fourteen policy entries, liveness entries outside the save'
+    Write-Host '  --- 0. the list: fifteen policy entries, liveness entries outside the save'
     $d = Probe 'return cd.describe()'
     Write-Host "  $($d.Result)"
-    $null = Assert-Result $d 'fourteen policy entries, and the saved list has exactly those' -Match 'policy=14 saved=14 '
+    $null = Assert-Result $d 'fifteen policy entries, and the saved list has exactly those' -Match 'policy=15 saved=15 '
     $null = Assert-Result $d 'CANNOT_MOVE and ENCASED are liveness entries of the list' -Match 'liveness=\[CANNOT_MOVE,ENCASED\]'
     $null = Assert-Result $d 'and neither reaches the saved list' -Match 'leaked=\[\]'
     $null = Assert-Result $d "v1's order: DEBUFF_STUNNED first, SCOUTER_CROWDPOWER last" -Match 'first=DEBUFF_STUNNED last=SCOUTER_CROWDPOWER'

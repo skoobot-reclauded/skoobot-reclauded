@@ -54,6 +54,7 @@ M.HANDED_BACK = "handed_back"
 --   ctx.score        the situation scored (data/score.lua)
 --   ctx.cfg          function(key) -> the setting's value
 --   ctx.chestInView  function(p) -> is an unopened glowing chest in view
+--   ctx.escortee     function() -> the actor being escorted, or nil
 --   ctx.delta        life change this turn (SITE_LOOP only)
 --   ctx.turnsLost    whole turns the character never got
 --   ctx.title        function(key) -> the option's title in the options tab
@@ -216,6 +217,21 @@ M.LIST = {
       category = "terrain", site = M.SITE_EXPLORE, blocks = {}, severity = M.HANDED_BACK,
       detect = function(p, ctx) return ctx.chestInView(p) and true or false end,
       message = "a glowing chest is nearby -- open it yourself, they can be guarded" },
+
+    -- An escort changes what the bot does, so it says so once and then gets on
+    -- with it. IGNORE turns the escort behaviour off entirely and the bot
+    -- explores as if the quest were not running; STOP hands back every turn of
+    -- one. Fired by the escort branch rather than by the explore sweep, which
+    -- switches state before it runs; the detector is here so the entry is
+    -- self-describing and the wording has one home (#93).
+    { code = "ESCORT_ACTIVE", label = "Escorting someone", default = "WARN",
+      category = "terrain", site = M.SITE_EXPLORE, blocks = {}, severity = M.HANDED_BACK,
+      detect = function(_, ctx) return ctx.escortee() ~= nil end,
+      message = function(_, ctx)
+          local npc = ctx.escortee()
+          return ("escorting %s -- exploring is off until the escort ends"):format(
+              npc and tostring(npc.name) or "someone")
+      end },
 
     -- Power level: the four thresholds of v1, read off the situation score
     -- (#11), which makes v1's comparisons over rank-weighted enemy figures

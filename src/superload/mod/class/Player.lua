@@ -42,12 +42,14 @@ local conditions = dofile("/data-skoobot_reclauded/conditions.lua")
 local score = dofile("/data-skoobot_reclauded/score.lua")
 local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 local lifem = dofile("/data-skoobot_reclauded/life.lua")
+local escortm = dofile("/data-skoobot_reclauded/escort.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
 local STATE_HUNT    = 12
 local STATE_FIGHT   = 13
 local STATE_SEEK    = 14
+local STATE_ESCORT  = 15
 
 -- The liveness invariant (#13, design-stop-conditions.md 1.3): an act-loop
 -- iteration that did not advance game.turn consumed no game time and so did
@@ -209,6 +211,7 @@ local function setStopCondition(p, code, stoptype)
 end
 
 local conditionContext   -- defined with the checks below
+local liveEscortee       -- the escortee actor or nil (#93), same reason
 
 bot.conditions = {
     module = conditions,
@@ -524,6 +527,7 @@ local function aiStateString()
     elseif bot.state == STATE_HUNT then return "SAI_STATE_HUNT"
     elseif bot.state == STATE_FIGHT then return "SAI_STATE_FIGHT"
     elseif bot.state == STATE_SEEK then return "SAI_STATE_SEEK"
+    elseif bot.state == STATE_ESCORT then return "SAI_STATE_ESCORT"
     end
     return "Unknown State"
 end
@@ -1539,6 +1543,9 @@ function conditionContext(p, hostiles)
         life        = lifem.of(p),
         describeLife = lifem.describe,
         chestInView = glowingChestInView,
+        -- #93: the escortee, or nil. A function rather than a value because
+        -- most turns never ask, and it walks the level's entity list.
+        escortee    = function() return liveEscortee() end,
         -- #77: whole turns the character never got, counted by the act wrapper
         -- against the ENGINE's clock and not the bot's decision clock -- a rest
         -- is not a blackout. nil outside an activation, 0 on its first turn.
@@ -1567,6 +1574,39 @@ local function seekChest(ctx, hostiles)
     local chest = nearestGlowingChest(game.player)
     if not chest or chest.distance <= 1 then return false end
     return true
+end
+
+--- The escortee on this level, or nil (#93).
+function liveEscortee()
+    local level = game.level
+    if not level or not level.entities then return nil end
+    return escortm.escortee(level.entities, function(qid)
+        if not qid then return true end
+        local q = game.player.hasQuest and game.player:hasQuest(qid)
+        if not q or not q.isStatus then return true end
+        return not (q:isStatus(engine.Quest.DONE) or q:isStatus(engine.Quest.FAILED))
+    end)
+end
+
+--- Is something hostile on the escortee (#93)?
+---
+--- Scanned from the ESCORTEE's grid rather than the player's -- that is the
+--- case a player-centric scan misses -- but `game.level.map.seens` inside
+--- spotHostiles is still the PLAYER's memory, so this never reports a room the
+--- character has not looked into. Deliberate; docs/design-escort.md.
+local function escortThreatened(npc)
+    if not npc or not npc.x then return false end
+    return #spotHostiles(npc, true) > 0
+end
+
+--- Should the bot be escorting rather than exploring (#93)? The policy is the
+--- player's: IGNORE here means "explore as if the escort were not happening".
+local function shouldEscort(ctx, hostiles)
+    if #hostiles > 0 or ctx.caps.move then return false end
+    if ctx.score and ctx.score.posture ~= score.FIGHT then return false end
+    local pol = getStopCondition(game.player, "ESCORT_ACTIVE")
+    if not pol or pol.stoptype == "IGNORE" then return false end
+    return liveEscortee() ~= nil
 end
 
 --- One loop over the condition list for a site (#12), replacing v1's
@@ -1708,6 +1748,12 @@ function skoobot_act(noAction)
             bot.state = STATE_SEEK
             return skoobot_act(true)
         end
+        -- #93: an escort defers exploring entirely -- the escortee walks itself
+        -- to its portal and wandering after unseen tiles abandons it.
+        if shouldEscort(ctx, hostiles) then
+            bot.state = STATE_ESCORT
+            return skoobot_act(true)
+        end
         if checkConditions(conditions.SITE_EXPLORE, ctx) then return end
         -- #62: exempt the tile the activation started on until the player has
         -- left it, or toggling the bot on the stairs you arrived by hands back
@@ -1802,6 +1848,77 @@ function skoobot_act(noAction)
         end
         checkForAdditionalAction()
         return
+
+    elseif bot.state == STATE_ESCORT then
+        -- #93. Built on STATE_SEEK's shape: a walking objective that threat
+        -- always outranks, with the score re-read every step rather than
+        -- trusted from the step that started the walk. The difference is that
+        -- the target moves, so it is recomputed each step and arrival is a band.
+        local act = bot.activation
+        local npc = liveEscortee()
+        local pol = getStopCondition(game.player, "ESCORT_ACTIVE")
+        if not npc or not pol or pol.stoptype == "IGNORE" then
+            if act then act.escorts = 0 end
+            bot.state = STATE_EXPLORE
+            return skoobot_act(true)
+        end
+        -- Told once per escort that exploring is off, and STOP hands back at
+        -- every turn of one. The entry's own wording and severity, not a
+        -- second copy of them.
+        local edef = conditions.find("ESCORT_ACTIVE")
+        if edef and checkStop(game.player, edef.code, true,
+                              conditions.message(edef, game.player, ctx), edef.severity) then
+            return
+        end
+        if ctx.caps.move or (ctx.score and ctx.score.posture ~= score.FIGHT) then
+            if act then act.escorts = 0 end
+            bot.state = STATE_EXPLORE
+            return skoobot_act(true)
+        end
+        local plan, why = escortm.plan(game.player, npc,
+            { dist = core.fov.distance, threatened = escortThreatened(npc) })
+        if plan == escortm.DONE then
+            if act then act.escorts = 0 end
+            bot.state = STATE_EXPLORE
+            return skoobot_act(true)
+        end
+        if plan == escortm.HOLD then
+            -- The escortee walks itself (mod/ai/escort.lua move_escort), and it
+            -- idles 35% of turns to let the player keep up, so standing still
+            -- IS the move. Waiting is a real action, so #13's progress
+            -- invariant reads it as one.
+            if act then act.escorts = 0 end
+            chan.debug("[Escort] holding: %s", tostring(why))
+            SAI_wait(npc)
+            checkForAdditionalAction()
+            return
+        end
+        if act then
+            act.escorts = (act.escorts or 0) + 1
+            if act.escorts > escortm.STEP_LIMIT then
+                chan.debug("[Escort] gave up closing after %d steps", act.escorts)
+                act.escorts = 0
+                return stop(notice.HANDED_BACK, "could not keep up with " .. escortm.name(npc))
+            end
+        end
+        local ea = Astar.new(game.level.map, game.player)
+        -- #64's exclusion again: the escortee walks through a door the bot
+        -- will not open without consent, and following it into one is the
+        -- sealed-door loop.
+        local epath = ea:calc(game.player.x, game.player.y, npc.x, npc.y,
+            nil, nil, function(x, y) return not needsConsent(x, y) end)
+        if not epath or #epath == 0 then
+            if act then act.escorts = 0 end
+            return stop(notice.HANDED_BACK, "no way through to " .. escortm.name(npc))
+        end
+        chan.info("[Escort] Closing on %s: %s", escortm.name(npc), tostring(why))
+        if not SAI_movePlayer(epath[1].x, epath[1].y) and not bot.do_nothing then
+            if act then act.escorts = 0 end
+            return stop(notice.CANNOT_ACT, "could not move toward " .. escortm.name(npc))
+        end
+        checkForAdditionalAction()
+        return
+
     elseif bot.state == STATE_FIGHT then
         -- #12 (design 1.1): a move block changes nothing until the rotation
         -- finds no talent that reaches -- a pinned character still attacks what
