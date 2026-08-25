@@ -68,6 +68,13 @@ is. What a PR needs, and the template will ask for:
   somewhere. Always worth the space: why an approach that looks right does *not* work, an
   engine citation with its file and line, and the reason not to retry the obvious fix.
   Long-form findings go in `docs/`, not in `src/`.
+- **A comment-only pass is proved, not asserted.** If a change to `src/` is meant to touch only
+  comments, run `tools/check-comment-only.ps1 <the commit you started from>`: it compiles both
+  versions and compares normalised LuaJIT bytecode listings, so identical output means the
+  instruction stream and the constant table are unchanged. `luacheck` and the parse check pass
+  any file that *parses* — they cannot tell you an off-by-one delete has not quietly rescoped a
+  block or run a comment range into a long string. Pass the commit the pass started from, not
+  `HEAD`: once the work is committed, `HEAD` is the edit and the check passes trivially.
 
 Nothing under `tools/` or `spec/` may be referenced from `src/`: `tools/` executes arbitrary
 Lua from disk by design and is never packaged, and `tools/pack.ps1` refuses an archive that
