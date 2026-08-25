@@ -8,14 +8,32 @@
     the expected result and not a failure of the run; 100% would mean the
     bound was too loose to find anything.
 
-    WHAT "CLEARED" MEANS HERE. The character reached a second floor of its
-    starting zone (or left the zone) while alive. The bot does the clearing --
-    survive the floor and explore it to exhaustion -- and tools/soak.ps1's
-    descend rung does the stair-taking once the level reports itself explored.
-    That division is deliberate and is recorded per class as `descents`: we
-    are measuring whether a class can survive and finish a floor, not whether
-    it is willing to press '>'. Scoring by FLOOR rather than by zone is the
+    WHAT "CLEARED" MEANS HERE. The character got off its FIRST floor: the zone
+    trail shows a second real floor. The bot does the clearing -- survive the
+    floor and explore it to exhaustion -- and tools/soak.ps1's descend rung
+    does the stair-taking once the level reports itself explored. That
+    division is deliberate and is recorded per class as `descents`: we are
+    measuring whether a class can survive and finish a floor, not whether it
+    is willing to press '>'. Scoring by FLOOR rather than by zone is the
     owner's call for a faster first pass (2026-08-25).
+
+    -Minutes IS A CAP, NOT A TARGET. A class that clears floor one in thirty
+    seconds keeps going until the budget is spent, so the trail routinely runs
+    deeper than the question needs. Two consequences, and both are scoring
+    rules rather than notes:
+
+      * CLEARED OUTRANKS DIED. A class that clears floor one and dies on floor
+        three has answered this sweep's question yes. The death is recorded
+        beside it (`Deaths`, `DiedAfter`, `Killer`), never instead of it.
+      * THE EIDOLON PLANE IS A DEATH, NOT A FLOOR. A death with lives left
+        teleports there and the rescue RESETS player.dead (#61), so it can be
+        the only evidence a death happened -- and counting it as a second
+        floor would turn a death into a CLEARED. It is excluded from the trail
+        for scoring and counted in `Eidolon`.
+
+    The per-class soak records are kept beside the results, so a scoring rule
+    that turns out to be wrong can be re-applied to a finished sweep without
+    re-running any of it.
 
     WHAT IS MEASURED, AND WHAT IS NOT:
       * the roster comes from tools/unlock-classes.ps1 and is PER-RACE, since
@@ -211,15 +229,32 @@ try {
         # is not the first IS the floor being cleared -- either a descent
         # within the zone or leaving it.
         $trail = @($s.zones)
-        $first = $(if ($trail.Count -gt 0) { $trail[0] } else { '?' })
-        $moved = @($trail | Where-Object { $_ -ne $first }).Count -gt 0
 
+        # The Eidolon plane is where a death with lives left puts you, and the
+        # rescue RESETS player.dead -- so it is a death in the trail rather
+        # than a floor, and it may be the only evidence of one (#61). Counting
+        # it as a floor would turn a death into a CLEARED.
+        $eidolon   = @($trail | Where-Object { $_ -like 'eidolon-plane*' }).Count
+        $realTrail = @($trail | Where-Object { $_ -notlike 'eidolon-plane*' })
+        $firstReal = $(if ($realTrail.Count -gt 0) { $realTrail[0] } else { '?' })
+        $cleared   = @($realTrail | Where-Object { $_ -ne $firstReal }).Count -gt 0
+
+        # CLEARED outranks DIED, because the question this sweep answers is
+        # "did this class get off its FIRST floor" and the run keeps going for
+        # the whole budget afterwards. A class that clears floor one and then
+        # dies on floor three has answered the question yes; the death is
+        # recorded beside it rather than replacing it.
         $outcome = 'STUCK'
-        if     ($s.lua_errors.count -gt 0) { $outcome = 'ERROR' }
-        elseif ($s.deaths -gt 0)           { $outcome = 'DIED'  }
-        elseif ($moved)                    { $outcome = 'CLEARED' }
+        if     ($s.lua_errors.count -gt 0)          { $outcome = 'ERROR' }
+        elseif ($cleared)                           { $outcome = 'CLEARED' }
+        elseif ($s.deaths -gt 0 -or $eidolon -gt 0) { $outcome = 'DIED' }
 
-        $top = $(if ($s.stops -and @($s.stops).Count -gt 0) { "$(@($s.stops)[0].reason) x$(@($s.stops)[0].count)" } else { '' })
+        # The TOP THREE stops, not one. A class does not report "out of mana";
+        # it reports whatever the rotation did instead, and the shape of that
+        # only shows up across several reasons (owner, 2026-08-25). The full
+        # histogram stays in the .soak.json beside this.
+        $top3 = @(@($s.stops) | Select-Object -First 3 | ForEach-Object { "$($_.reason) x$($_.count)" })
+        $top  = ($top3 -join ' ; ')
         $row = [pscustomobject]@{
             Class    = $p.Class
             Tree     = $p.Tree
@@ -230,6 +265,8 @@ try {
             CharLevel= "$($s.level.start)->$($s.level.end)"
             Turns    = $s.turns.delta
             Deaths   = $s.deaths
+            Eidolon  = $eidolon
+            DiedAfter= ($cleared -and ($s.deaths -gt 0 -or $eidolon -gt 0))
             Killer   = $s.killer
             LuaErrors= $s.lua_errors.count
             Descents = $s.rungs.descend.taken
@@ -258,7 +295,7 @@ $md.Add("# Class baseline sweep -- $Race, $Minutes min per class")
 $md.Add('')
 $md.Add("**$cleared of $ran cleared their first floor ($pct%).** Stair-taking is the harness's descend rung once the level reports itself explored; the clearing is the bot's.")
 $md.Add('')
-$md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | Most common stop |')
+$md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | Most common stops |')
 $md.Add('|---|---|---|---|---|---|---|---|---|---|')
 foreach ($r in ($results | Sort-Object @{e={$_.Outcome}}, @{e={$_.Class}})) {
     $md.Add("| $($r.Class) | $($r.Tree) | $($r.Race) | **$($r.Outcome)** | $($r.Trail) | $($r.CharLevel) | $($r.Turns) | $($r.Stops) | $($r.Descents) | $($r.TopStop) |")
