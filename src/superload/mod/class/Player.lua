@@ -1761,6 +1761,58 @@ local function atLevelChange(grid)
     return stop(notice.HANDED_BACK, "standing on a level change -- asked whether to take it")
 end
 
+--- Recovery attempts allowed per activation before the low-life stop is let
+--- through anyway (#133). Three, because a recovery that has not raised the
+--- pool in three turns is not going to, and the player should be told rather
+--- than watched over indefinitely.
+local LOWLIFE_TRIES = 3
+
+--- #133: try to fix low life before handing it back.
+---
+--- LIFE_LOWLIFE is a STOP evaluated at the TURN site, before the state
+--- branch -- so the Recovery talents the player configured, which the FIGHT
+--- branch fires at a gentler threshold, never get a chance. The bot handed
+--- the game back having spent none of its options, into a situation neither
+--- restarting nor resting could change: a class lost a whole four-minute run
+--- to it without taking a single turn (#123, #133).
+---
+--- Returns true when it acted, in which case the caller must not go on to
+--- evaluate the stop this turn.
+local function tryLowLifeRecovery(ctx)
+    if not ctx or (ctx.hostiles or 0) == 0 then return false end
+    local def = conditions.find("LIFE_LOWLIFE")
+    if not def or not def.detect then return false end
+    local firing = def.detect(game.player, ctx)
+    if not firing then return false end
+
+    -- IGNORE is the player saying they do not want to be stopped for this, so
+    -- there is nothing here to save them from and the ordinary rotation --
+    -- which fires recovery on its own terms -- should be left to it.
+    local pol = getStopCondition(game.player, "LIFE_LOWLIFE")
+    if not pol or pol.stoptype == "IGNORE" then return false end
+
+    local act = bot.activation
+    if act then
+        act.lowlife = (act.lowlife or 0) + 1
+        if act.lowlife > LOWLIFE_TRIES then return false end
+    end
+
+    -- bot.loop is built AFTER this point on the first pass of an activation,
+    -- so the failed-talent filter is applied only when there is one to apply.
+    local talents = getRecoveryTalents()
+    if bot.loop then talents = filterFailedTalents(talents) end
+    if #talents == 0 then return false end
+
+    chan.info("[Survival] low life with %d in view: recovery before handing back", ctx.hostiles)
+    -- No forced target, matching the FIGHT branch's own recovery call. Aiming
+    -- these at the player is right and is #118's, which ships the placement
+    -- guard with it; doing it here would be half of that change without the
+    -- half that stops a mis-placed damage talent finishing the character off.
+    SAI_useTalent(talents[1])
+    checkForAdditionalAction()
+    return true
+end
+
 --- One loop over the condition list for a site (#12), replacing v1's
 --- checkForDebuffs / checkPowerLevel if-chains: every policy entry with a
 --- detector is evaluated in the list's order, and the first that fires under
@@ -1818,6 +1870,7 @@ function skoobot_act(noAction)
         chan.debug("[Score] threat %s, posture %s: %s", ctx.score.suffix:sub(12), ctx.score.posture,
             table.concat(ctx.score.reasons, "; "))
     end
+    if tryLowLifeRecovery(ctx) then return end
     if checkConditions(conditions.SITE_TURN, ctx) then return end
     if #hostiles > 0 then
         bot.state = STATE_FIGHT
