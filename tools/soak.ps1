@@ -186,6 +186,24 @@ param(
     # measured rather than the depth.
     [ValidateSet('always', 'ask', 'never', 'leave')]
     [string]$TakeStairs = 'always',
+    # #145: consecutive polls in which the clock moved and the character did
+    # not. Demonologist burned a whole run at 130,393 game turns with ZERO
+    # stops -- so every existing ending missed it, because they all key on a
+    # stop reason repeating. Turns advancing while the character stands still
+    # is the one signal that needs no stop to read.
+    #
+    # It is measured as DISTINCT POSITIONS over a window, not as a position
+    # that never changes: the owner watched the Demonologist run back and forth
+    # diagonally the whole time. A character pacing between two tiles is going
+    # nowhere exactly as much as one standing on a single tile, and a
+    # fixed-position test would have missed the run this exists for.
+    #
+    # 0 disables. Polls are a few seconds apart, so 15 is on the order of a
+    # minute: long past anything a fight or a rest explains.
+    [int]$IdleAfter = 15,
+    # Distinct grids in that window that still count as going nowhere. 3 covers
+    # standing still, pacing between two tiles, and a three-tile shuffle.
+    [int]$IdleDistinct = 3,
     # The player's stop-condition policies for this run, "CODE=WARN|STOP|IGNORE,..."
     # (e.g. "SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN"), applied through
     # skoobot_reclauded.conditions.set and recorded in the summary.
@@ -814,6 +832,8 @@ return "installed save_name=" .. tostring(game.save_name)
 
     $deadline = $started.AddMinutes($MaxMinutes)
     $lastReason = $null; $lastStopTurn = -1; $sameCount = 0; $stuckStage = 0
+    $idleWhere = New-Object System.Collections.Generic.List[string]
+    $idleTurn = -1; $idleTurn0 = -1
     $s = $null
 
     # (f)/(g) helpers over the loop's state. A walk ends in one of three ways,
@@ -887,6 +907,27 @@ return "installed save_name=" .. tostring(game.save_name)
                 $killer = (@($tailLog | Where-Object { $_ -match 'kill|slain|die' } | Select-Object -Last 1) -join '')
             }
             $endReason = 'DEATH'; break
+        }
+        # #145: going nowhere, measured without needing a stop to key on. Only
+        # while the bot is ACTIVE and no stop has fired -- a bot that has handed
+        # back is standing still because it was told to, and the stop-based
+        # endings own that case.
+        if ($IdleAfter -gt 0) {
+            if ($s.active -eq 'true' -and [int]$s.turn -gt $idleTurn) {
+                $null = $idleWhere.Add("$($s.x),$($s.y)")
+                while ($idleWhere.Count -gt $IdleAfter) { $idleWhere.RemoveAt(0) }
+                if ($idleWhere.Count -ge $IdleAfter) {
+                    $distinct = @($idleWhere | Sort-Object -Unique)
+                    if ($distinct.Count -le $IdleDistinct) {
+                        $stuckLabel = "IDLE $($distinct.Count) grid(s) in $($idleWhere.Count) polls while the clock ran ($idleTurn0 -> $($s.turn)): $($distinct -join ' ')"
+                        $endReason = 'IDLE'; break
+                    }
+                }
+                if ($idleWhere.Count -eq 1) { $idleTurn0 = [int]$s.turn }
+            } else {
+                $idleWhere.Clear()
+            }
+            $idleTurn = [int]$s.turn
         }
         if ((Get-Date) -ge $deadline) { $endReason = 'MAX_MINUTES'; break }
         if ($MaxLevel -gt 0 -and $s.level -ge $MaxLevel) { $endReason = 'MAX_LEVEL'; break }
@@ -1170,7 +1211,7 @@ finally {
     # endings that do not say why they happened; DEATH and EIDOLON name their
     # killer, and the limit endings are the run working.
     $captureFiles = @()
-    if ($TimeoutActionCaptures -gt 0 -and $endReason -in @('MAX_MINUTES', 'STUCK')) {
+    if ($TimeoutActionCaptures -gt 0 -and $endReason -in @('MAX_MINUTES', 'STUCK', 'IDLE')) {
         $base  = [IO.Path]::GetFileNameWithoutExtension($OutFile)
         $outDirC = Split-Path -Parent $OutFile
         $notes = New-Object System.Collections.Generic.List[string]
