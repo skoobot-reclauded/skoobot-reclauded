@@ -678,6 +678,44 @@ local function knownLevelChanges()
     return n
 end
 
+--- A door the engine has already refused to explore past, right next to us.
+---
+--- ToME marks a vault or locked door `autoexplore_ignore` when explore stops at
+--- it and then leaves it out of the target list -- "we only run to a vault or
+--- locked door once". But while the character stands NEXT to it, the flag is
+--- what puts it straight back in at cost 1, so explore targets it, stops on it
+--- and refuses again. Standing still is what makes the engine's own guard
+--- self-defeating. See #136.
+local function adjacentRefusedDoor()
+    local p, map = game.player, game.level and game.level.map
+    if not map then return nil end
+    for _, dir in ipairs(util.adjacentDirs()) do
+        local x, y = util.coordAddDir(p.x, p.y, dir)
+        if x >= 0 and y >= 0 and x < map.w and y < map.h
+           and map.attrs(x, y, "autoexplore_ignore") and bot.needsConsent(x, y) then
+            return x, y
+        end
+    end
+    return nil
+end
+
+--- One step that breaks adjacency with (gx, gy). Exits are chosen after doors
+--- in the same target chain, so once the door is out of the list explore walks
+--- to the stairs on its own and no route has to be built here.
+local function stepOffDoor(gx, gy)
+    local p = game.player
+    local bx, by, bd
+    for _, dir in ipairs(util.adjacentDirs()) do
+        local sx, sy = util.coordAddDir(p.x, p.y, dir)
+        if p:canMove(sx, sy) and not bot.needsConsent(sx, sy) then
+            local d = core.fov.distance(sx, sy, gx, gy)
+            if d > 1 and (not bd or d > bd) then bx, by, bd = sx, sy, d end
+        end
+    end
+    if not bx then return false end
+    return p:move(bx, by) and true or false
+end
+
 local function SAI_beginExplore()
     if bot.do_nothing then
         game.log("[SkooBot] AI would begin exploring.")
@@ -688,6 +726,21 @@ local function SAI_beginExplore()
     if game.player:autoExplore() then
         return game.player:act()
     else
+        -- #136: a refusal while standing beside a refused door is not a
+        -- finished level, and reporting one sent the run round again.
+        local dx, dy = adjacentRefusedDoor()
+        if dx then
+            local t = game.level.map(dx, dy, engine.Map.TERRAIN)
+            local what = t and t.name or "a door"
+            if stepOffDoor(dx, dy) then
+                chan.info("[Action] Stepping away from %s so exploring can move on.",
+                          tostring(what))
+                return
+            end
+            return stop(notice.HANDED_BACK,
+                ("%s is the only way on, and there is no step away from it"):format(
+                    tostring(what)))
+        end
         -- #103: a refusal is not an inability. autoExplore returns false only
         -- when it can reach nothing worth going to, so the level is finished
         -- and this is a hand-back. The stairs are named when the player has
