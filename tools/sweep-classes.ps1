@@ -360,6 +360,13 @@ try {
             Eidolon  = $eidolon
             DiedAfter= ($cleared -and ($s.deaths -gt 0 -or $eidolon -gt 0))
             Killer   = $s.killer
+            # #132: escorts per class. SelfKill is the number this exists for --
+            # the escortee killed by this character's own effects, which is
+            # otherwise indistinguishable from one killed by a troll.
+            Escorts  = (($s.escorts.granted, 0) -ne $null)[0]
+            EscDone  = (($s.escorts.done, 0) -ne $null)[0]
+            EscFail  = (($s.escorts.failed, 0) -ne $null)[0]
+            SelfKill = (($s.escorts.selfkills, 0) -ne $null)[0]
             LuaErrors= $s.lua_errors.count
             # The stairs the HARNESS took, which is rungs.descend only when it
             # had to walk there first. Auto-explore usually walks there itself
@@ -411,10 +418,11 @@ if ($offZone.Count -gt 0) {
     $md.Add("Reported but NOT in that percentage, because they do not start in Trollmire and so did not clear the same floor: " + (($offZone | ForEach-Object { "$($_.Class) ($($_.StartZone))" }) -join ', ') + '.')
 }
 $md.Add('')
-$md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | Most common stops |')
-$md.Add('|---|---|---|---|---|---|---|---|---|---|')
+$md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | Escorts | Most common stops |')
+$md.Add('|---|---|---|---|---|---|---|---|---|---|---|')
 foreach ($r in ($results | Sort-Object @{e={$_.Outcome}}, @{e={$_.Class}})) {
-    $md.Add("| $($r.Class) | $($r.Tree) | $($r.Race) | **$($r.Outcome)** | $($r.Trail) | $($r.CharLevel) | $($r.Turns) | $($r.Stops) | $($r.Descents) | $($r.TopStop) |")
+    $esc = if ($r.Escorts -gt 0) { "$($r.EscDone)/$($r.Escorts)$(if ($r.SelfKill -gt 0) { " **-$($r.SelfKill) self**" })" } else { '-' }
+    $md.Add("| $($r.Class) | $($r.Tree) | $($r.Race) | **$($r.Outcome)** | $($r.Trail) | $($r.CharLevel) | $($r.Turns) | $($r.Stops) | $($r.Descents) | $esc | $($r.TopStop) |")
 }
 $md.Add('')
 $md.Add('`Descents` counts stairs the HARNESS took, so it says how much of a `CLEARED` was injected; the clearing itself is the bot''s. A `STUCK` row is not necessarily a class problem -- read the stop column first, because a known bug eating the whole budget (a sealed door, #64; a talent that opens a dialog every turn) looks exactly like a class that cannot cope.')

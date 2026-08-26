@@ -668,6 +668,46 @@ end
 -- suppression at :184 applies only to savefile shots -- and the dialog is
 -- usually the thing worth seeing. Written to the module dir, the same write
 -- path the dossiers use (#135); /skoobot-bridge/ is not writable.
+-- #132: escort outcomes, per run, read from the QUEST.
+--
+-- NOT from registerEscorts: that writes a lifetime tally to the ACCOUNT
+-- profile (mod/class/interface/PlayerStats.lua:60), so it cannot be attributed
+-- to a run, and a measurement rig incrementing it would be writing to the
+-- player's own profile -- the mistake the sweep already made once with
+-- TAKE_STAIRS.
+--
+-- The game separates the case this exists for: escort-duty.lua:146 records
+-- `killing_npc` on the quest, and it is the CHARACTER'S OWN NAME when the
+-- bot's own effects did it. An escort killed by the bot and one killed by a
+-- troll are otherwise indistinguishable.
+--
+-- Ids are "escort-duty-<zone>-<level>" (escort-duty.lua:54), so a run can
+-- carry several and each says where it was granted.
+function sk.escorts()
+  local p = game.player
+  if not p or not p.quests then return "none" end
+  local out = {}
+  for id, q in pairs(p.quests) do
+    if tostring(id):find("^escort%-duty") then
+      local st = tonumber(q.status)
+      local status = (st == 100 and "DONE") or (st == 101 and "FAILED")
+                  or (st == 1 and "COMPLETED") or (st == 0 and "PENDING")
+                  or ("UNKNOWN:" .. tostring(q.status))
+      local killer = tostring(q.killing_npc or "")
+      out[#out+1] = table.concat({
+        "id=" .. tostring(id),
+        "kind=" .. tostring(q.kind_id or "?"),
+        "status=" .. status,
+        "granted_turn=" .. tostring(q.gained_turn or "?"),
+        "killer=" .. killer,
+        "selfkill=" .. tostring(killer ~= "" and killer == tostring(p.name)),
+      }, ",")
+    end
+  end
+  if #out == 0 then return "none" end
+  return table.concat(out, " | ")
+end
+
 function sk.shot(name)
   local ok, s = pcall(game.takeScreenshot, game)
   if not ok then return "ERR takeScreenshot " .. tostring(s) end
@@ -1060,6 +1100,33 @@ finally {
             }
         }
     } catch { }
+    # #132: read the escort quests before the game goes away. Parsed here into
+    # rows so the summary carries structure rather than a string the sweep would
+    # have to re-parse.
+    $escortRows = @()
+    $esc = Invoke-Bridge -Lua 'return sk.escorts()' -TimeoutSec 30
+    if ($esc.Status -eq 'OK' -and $esc.Result -and $esc.Result -ne 'none') {
+        foreach ($part in ($esc.Result -split ' \| ')) {
+            $h = @{}
+            foreach ($kv in ($part -split ',')) {
+                $eq = $kv.IndexOf('=')
+                if ($eq -gt 0) { $h[$kv.Substring(0, $eq)] = $kv.Substring($eq + 1) }
+            }
+            $escortRows += [pscustomobject]@{
+                id           = $h['id']
+                kind         = $h['kind']
+                status       = $h['status']
+                granted_turn = $h['granted_turn']
+                killer       = $h['killer']
+                selfkill     = ($h['selfkill'] -eq 'true')
+            }
+        }
+        $sk = @($escortRows | Where-Object { $_.selfkill }).Count
+        Write-Host "  escorts  $($escortRows.Count): $((($escortRows | ForEach-Object { "$($_.kind)=$($_.status)" }) -join ', '))$(if ($sk -gt 0) { " -- $sk killed by this character" })"
+    } else {
+        Write-Host "  escorts  none"
+    }
+
     # #138: BEFORE the bot is stopped and before Stop-Game, or the state that
     # needs explaining is already gone. MAX_MINUTES and STUCK are the two
     # endings that do not say why they happened; DEATH and EIDOLON name their
@@ -1167,6 +1234,14 @@ finally {
         rules_source = $(if ($NoAutoRules) { 'none' } elseif ($ProposedRules) { 'loadout-proposal' } else { 'every-known-talent' })
         dossier      = $dossierFile
         captures     = @($captureFiles)
+        escorts      = [ordered]@{
+            granted   = $escortRows.Count
+            done      = @($escortRows | Where-Object { $_.status -eq 'DONE' }).Count
+            failed    = @($escortRows | Where-Object { $_.status -eq 'FAILED' }).Count
+            pending   = @($escortRows | Where-Object { $_.status -eq 'PENDING' }).Count
+            selfkills = @($escortRows | Where-Object { $_.selfkill }).Count
+            rows      = @($escortRows)
+        }
         conditions   = @($conditionsApplied)
         scratch_save = $ScratchSave
     }
@@ -1185,6 +1260,10 @@ finally {
     $md.Add("| level | $($summary.level.start) -> $($summary.level.end) (max $peakLevel, limit $MaxLevel) |")
     $md.Add("| zones | $($zoneTrail -join ' > ') |")
     $md.Add("| deaths | $deaths$(if ($killer) { " (killed by $killer)" }) |")
+    if ($escortRows.Count -gt 0) {
+        $sk2 = @($escortRows | Where-Object { $_.selfkill }).Count
+        $md.Add("| escorts | $($escortRows.Count) granted, $(@($escortRows | Where-Object { $_.status -eq 'DONE' }).Count) done, $(@($escortRows | Where-Object { $_.status -eq 'FAILED' }).Count) failed$(if ($sk2 -gt 0) { ", **$sk2 killed by this character**" }) |")
+    }
     if ($captureFiles.Count -gt 0) { $md.Add("| captures | $($captureFiles -join ', ') (+ $([IO.Path]::GetFileNameWithoutExtension($OutFile)).timeout.txt) |") }
     $md.Add("| stops | $($summary.stop_total) across $($stopRows.Count) reason(s) |")
     $md.Add("| resumes | $($summary.resumes.total) |")
