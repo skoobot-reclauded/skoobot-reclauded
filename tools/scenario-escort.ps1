@@ -291,6 +291,48 @@ return out
     }
     $null = Assert-Result $hold 'and it is still the escort state' -Match 'state=SAI_STATE_ESCORT'
 
+    # ----- H: the hold is bounded (#129) -------------------------------------
+    Write-Host ''
+    Write-Host '  --- H. holding is bounded: a motionless escortee is not waited for forever'
+    $bound = Probe @'
+es.reset()
+local p, npc = game.player, es.npc
+-- Beside us, so the plan is HOLD.
+local put = nil
+for _, c in pairs(util.adjacentCoords(p.x, p.y)) do
+  local x, y = c[1], c[2]
+  if game.level.map:isBound(x, y) and not game.level.map:checkAllEntities(x, y, "block_move")
+     and not game.level.map(x, y, engine.Map.ACTOR) then put = { x, y } break end
+end
+if not put then return "SETUP no free tile beside the player" end
+npc:move(put[1], put[2], true)
+p:playerFOV()
+local e = dofile("/data-skoobot_reclauded/escort.lua")
+es.b.state = 11
+es.b.start()
+if not es.b.activation then return "SETUP the start left no activation" end
+-- Stage the counter at the limit, with the escortee recorded where it now
+-- stands, so the next decision is the one that must give up.
+es.b.activation.escortholds = e.HOLD_LIMIT
+es.b.activation.escortx, es.b.activation.escorty = npc.x, npc.y
+es.b.active = false; es.b.last_reason = nil
+while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end
+es.b.query()
+local out = ("limit=%d holds=%s state=%s reason=%s"):format(
+  e.HOLD_LIMIT, tostring(es.b.activation and es.b.activation.escortholds),
+  es.b.inspect():match("state=(%S+)"), tostring(es.b.last_reason))
+if es.b.active then es.b.stop("measured") end
+return out
+'@ 120
+    Write-Host "  $($bound.Result)"
+    if ($bound.Result -match '^SETUP') { Inconclusive $bound.Result }
+    $null = Assert-Result $bound 'past the limit it stops waiting and hands back' -Match 'has not moved for \d+ turns'
+    $null = Assert-Result $bound 'and names the escortee' -Match 'reason=.*: \S'
+    # holds=nil, not holds=0: stop() clears the activation, so the counter goes
+    # with it and a resume starts from a fresh budget either way. Asserting the
+    # activation is gone is the invariant that actually holds.
+    $null = Assert-Result $bound 'the activation is cleared, so a resume starts fresh' -Match 'holds=nil'
+
     # ----- F: IGNORE --------------------------------------------------------
     Write-Host ''
     Write-Host '  --- F. IGNORE means explore as if the escort were not happening'

@@ -162,6 +162,19 @@ describe("data/escort.lua", function()
     end)
   end)
 
+  describe("the hold bound (#129)", function()
+    it("exists, and is not so small that the escortee's own idling trips it", function()
+      -- mod/ai/escort.lua:64 -- it stops 35% of its own turns on purpose, so a
+      -- run of a few holds is ordinary and only a long one means anything.
+      assert.is_true(M.HOLD_LIMIT >= 10)
+    end)
+
+    it("is finite: holding was unbounded, which cost 4.7x the game time", function()
+      assert.is_number(M.HOLD_LIMIT)
+      assert.is_true(M.HOLD_LIMIT < math.huge)
+    end)
+  end)
+
   describe("the band itself", function()
     it("is ordered, and leaves room to stand", function()
       assert.is_true(M.FOLLOW_NEAR >= 1)

@@ -1957,9 +1957,28 @@ function skoobot_act(noAction)
         if plan == escortm.HOLD then
             -- The escortee walks itself (mod/ai/escort.lua move_escort), and it
             -- idles 35% of turns to let the player keep up, so standing still
-            -- IS the move. Waiting is a real action, so #13's progress
-            -- invariant reads it as one.
-            if act then act.escorts = 0 end
+            -- IS the move -- for a while. #129: this reset the counter on every
+            -- hold, so only CLOSING was ever bounded and a hold could repeat for
+            -- the whole run. Waiting is a real action, so #13 saw progress and
+            -- nothing reported it.
+            --
+            -- Bounded on holds where the escortee did not move either: if
+            -- neither of us is going anywhere, waiting cannot help.
+            if act then
+                act.escorts = 0
+                local stillThere = (act.escortx == npc.x and act.escorty == npc.y)
+                act.escortx, act.escorty = npc.x, npc.y
+                if stillThere then
+                    act.escortholds = (act.escortholds or 0) + 1
+                    if act.escortholds > escortm.HOLD_LIMIT then
+                        act.escortholds = 0
+                        return stop(notice.HANDED_BACK, ("%s has not moved for %d turns"):format(
+                            escortm.name(npc), escortm.HOLD_LIMIT))
+                    end
+                else
+                    act.escortholds = 0
+                end
+            end
             chan.debug("[Escort] holding: %s", tostring(why))
             SAI_wait(npc)
             checkForAdditionalAction()

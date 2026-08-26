@@ -30,6 +30,20 @@ M.FOLLOW_FAR  = 4
 --- STATE_SEEK bounds its own walk (#78).
 M.STEP_LIMIT = 80
 
+--- Consecutive turns of holding, with the escortee not moving either, before
+--- the branch stops waiting and hands back.
+---
+--- Holding was unbounded until #129, which measured escort runs at 4.7x the
+--- game time of runs without one -- the three highest turn counts in a
+--- 24-class sweep were all escorts, with the FEWEST stops. Waiting is a real
+--- action, so #13's liveness invariant is satisfied on every iteration and
+--- nothing reported it: a productive-looking idle.
+---
+--- 20 rather than a smaller number because the escortee idles 35% of its own
+--- turns by design (mod/ai/escort.lua:64), so short runs of holding are
+--- normal and only a long one means nothing is going to happen.
+M.HOLD_LIMIT = 20
+
 local function isTable(v) return type(v) == "table" end
 
 --- The escortee among `actors`, or nil.
