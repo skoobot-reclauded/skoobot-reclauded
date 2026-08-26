@@ -35,8 +35,12 @@
       B. the bug is real: with the bot left to itself the check dialog opens;
       C. THE FIX: with the dialog closed, one decision steps AWAY -- distance
          to the door goes above 1 -- instead of walking back in;
-      D. and it is bounded, so a door beside the only route out cannot turn
-         into an oscillation.
+      D. #137 first pass: once the step-off allowance is spent the bot heads
+         for a known way off the level instead of handing back, so the door
+         dialog never comes back and the character does not end up beside it
+         again. NOT asserted here: the no-way-off fallback, which needs a level
+         with no seen level change and cannot be staged on this fixture -- the
+         fixture starts standing on one.
 
     Exit codes:  0 pass   1 fail   2 tainted   3 inconclusive (no free grid
     beside the player -- a setup problem, never a product failure)
@@ -177,19 +181,30 @@ local d = _G.__dr
 -- harness does after a hand-back. The bound used to live on the activation,
 -- so this cleared it every time and the oscillation was unbounded in the one
 -- configuration it mattered in. It must still bound.
-local reasons = {}
-for i = 1, 8 do
-  game.player:move(d.x - 1, d.y, true)
+--
+-- #137 first pass: once the bound is used up the bot should head for the way
+-- off the level rather than hand back, so the later iterations are expected to
+-- report no stop at all.
+-- No teleporting between iterations: a forced move grants no energy, so the
+-- next real step is refused and the run reads as a product failure when it is
+-- the probe's. Let the bot decide for itself and watch where it ends up.
+local out = {}
+for i = 1, 10 do
   b.active = false ; b.state = 11
   b.activation = nil ; b.loop = nil ; b.prevloop = nil
   b.start()
-  reasons[#reasons+1] = tostring(b.last_reason)
+  out[#out+1] = ("%d:%s@%d,%d"):format(i, tostring(b.last_reason), game.player.x, game.player.y)
   if #game.dialogs > 0 then bridge.key("EXIT") end
 end
-return table.concat(reasons, " | ")
+out[#out+1] = ("final dist to door=%s"):format(tostring(dr.dist()))
+return table.concat(out, " | ")
 '@
     Write-Host "  bounded: $($bounded.Result)"
-    Check ($bounded.Result -match 'keeps drawing exploring back|is the only way on') 'repeated draws are bounded and reported, not spun on'
+    $dialogRepeats = ([regex]::Matches($bounded.Result, 'a dialog is open: sealed door')).Count
+    Check ($dialogRepeats -le 1) 'the door dialog does not come back'
+    $finalDist = if ($bounded.Result -match 'final dist to door=(-?\d+)') { [int]$Matches[1] } else { -1 }
+    Check ($finalDist -gt 1) 'and the character does not end up beside the door again'
+    Check ($bounded.Result -notmatch 'keeps drawing exploring back') 'the pre-#137 give-up message is not reached when a way off exists'
 
     $null = Invoke-Bridge -TimeoutSec 30 -Lua 'skoobot_reclauded.stop("done") return dr.restore()'
 }

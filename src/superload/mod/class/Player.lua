@@ -715,6 +715,32 @@ end
 bot.levelBump  = levelBump
 bot.levelState = levelState
 
+--- The nearest level change the PLAYER has seen, cached for the level.
+---
+--- The scan is the whole map, which knownLevelChanges() only ever does once
+--- because it is expensive; this runs on every decision while walking to the
+--- exit, so the answer is remembered instead. A level change does not move.
+--- `has_seens` is the engine's own memory, so this only ever names stairs the
+--- character actually found. See #137.
+local function vaultExit()
+    local st = levelState("vaultexit")
+    if st.done then return st.x, st.y end
+    st.done = true
+    local map, p = game.level and game.level.map, game.player
+    if not map then return nil end
+    local bd
+    for x = 0, map.w - 1 do
+        for y = 0, map.h - 1 do
+            if map.has_seens(x, y)
+               and map:checkEntity(x, y, engine.Map.TERRAIN, "change_level") then
+                local d = core.fov.distance(p.x, p.y, x, y)
+                if not bd or d < bd then st.x, st.y, bd = x, y, d end
+            end
+        end
+    end
+    return st.x, st.y
+end
+
 --- A door the engine has already refused to explore past, right next to us.
 ---
 --- ToME marks a vault or locked door `autoexplore_ignore` when explore stops at
@@ -774,8 +800,46 @@ local function SAI_beginExplore()
         -- this another three tries, and a second vault deserves its own (#140).
         local tries = levelBump(("stepoff:%d,%d"):format(dx, dy))
         if tries > STEPOFF_TRIES then
-            return stop(notice.HANDED_BACK,
-                ("%s keeps drawing exploring back; the way on needs you"):format(
+            -- #137, first pass: a vault the bot cannot get past is not a
+            -- reason to end the run. Walk to a way off the level instead and
+            -- let #86's offer decide whether to take it -- so this ignores the
+            -- vault without deciding to skip its contents, which is the part
+            -- that is still the player's.
+            --
+            -- Deliberately unconditional for now. Asking, and remembering the
+            -- answer as categorically / this one / never, is what #137 stays
+            -- open for.
+            local lx, ly = vaultExit()
+            if not lx then
+                return stop(notice.HANDED_BACK,
+                    ("%s blocks the way on, and no way off this level has been found"):format(
+                        tostring(what)))
+            end
+            -- Already standing on it. The explore branch checks for that
+            -- before ever calling here, so reaching this means the #62
+            -- exemption is holding it back -- the activation started on this
+            -- tile. Say where the way out is rather than pathing to where we
+            -- already are, which returns an empty path and reads as failure.
+            if lx == game.player.x and ly == game.player.y then
+                return stop(notice.HANDED_BACK,
+                    ("%s blocks the way on; you are standing on the way out"):format(
+                        tostring(what)))
+            end
+            local path = Astar.new(game.level.map, game.player):calc(
+                game.player.x, game.player.y, lx, ly,
+                nil, nil, function(x, y) return not bot.needsConsent(x, y) end)
+            if not path or #path == 0 then
+                return stop(notice.HANDED_BACK,
+                    ("%s blocks the way on, and the way out at %d,%d cannot be reached"):format(
+                        tostring(what), lx, ly))
+            end
+            if SAI_movePlayer(path[1].x, path[1].y) then
+                chan.info("[Action] Ignoring %s; heading for the way off this level.",
+                          tostring(what))
+                return
+            end
+            return stop(notice.CANNOT_ACT,
+                ("could not step towards the way off this level, past %s"):format(
                     tostring(what)))
         end
         if stepOffDoor(dx, dy) then
