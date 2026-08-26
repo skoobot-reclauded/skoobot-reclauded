@@ -556,13 +556,14 @@ end
 --- Retire one, and say so once. The player is told because a talent silently
 --- vanishing from the rotation is the kind of thing that reads as the bot
 --- ignoring their configuration.
-local function retireTalent(tid, name)
+local function retireTalent(tid, name, why)
     local out = retiredTalents(game.player)
     if out[tid] then return end
     out[tid] = true
-    chan.warn("[Talent] %s raised an engine error and will not be used again on this character", tostring(name))
-    game.log("#YELLOW#[SkooBot] %s raised an error and has been dropped from the rotation for this character.",
-        tostring(name))
+    why = why or "raised an engine error"
+    chan.warn("[Talent] %s %s and will not be used again on this character", tostring(name), why)
+    game.log("#YELLOW#[SkooBot] %s %s, and has been dropped from the rotation for this character.",
+        tostring(name), why)
 end
 
 bot.retiredTalents = function(p) return retiredTalents(p) end
@@ -619,18 +620,27 @@ local function SAI_useTalent(tid, who, force_level, ignore_cd, target)
     -- The mark lands before the caller's checkForAdditionalAction(), which is
     -- what lets Attack follow a refused Rockswallow inside one iteration
     -- (scenario-t010-marked-target).
+    -- #131: a talent that ASKS THE PLAYER SOMETHING cannot be driven by the
+    -- bot, and it does not raise, so #130's error sweep never sees it. Arcane
+    -- Combat opened its spell picker on all 25 restarts of a four-minute run;
+    -- the character took 20 game turns in total.
+    --
+    -- talentDialog pushes onto the engine's own list and THEN yields
+    -- (engine/interface/ActorTalents.lua:1261-1278), removing the entry only
+    -- once the coroutine resumes -- so when useTalent returns the entry is
+    -- still there, and the list growing across the call is an exact marker.
+    -- A bare "#game.dialogs grew" test would instead retire a good attack
+    -- talent the first time one of its kills opened the level-up dialog.
+    local dlist = game.player.talentDialogData and select(1, game.player:talentDialogData())
+    local dbefore = (type(dlist) == "table") and #dlist or 0
+
     local ret = game.player:useTalent(tid, who, force_level, ignore_cd, target, false, true)
     if ret == false and bot.loop then bot.loop.talentfailed[tid] = true end
 
-    -- #130: a talent that RAISED is not a talent that refused, and marking it
-    -- failed for the iteration is not enough -- the next iteration tries it
-    -- again. Three staff classes raised on Command Staff fourteen to sixteen
-    -- times in a four-minute run.
-    --
-    -- useTalent clears talent_error at its start (engine/interface/
-    -- ActorTalents.lua:146), so a non-nil one here belongs to THIS call and
-    -- nothing else. Retire the talent for the character: it cannot be made to
-    -- work by trying harder, and the reason it failed will not change.
+    if type(dlist) == "table" and #dlist > dbefore then
+        retireTalent(tid, name, "asks a question the bot cannot answer")
+        if bot.loop then bot.loop.talentfailed[tid] = true end
+    end
     return ret
 end
 
