@@ -162,6 +162,56 @@ if ($suspects.Count -eq 0) {
 }
 Say ''
 
+# ------------------------------------------------------------------ deaths ---
+# #135's payoff: a death with a warning raised is the product judging the fight
+# and losing it; a death with nothing raised is the scoring failing to see it
+# coming. They read identically in the outcome column and they are opposite
+# problems -- the first wants better tactics, the second wants better numbers.
+$deathRows = @()
+foreach ($r in $rows) {
+    $dp = Join-Path $Dir ($r.File + '.soak.dossier.json')
+    if (-not (Test-Path $dp)) { $dp = Join-Path $Dir ($r.File + '.dossier.json') }
+    if (-not (Test-Path $dp)) { continue }
+    try { $d = Get-Content $dp -Raw | ConvertFrom-Json } catch {
+        $deathRows += [pscustomobject]@{ Class = $r.Row.Class; Moment = 'UNREADABLE'; Killer = "$($_.Exception.Message)"; Warned = ''; Terms = '' }
+        continue
+    }
+    foreach ($rec in @($d.records)) {
+        if ($rec.moment -ne 'death' -and $rec.moment -ne 'predicted_lethal') { continue }
+        $flags = @()
+        if ($rec.score -and $rec.score.flags) {
+            foreach ($n in $rec.score.flags.PSObject.Properties) { if ($n.Value) { $flags += $n.Name } }
+        }
+        # source may be a same-ref to the player, or a form reference
+        $killer = '?'
+        $src = $rec.source
+        if ($src -and $src.same -eq 'player') { $killer = '(self)' }
+        elseif ($src -and $src.form -and $d.creatures.($src.form)) { $killer = $d.creatures.($src.form).name }
+        $deathRows += [pscustomobject]@{
+            Class  = $r.Row.Class
+            Moment = $rec.moment
+            Killer = $killer
+            Warned = $(if ($flags.Count) { ($flags -join ' ') } else { 'NOTHING RAISED' })
+            Terms  = $(if ($rec.score -and $rec.score.terms) { "stronger=$([math]::Round(($rec.score.terms.stronger, 0 -ne $null)[0],2))" } else { '' })
+        }
+    }
+}
+if ($deathRows.Count -gt 0) {
+    Say '## Deaths, and whether anything was raised first'
+    Say ''
+    Say 'A death with a flag raised is the product judging the fight and losing it. A death with **NOTHING RAISED** is the scoring not seeing it coming -- the opposite problem, and the one the thresholds are for.'
+    Say ''
+    Say '| Class | Moment | Killer | Flags at the time | |'
+    Say '|---|---|---|---|---|'
+    foreach ($x in ($deathRows | Sort-Object Class, Moment)) {
+        Say "| $($x.Class) | $($x.Moment) | $($x.Killer) | $($x.Warned) | $($x.Terms) |"
+    }
+    Say ''
+    $unwarned = @($deathRows | Where-Object { $_.Moment -eq 'death' -and $_.Warned -eq 'NOTHING RAISED' })
+    Say "**$($unwarned.Count) of $(@($deathRows | Where-Object { $_.Moment -eq 'death' }).Count) confirmed deaths had nothing raised.**"
+    Say ''
+}
+
 # ------------------------------------------------------------------ evidence --
 $shots = @(Get-ChildItem (Join-Path $Dir '*.timeout-*.png') -ErrorAction SilentlyContinue)
 $doss  = @(Get-ChildItem (Join-Path $Dir '*.dossier.json') -ErrorAction SilentlyContinue)
