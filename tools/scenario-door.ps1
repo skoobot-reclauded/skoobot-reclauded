@@ -31,7 +31,9 @@
     real terrain predicate rather than a name match. It is restored afterwards.
 
     What is driven, on the fixture:
-      A. the staged door is a consent grid and is marked ignored;
+      A. the staged door is a consent grid, and starts UNMARKED as a real one
+         does -- the engine marks only doors EXPLORE stopped at, never one the
+         character was walked into;
       B. the bug is real: with the bot left to itself the check dialog opens;
       C. THE FIX: with the dialog closed, one decision steps AWAY -- distance
          to the door goes above 1 -- instead of walking back in;
@@ -92,7 +94,11 @@ function dr.place()
         d.door_player_check = "This door seems to have been sealed off."
         d.door_opened = "DOOR_OPEN"
         map(x, y, engine.Map.TERRAIN, d) ; map:updateMap(x, y)
-        map.attrs(x, y, "autoexplore_ignore", true)
+        -- NOT set here. The engine only marks a door it stopped EXPLORING at,
+        -- never one the character was walked into, so pre-setting it staged a
+        -- condition a real run never reaches and hid that both fixes were
+        -- inert. The bot must set it itself. See #136.
+        map.attrs(x, y, "autoexplore_ignore", nil)
         _G.__dr = { x = x, y = y, old = old }
         p:playerFOV()
         return ("door=%d,%d player=%d,%d consent=%s ignore=%s"):format(
@@ -141,7 +147,7 @@ return "installed"
         Stop-Game; exit 3
     }
     Check ($place.Result -match 'consent=true') 'the staged door is a consent grid'
-    Check ($place.Result -match 'ignore=true')  'and is marked autoexplore_ignore'
+    Check ($place.Result -match 'ignore=nil')   'and starts UNMARKED, as a real vault door does'
 
     # -----------------------------------------------------------------------
     # B. The bug is real: left to itself, the bot ends up at the door's dialog.
@@ -154,6 +160,8 @@ return "installed"
         $null = Invoke-Bridge -TimeoutSec 30 -Lua 'if not skoobot_reclauded.active then skoobot_reclauded.start() end return "kick"'
     }
     Check $sawDialog 'the door check dialog does open (the loop this fixes is real)'
+    $flag = (Invoke-Bridge -TimeoutSec 30 -Lua 'return tostring(game.level.map.attrs(_G.__dr.x, _G.__dr.y, "autoexplore_ignore"))').Result
+    Check ($flag -eq 'true') 'and the bot marks it itself, since the engine does not'
 
     # -----------------------------------------------------------------------
     # C. The fix. Close the dialog, then take ONE decision: it must step away.

@@ -1073,6 +1073,38 @@ local function needsConsent(x, y)
     return false
 end
 bot.needsConsent = function(x, y) return needsConsent(x, y) end
+
+--- Mark an adjacent consent grid the way the ENGINE marks one it stopped at.
+---
+--- ToME sets `autoexplore_ignore` on a vault or locked door only when EXPLORE
+--- stops at it (PlayerExplore.lua:2454, :2505, :2590). Being walked INTO one
+--- and getting its check dialog does not set it -- measured: staged a sealed
+--- door, let the bot reach its dialog, and the attribute was nil throughout.
+---
+--- That mattered because #136's step-off and #137's walk-to-the-exit both
+--- keyed on the flag, so in a real run neither ever engaged; they passed their
+--- scenario only because the scenario set the flag itself.
+---
+--- Setting it here is not a new policy. It is the engine's own "we only run to
+--- a vault or locked door once" applied at the one moment the bot knows it was
+--- walked into one, and it also stops the flood-fill scan re-targeting the
+--- door from across the level (:2013).
+local function markWalkedInto()
+    local p, map = game.player, game.level and game.level.map
+    if not map then return 0 end
+    local n = 0
+    for _, dir in ipairs(util.adjacentDirs()) do
+        local x, y = util.coordAddDir(p.x, p.y, dir)
+        if x >= 0 and y >= 0 and x < map.w and y < map.h
+           and needsConsent(x, y) and not map.attrs(x, y, "autoexplore_ignore") then
+            map.attrs(x, y, "autoexplore_ignore", true)
+            n = n + 1
+        end
+    end
+    return n
+end
+-- Through `bot`, because skoobot_act is at LuaJIT's 60-upvalue limit.
+bot.markWalkedInto = markWalkedInto
 local function getNearestHostile()
     local seen = spotHostiles(game.player, true)
     local target = nil
@@ -2141,6 +2173,11 @@ function skoobot_act(noAction)
                 top.key.virtuals.EXIT()
             end
         else
+            -- #136: a dialog with a consent grid beside us is how being walked
+            -- into a vault door looks from here, and it is the only moment the
+            -- bot can be sure of it. Mark it, or explore targets it again the
+            -- instant the dialog is closed and nothing downstream can tell.
+            bot.markWalkedInto()
             return stop(notice.HANDED_BACK, "a dialog is open: " .. top.title)
         end
     end
