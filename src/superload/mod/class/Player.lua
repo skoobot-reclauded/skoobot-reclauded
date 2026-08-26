@@ -683,6 +683,38 @@ end
 -- run says so and hands over.
 local STEPOFF_TRIES = 3
 
+--- Counters that survive the bot being restarted (#140).
+---
+--- Every bound written before this lived on `bot.activation`, which is rebuilt
+--- on every start -- and the harness restarts after every hand-back, so a
+--- bound of three was quietly handed unlimited attempts and bounded nothing.
+--- The level is the right scope: the situation belongs to it, and arriving
+--- somewhere new is a real fresh start.
+local levelBounds = {}
+
+local function levelBump(name)
+    local k = tostring(game.zone and game.zone.short_name) .. ":"
+        .. tostring(game.level and game.level.level)
+    local t = levelBounds[k]
+    if not t then t = {} ; levelBounds[k] = t end
+    t[name] = (t[name] or 0) + 1
+    return t[name]
+end
+--- A table that persists for this level, for state a counter cannot hold.
+local function levelState(name)
+    local k = tostring(game.zone and game.zone.short_name) .. ":"
+        .. tostring(game.level and game.level.level)
+    local t = levelBounds[k]
+    if not t then t = {} ; levelBounds[k] = t end
+    if type(t[name]) ~= "table" then t[name] = {} end
+    return t[name]
+end
+
+-- Reached through `bot` from inside skoobot_act, which is at LuaJIT's
+-- 60-upvalue limit; a new file local referenced there is a parse error.
+bot.levelBump  = levelBump
+bot.levelState = levelState
+
 --- A door the engine has already refused to explore past, right next to us.
 ---
 --- ToME marks a vault or locked door `autoexplore_ignore` when explore stops at
@@ -738,9 +770,10 @@ local function SAI_beginExplore()
     if dx then
         local t = game.level.map(dx, dy, engine.Map.TERRAIN)
         local what = t and t.name or "a door"
-        local act = bot.activation
-        if act then act.steppedoff = (act.steppedoff or 0) + 1 end
-        if act and act.steppedoff > STEPOFF_TRIES then
+        -- Per DOOR and per level, not per activation: a restart must not hand
+        -- this another three tries, and a second vault deserves its own (#140).
+        local tries = levelBump(("stepoff:%d,%d"):format(dx, dy))
+        if tries > STEPOFF_TRIES then
             return stop(notice.HANDED_BACK,
                 ("%s keeps drawing exploring back; the way on needs you"):format(
                     tostring(what)))
@@ -1871,11 +1904,17 @@ local function tryLowLifeRecovery(ctx)
     local pol = getStopCondition(game.player, "LIFE_LOWLIFE")
     if not pol or pol.stoptype == "IGNORE" then return false end
 
-    local act = bot.activation
-    if act then
-        act.lowlife = (act.lowlife or 0) + 1
-        if act.lowlife > LOWLIFE_TRIES then return false end
-    end
+    -- #140: consecutive FAILURES, held on the level so a restart cannot clear
+    -- them. Per activation this bounded nothing under the harness. Counting
+    -- failures rather than attempts is the other half: the point was never
+    -- "heal at most three times on a level", it was "a heal that has not
+    -- raised the pool is not going to", so a heal that works resets it.
+    local st = levelState("lowlife")
+    local pool = game.player.life
+    if st.life and pool and pool > st.life then st.tries = 0 end
+    st.life = pool
+    st.tries = (st.tries or 0) + 1
+    if st.tries > LOWLIFE_TRIES then return false end
 
     -- bot.loop is built AFTER this point on the first pass of an activation,
     -- so the failed-talent filter is applied only when there is one to apply.
@@ -2185,12 +2224,17 @@ function skoobot_act(noAction)
             -- shuffling between two tiles moves every turn and gets nowhere,
             -- which the previous-position test read as movement and reset the
             -- counter on, every turn.
+            -- #140: the anchor is held on the LEVEL, not the activation. On the
+            -- activation a restart cleared it, so the count never reached the
+            -- limit however long the escortee shuffled. Deliberately NOT reset
+            -- when the limit is hit either: the only thing that should start
+            -- escorting again is the escortee actually getting somewhere, which
+            -- holdCount already resets on.
             if act then
                 act.escorts = 0
-                act.escortanchor = act.escortanchor or {}
-                local holds = escortm.holdCount(act.escortanchor, npc, core.fov.distance)
+                local anchor = bot.levelState("escortanchor")
+                local holds = escortm.holdCount(anchor, npc, core.fov.distance)
                 if holds > escortm.HOLD_LIMIT then
-                    act.escortanchor = nil
                     return stop(notice.HANDED_BACK,
                         ("%s has not got anywhere in %d turns"):format(
                             escortm.name(npc), escortm.HOLD_LIMIT))

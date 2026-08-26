@@ -173,12 +173,15 @@ return "installed"
 local b = skoobot_reclauded
 b.active = false ; b.state = 11 ; b.activation = nil ; b.loop = nil ; b.prevloop = nil
 local d = _G.__dr
--- stand next to the door again, then decide repeatedly WITHOUT resetting the
--- activation, which is what the bound is counted on.
-game.player:move(d.x - 1, d.y, true)
+-- #140: reset the activation on every iteration, which is exactly what the
+-- harness does after a hand-back. The bound used to live on the activation,
+-- so this cleared it every time and the oscillation was unbounded in the one
+-- configuration it mattered in. It must still bound.
 local reasons = {}
-for i = 1, 6 do
+for i = 1, 8 do
+  game.player:move(d.x - 1, d.y, true)
   b.active = false ; b.state = 11
+  b.activation = nil ; b.loop = nil ; b.prevloop = nil
   b.start()
   reasons[#reasons+1] = tostring(b.last_reason)
   if #game.dialogs > 0 then bridge.key("EXIT") end

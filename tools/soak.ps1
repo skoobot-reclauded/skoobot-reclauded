@@ -927,7 +927,19 @@ return "installed save_name=" .. tostring(game.save_name)
                         continue
                     }
                 }
-                Write-Host "  loop     $why; no seen down staircase$(if ($NoDescend) { ' (descend off)' }), carrying on"
+                # #140: "carrying on" with nowhere to go is how a run outlasts
+                # its own usefulness. The same reason, on the same level,
+                # LoopAfter times, with no staircase seen and no next zone, is
+                # the definition of stuck -- so say so once and end on the
+                # second, rather than spending the rest of MAX_MINUTES proving
+                # it. One firing of grace, because a loop that resolves itself
+                # does happen and ending on the first would lose those runs.
+                $nowhere = Bump-Count $levelLoops "$key|$reason|nowhere"
+                if ($nowhere -ge 2) {
+                    $stuckLabel = "STUCK $reason (x$loops on $key, nothing to descend to)"
+                    $endReason = 'STUCK'; break
+                }
+                Write-Host "  loop     $why; no seen down staircase$(if ($NoDescend) { ' (descend off)' }), one more cycle then stopping"
             }
         }
 
