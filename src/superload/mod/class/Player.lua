@@ -1946,15 +1946,20 @@ local CLEANSE_TRIES = 3
 local function tryCleanse(ctx)
     local p = game.player
     if not ctx or not ctx.caps then return false end
+
+    -- #140: held on the level, because the harness rebuilds the activation
+    -- after every hand-back and a bound kept there bounds nothing.
+    local st = levelState("cleanse")
     if not (ctx.caps.move or ctx.caps.act or ctx.caps.target or impaired(p)) then
+        -- Free again: whatever ended it, the next block starts from zero. So
+        -- being blocked twice on one level is not rationed, while a cure that
+        -- does not work still stops after three.
+        st.tries = 0
         return false
     end
 
-    local act = bot.activation
-    if act then
-        act.cleanse = (act.cleanse or 0) + 1
-        if act.cleanse > CLEANSE_TRIES then return false end
-    end
+    st.tries = (st.tries or 0) + 1
+    if st.tries > CLEANSE_TRIES then return false end
 
     local talents = getRecoveryTalents()
     if bot.loop then talents = filterFailedTalents(talents) end
