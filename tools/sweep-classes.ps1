@@ -100,6 +100,8 @@ param(
     [int]$LeaseWaitMin = 60,
     # Do not take a lease. For running under an outer host that holds one.
     [switch]$NoRunLease,
+    # Skip pointing the game's junctions at this checkout.
+    [switch]$NoSetup,
     # Record creature dossiers (#135). Off by default; see soak.ps1 -Dossier.
     [switch]$Dossier,
     # The player's stop-condition knobs for every run, passed to soak.ps1.
@@ -267,6 +269,23 @@ if ($measurable.Count -eq 0) { Fail 'nothing to measure' }
 # inherit it through SKOOBOT_HARNESS_HOST, which Enter-HarnessLease sets on
 # this process -- so every birth and every soak finds the lease already theirs
 # and none of them fights the sweep for the game.
+# Point the game at THIS checkout before anything else. The harness refuses to
+# load when the junctions point elsewhere -- correctly -- but it refuses at the
+# first birth, minutes in, after the lease is taken and a class is already
+# half-created. A sweep launched from a worktree, or after a scenario was run
+# from one, hit that every time; the guard caught it, and the run was still lost.
+#
+# setup-dev is idempotent and cheap, so doing it here costs a second and removes
+# the whole class of "measured the wrong build" and "failed eight minutes in".
+if (-not $NoSetup) {
+    $sd = & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev.ps1') 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ($sd | Out-String)
+        Fail "setup-dev failed; the junctions do not point at $RepoRoot"
+    }
+    Write-Host "[sweep] junctions point at $RepoRoot"
+}
+
 if (-not $NoRunLease) {
     $null = Wait-HarnessLease -TimeoutSec ($LeaseWaitMin * 60) -Label 'sweep'
     Write-Host "[sweep] holding the game lease for this run (host pid $PID)"
