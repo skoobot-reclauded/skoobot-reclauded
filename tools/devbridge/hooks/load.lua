@@ -287,7 +287,9 @@ local MAX_DEPTH      = 12
 local MAX_KEYS       = 400
 
 bridge.dossier = { on = false, schema = DOSSIER_SCHEMA, records = {}, creatures = {}, byform = {}, nform = 0,
-                   audit = { predicted = 0, deaths = 0, kills = 0, forms = 0, reused = 0, deltas = 0 } }
+                   seen_uids = {},
+                   audit = { predicted = 0, deaths = 0, kills = 0, forms = 0, reused = 0, deltas = 0,
+                             sightings = 0 } }
 
 --- Marks a key the form has and this instance does not, so that "absent" and
 --- "unchanged" stay distinguishable when a delta is reapplied. See #135.
@@ -478,6 +480,36 @@ end
 --- Install the hooks. Not installed means NOT INSTALLED -- no superload, no
 -- serialisation, no cost -- rather than a hook that runs and discards, so the
 -- ordinary dev loop pays nothing for this.
+--- Everything now in view that this run has not recorded yet (#101).
+---
+--- The power level that matters is the one at FIRST SIGHTING. A creature read
+--- at the moment it kills the character has been fought down and scores a
+--- fraction of what it did when the fight began -- life is a term in the sum --
+--- so "review the power levels of enemies recently seen (when first seen...
+--- their power level will be stunted)" is a SAMPLING requirement, not an
+--- analysis step. It cannot be reconstructed afterwards.
+---
+--- Every uid is marked once whether hostile or not, so a friendly costs one
+--- reaction test per run rather than one per turn; only hostiles are recorded.
+local function dossierSightings(p)
+	local d = bridge.dossier
+	local lvl = game and game.level
+	if not lvl or not lvl.entities or not lvl.map then return end
+	local seen = d.seen_uids
+	for _, a in ipairs(lvl.entities) do
+		local uid = a and rawget(a, "uid")
+		if uid and a ~= p and not seen[uid] and a.x and a.y and not a.dead then
+			if lvl.map.seens(a.x, a.y) and p:canSee(a) then
+				seen[uid] = true
+				if p:reactionToward(a) < 0 then
+					d.audit.sightings = d.audit.sightings + 1
+					dossierRecord("sighting", a, nil)
+				end
+			end
+		end
+	end
+end
+
 function bridge.dossierOn()
 	local d = bridge.dossier
 	if d.on then return "already on" end
@@ -543,6 +575,23 @@ function bridge.dossierOn()
 			return olddie(self, src, death_note)
 		end
 	end
+	-- #101: sample what enters view, as it enters view. playerFOV is where
+	-- "what can I see" is recomputed, so it is the moment a creature becomes
+	-- visible; anything later has already been fought.
+	local Player = require "mod.class.Player"
+	if not Player.__skoobot_dossier_fov then
+		Player.__skoobot_dossier_fov = true
+		local oldfov = Player.playerFOV
+		function Player:playerFOV()
+			local r = oldfov(self)
+			if bridge.dossier.on and self == (game and game.player) then
+				local ok, err = pcall(dossierSightings, self)
+				if not ok then emit("ERR dossier sighting " .. tostring(err)) end
+			end
+			return r
+		end
+	end
+
 	return ("on schema=%d"):format(DOSSIER_SCHEMA)
 end
 
@@ -562,6 +611,7 @@ end
 local function dossierForget()
 	local d = bridge.dossier
 	d.creatures, d.byform, d.nform = {}, {}, 0
+	d.seen_uids = {}
 end
 
 --- Strict JSON, because the engine's encoder does not emit it: Json2 escapes
@@ -648,8 +698,9 @@ end
 
 function bridge.dossierStatus()
 	local d = bridge.dossier
-	return ("on=%s schema=%d pending=%d predicted=%d deaths=%d kills=%d forms=%d reused=%d deltas=%d"):format(
+	return ("on=%s schema=%d pending=%d predicted=%d deaths=%d kills=%d sightings=%d forms=%d reused=%d deltas=%d"):format(
 		tostring(d.on), d.schema, #d.records, d.audit.predicted, d.audit.deaths, d.audit.kills,
+		d.audit.sightings,
 		d.audit.forms, d.audit.reused, d.audit.deltas)
 end
 
