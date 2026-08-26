@@ -2572,12 +2572,35 @@ function skoobot_act(noAction)
         -- The filter decides only the PICK: approach needs every hostile, since
         -- closing the distance is HOW a melee talent comes into range.
         local targets, usable = {}, {}
+        -- #146: an enemy already found unreachable FROM THIS GRID is not a
+        -- target. Doombringer lost a whole run to one -- thirty-seven identical
+        -- hand-backs in 110 game turns -- because a hostile in view keeps the
+        -- bot in FIGHT and an unreachable one gives FIGHT nothing to do.
+        local cannotReach, unreachable = bot.levelState("unreachable"), 0
+        local herePos = ("%d,%d"):format(game.player.x, game.player.y)
         for _, enemy in pairs(hostiles) do
-            -- attacking is a talent, so it does not need adding as a choice
-            targets[#targets + 1] = enemy
-            if #filterFailedTalents(getAvailableTalents(enemy)) > 0 then
-                usable[#usable + 1] = enemy
+            local a = enemy.actor
+            local uid = a and rawget(a, "uid")
+            if uid and cannotReach[tostring(uid)] == herePos then
+                unreachable = unreachable + 1
+            else
+                -- attacking is a talent, so it does not need adding as a choice
+                targets[#targets + 1] = enemy
+                if #filterFailedTalents(getAvailableTalents(enemy)) > 0 then
+                    usable[#usable + 1] = enemy
+                end
             end
+        end
+
+        if #targets == 0 and unreachable > 0 then
+            -- Everything in view is behind something. EXPLORE, not REST: the
+            -- comment below records that REST re-enters with the enemy still in
+            -- view and spins to THINK_LIMIT, and exploring both avoids that and
+            -- is the thing that can change the answer -- move, and reachability
+            -- is a different question.
+            chan.debug("[Combat] %d hostile(s) in view, none reachable from here; exploring", unreachable)
+            bot.state = STATE_EXPLORE
+            return skoobot_act(true)
         end
 
         if #targets == 0 then
@@ -2763,6 +2786,15 @@ function skoobot_act(noAction)
                 if beside then
                     return stop(notice.CANNOT_ACT, "standing next to " .. targets[1].name
                         .. ", which is in a grid you cannot enter, and nothing in the rotation reaches it")
+                end
+                -- #146: remember it, so the next decision is not this one again.
+                -- Keyed to the grid we learned it from, because reachability is
+                -- a fact about where we are standing: step anywhere else and the
+                -- question is open again.
+                local a1 = targets[1].actor
+                if a1 and rawget(a1, "uid") then
+                    bot.levelState("unreachable")[tostring(a1.uid)] =
+                        ("%d,%d"):format(game.player.x, game.player.y)
                 end
                 return stop(notice.CANNOT_ACT, "no path to " .. targets[1].name)
             else
