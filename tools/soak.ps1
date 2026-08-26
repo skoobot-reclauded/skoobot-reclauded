@@ -213,6 +213,8 @@ param(
     # someone, which is exactly the variable a controlled measurement removes.
     [string]$StartZone = '',
     [switch]$NoAutoSpend,
+    # #161: polls to wait out a bindless progress dialog before calling it stuck.
+    [int]$DialogWaitPolls = 12,
     [int]$IdleAfter = 15,
     # Distinct grids in that window that still count as going nowhere. 3 covers
     # standing still, pacing between two tiles, and a three-tile shuffle.
@@ -314,6 +316,7 @@ $conditionsApplied = @()
 $resumes['descend'] = 0
 $resumes['next-zone'] = 0
 $resumes['auto-spend'] = 0
+$resumes['dialog-wait'] = 0
 $descendWalks = 0; $descendMoves = 0; $descendAbandoned = 0; $waits = 0
 $levelHandbacks = @{}     # "zone:level" -> hand-backs on stairs up / the wilderness exit
 $levelLoops     = @{}     # "zone:level|reason" -> recurrences of one hand-back reason on one level
@@ -997,6 +1000,7 @@ return "installed save_name=" .. tostring(game.save_name)
 
     $deadline = $started.AddMinutes($MaxMinutes)
     $lastReason = $null; $lastStopTurn = -1; $sameCount = 0; $stuckStage = 0
+    $waitDialog = 0
     $idleWhere = New-Object System.Collections.Generic.List[string]
     $idleTurn = -1; $idleTurn0 = -1
     $s = $null
@@ -1104,6 +1108,26 @@ return "installed save_name=" .. tostring(game.save_name)
             if ($c.Tainted) { $tainted = $true }
             if ($c.Result -eq 'death') { continue }   # the next poll sees dead=true
             if ($c.Result -match '^noexit') {
+                # #161: a dialog with NO BINDS AT ALL is a progress dialog, not
+                # a decision -- "Generating level" is the engine's own, it has
+                # nothing to press because nothing is meant to press it, and it
+                # closes itself when generation finishes. Sweep 6 lost three of
+                # twenty runs to treating it as terminal, each on its first
+                # floor after five to six thousand turns.
+                #
+                # Bounded, because a genuinely undismissable modal must still
+                # end the run: that is what this check exists for.
+                # No binds listed at all, or the engine's own progress dialog
+                # by name. Both tests, because the binds list is the general
+                # signal and the name is the one case we have actually seen.
+                if ($c.Result -match 'binds=\s*$' -or $c.Result -match 'Generating') {
+                    $waitDialog++
+                    if ($waitDialog -le $DialogWaitPolls) {
+                        Count-Resume 'dialog-wait' $s "$($c.Result) (progress dialog, $waitDialog/$DialogWaitPolls)"
+                        Start-Sleep -Milliseconds 700
+                        continue
+                    }
+                }
                 Count-Resume 'dialog-stuck' $s $c.Result
                 $stuckLabel = "STUCK dialog with neither EXIT nor ACCEPT: $($c.Result)"
                 $endReason = 'STUCK'; break
@@ -1301,7 +1325,10 @@ return "installed save_name=" .. tostring(game.save_name)
         # disbelieving the bot on principle. Act on it at once: descend if
         # there is a seen way down, otherwise change zone (#157 removed the
         # depth restriction that used to block that).
-        if ($s.reason -match 'this level is explored') {
+        # Also the zone-exit refusal (#151): "the only way on is the world map"
+        # is as definitive as "explored", and Doomed stormed it fifteen times in
+        # sweep 6 while the harness held the lever that answers it.
+        if ($s.reason -match 'this level is explored|leads to the world map') {
             $key = "$($s.zone):$($s.zlevel)"
             if (-not $NoDescend -and $s.downs -gt 0) {
                 $walk = @{ action = 'descend'; phase = 'walking'; key = $key; moves = 0; waits = 0
