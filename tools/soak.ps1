@@ -159,6 +159,19 @@ param(
     # not installed means no superload and no serialisation, so an ordinary run
     # pays nothing. Written beside the summary as <name>.dossier.json.
     [switch]$Dossier,
+    # #138: on an ending that does not say WHY -- a timeout or a loop -- take
+    # this many screenshots, injecting one harness action between them, before
+    # the game is stopped.
+    #
+    # The first is taken before ANY input, or the evidence is of the harness
+    # poking the game rather than of the state it got stuck in. The ones after
+    # it show what happens when the harness tries to carry on, which is the
+    # half a single frame cannot show.
+    #
+    # On by default, because the whole point is not having to have predicted
+    # which run would need it. It costs nothing on a run that ends by its own
+    # limits with something to show for it, and three PNGs when it does not.
+    [int]$TimeoutActionCaptures = 3,
     # The player's stop-condition policies for this run, "CODE=WARN|STOP|IGNORE,..."
     # (e.g. "SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN"), applied through
     # skoobot_reclauded.conditions.set and recorded in the summary.
@@ -648,6 +661,26 @@ function sk.visitedZones()
   table.sort(out)
   return table.concat(out, ",")
 end
+-- #138: a screenshot WITHOUT the engine's "Screenshot taken!" popup.
+-- game:saveScreenshot() opens one (engine/Game.lua:818), which would land on
+-- top of the very state being captured and change what the next shot shows.
+-- takeScreenshot() is the same call without it; dialogs ARE drawn, since the
+-- suppression at :184 applies only to savefile shots -- and the dialog is
+-- usually the thing worth seeing. Written to the module dir, the same write
+-- path the dossiers use (#135); /skoobot-bridge/ is not writable.
+function sk.shot(name)
+  local ok, s = pcall(game.takeScreenshot, game)
+  if not ok then return "ERR takeScreenshot " .. tostring(s) end
+  if not s then return "ERR no image" end
+  if not fs.exists("/screenshots") then fs.mkdir("/screenshots") end
+  local path = "/screenshots/" .. tostring(name) .. ".png"
+  local f = fs.open(path, "w")
+  if not f then return "ERR open " .. path end
+  f:write(s)
+  f:close()
+  return "wrote " .. path
+end
+
 return "installed save_name=" .. tostring(game.save_name)
 "@ -TimeoutSec 30
     if ($install.Status -ne 'OK' -or $install.Result -notmatch '^installed') {
@@ -1027,6 +1060,48 @@ finally {
             }
         }
     } catch { }
+    # #138: BEFORE the bot is stopped and before Stop-Game, or the state that
+    # needs explaining is already gone. MAX_MINUTES and STUCK are the two
+    # endings that do not say why they happened; DEATH and EIDOLON name their
+    # killer, and the limit endings are the run working.
+    $captureFiles = @()
+    if ($TimeoutActionCaptures -gt 0 -and $endReason -in @('MAX_MINUTES', 'STUCK')) {
+        $base  = [IO.Path]::GetFileNameWithoutExtension($OutFile)
+        $outDirC = Split-Path -Parent $OutFile
+        $notes = New-Object System.Collections.Generic.List[string]
+        $notes.Add("ending: $endReason$(if ($stuckLabel) { " ($stuckLabel)" })")
+        Write-Host "  capture  ${endReason}: $TimeoutActionCaptures shot(s), the first before any input"
+        for ($i = 0; $i -lt $TimeoutActionCaptures; $i++) {
+            $stC = Invoke-Bridge -Lua 'return sk.status()' -TimeoutSec 20
+            $dlC = Invoke-Bridge -Lua 'return bridge.dialogs()' -TimeoutSec 20
+            $shotName = "$base.timeout-$i"
+            $shC = Invoke-Bridge -Lua "return sk.shot('$shotName')" -TimeoutSec 60
+            $notes.Add('')
+            $notes.Add("[$i] state   : $($stC.Result)")
+            $notes.Add("[$i] dialogs : $($dlC.Result)")
+            $notes.Add("[$i] shot    : $($shC.Result)")
+            Write-Host "  capture  $i dialogs=$($dlC.Result)"
+            $psrc = Join-Path $script:TomeHome (Join-Path 'tome\screenshots' "$shotName.png")
+            if (Test-Path $psrc) {
+                if ($outDirC -and -not (Test-Path $outDirC)) { New-Item -ItemType Directory -Force -Path $outDirC | Out-Null }
+                Move-Item -Force $psrc (Join-Path $outDirC "$shotName.png")
+                $captureFiles += "$shotName.png"
+            } else {
+                $notes.Add("[$i] WARNING : no file at $psrc")
+            }
+            # One action between shots, and none after the last: the sequence is
+            # shot, act, shot -- so every frame after the first is the answer to
+            # a named action rather than to an unknown amount of poking.
+            if ($i -lt $TimeoutActionCaptures - 1) {
+                $actC = Invoke-Bridge -Lua 'local r = sk.closeDialog() if r == "none" then sk.start() r = "restarted the bot" end return r' -TimeoutSec 30
+                $notes.Add("[$i] action  : $($actC.Result)")
+                Write-Host "  capture  action -> $($actC.Result)"
+            }
+        }
+        ($notes -join "`n") | Set-Content -Path (Join-Path $outDirC "$base.timeout.txt") -Encoding utf8
+        Write-Host "  capture  -> $($captureFiles.Count) png + $base.timeout.txt"
+    }
+
     $null = Invoke-Bridge -Lua 'if skoobot_reclauded and skoobot_reclauded.active then skoobot_reclauded.stop("soak ended") end return "stopped"' -TimeoutSec 15 -ErrorAction SilentlyContinue
 
     # #135: drain BEFORE Stop-Game. The ledger lives in the game's memory, so
@@ -1091,6 +1166,7 @@ finally {
         auto_rules   = (-not $NoAutoRules)
         rules_source = $(if ($NoAutoRules) { 'none' } elseif ($ProposedRules) { 'loadout-proposal' } else { 'every-known-talent' })
         dossier      = $dossierFile
+        captures     = @($captureFiles)
         conditions   = @($conditionsApplied)
         scratch_save = $ScratchSave
     }
@@ -1109,6 +1185,7 @@ finally {
     $md.Add("| level | $($summary.level.start) -> $($summary.level.end) (max $peakLevel, limit $MaxLevel) |")
     $md.Add("| zones | $($zoneTrail -join ' > ') |")
     $md.Add("| deaths | $deaths$(if ($killer) { " (killed by $killer)" }) |")
+    if ($captureFiles.Count -gt 0) { $md.Add("| captures | $($captureFiles -join ', ') (+ $([IO.Path]::GetFileNameWithoutExtension($OutFile)).timeout.txt) |") }
     $md.Add("| stops | $($summary.stop_total) across $($stopRows.Count) reason(s) |")
     $md.Add("| resumes | $($summary.resumes.total) |")
     $md.Add("| descend | $($resumes['descend']) taken ($descendWalks walk(s), $descendMoves move(s), $descendAbandoned abandoned; $(if ($NoDescend) { 'off' } else { "after $DescendAfter hand-backs, explored, or a loop of $LoopAfter" })) |")
