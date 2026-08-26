@@ -200,6 +200,10 @@ param(
     #
     # 0 disables. Polls are a few seconds apart, so 15 is on the order of a
     # minute: long past anything a fight or a rest explains.
+    # #158: spend stat and talent points automatically, so the sweep measures a
+    # character that levelled up rather than one that never did. A band-aid for
+    # the sweeps; the real feature is #88.
+    [switch]$NoAutoSpend,
     [int]$IdleAfter = 15,
     # Distinct grids in that window that still count as going nowhere. 3 covers
     # standing still, pacing between two tiles, and a three-tile shuffle.
@@ -300,6 +304,7 @@ $conditionsApplied = @()
 # zero, so a summary always says whether they fired.
 $resumes['descend'] = 0
 $resumes['next-zone'] = 0
+$resumes['auto-spend'] = 0
 $descendWalks = 0; $descendMoves = 0; $descendAbandoned = 0; $waits = 0
 $levelHandbacks = @{}     # "zone:level" -> hand-backs on stairs up / the wilderness exit
 $levelLoops     = @{}     # "zone:level|reason" -> recurrences of one hand-back reason on one level
@@ -705,6 +710,135 @@ function sk.visitedZones()
   table.sort(out)
   return table.concat(out, ",")
 end
+-- #158, HARNESS ONLY. A band-aid build so a sweep measures a character that
+-- spent its points rather than one that never did. This lives in the soak's
+-- own helpers, which are never packaged -- tools/pack.ps1 packs src/ only --
+-- and it must not become product behaviour by accident. The real feature is
+-- #88.
+--
+-- The owner's heuristic: the shortest-cooldown investable talent in the
+-- rotation that HAS a stat requirement identifies the primary stat.
+
+--- Can a point still go into this stat? The game's own limits
+--- (mod/class/Actor.lua:826, useBuildOrder), which must be honoured or the
+--- points stick: a soft per-level cap, and a hard one.
+function sk.statOpen(p, stat)
+  local ok, raw = pcall(p.getStat, p, stat, nil, nil, true)
+  if not ok or type(raw) ~= "number" then return false end
+  if p:isStatMax(stat) then return false end
+  if raw >= p.level * 1.4 + 20 then return false end
+  if raw >= 60 + math.max(0, p.level - 50) then return false end
+  return true
+end
+
+--- Talent ids in the rotation, or every activated talent if the rotation is
+--- not readable. Defensive about shape: entries may be ids or rule tables.
+function sk.rotationTids()
+  local p, out, seen = game.player, {}, {}
+  local function add(v)
+    local tid = v
+    if type(v) == "table" then tid = v.talent or v.id or v.tid end
+    if type(tid) == "string" and p.talents and p.talents[tid] and not seen[tid] then
+      seen[tid] = true ; out[#out+1] = tid
+    end
+  end
+  local b = rawget(_G, "skoobot_reclauded")
+  local ok, rot = pcall(function() return b and b.rules and b.rules.rotation and b.rules.rotation() end)
+  if ok and type(rot) == "table" then for _, e in ipairs(rot) do add(e) end end
+  if #out == 0 then
+    for tid in pairs(p.talents or {}) do
+      local t = p:getTalentFromId(tid)
+      if t and t.mode == "activated" then add(tid) end
+    end
+  end
+  return out
+end
+
+--- The stat the rotation leans on, by the owner's heuristic.
+function sk.primaryStat()
+  local p = game.player
+  local best, bestcd, bestname
+  for _, tid in ipairs(sk.rotationTids()) do
+    local t = p:getTalentFromId(tid)
+    local raw = t and p:getTalentLevelRaw(tid) or 0
+    -- investable: known, and not already at its maximum rank
+    if t and raw > 0 and raw < (t.points or 0) then
+      local req = t.require
+      if type(req) == "function" then
+        local ok, r = pcall(req, p, t, raw + 1) ; req = ok and r or nil
+      end
+      local stat
+      if type(req) == "table" and type(req.stat) == "table" then
+        for s in pairs(req.stat) do stat = stat or s end
+      end
+      if stat then
+        local cd = t.cooldown
+        if type(cd) == "function" then local ok, v = pcall(cd, p, t) ; cd = ok and v or nil end
+        cd = tonumber(cd) or 9999
+        if not bestcd or cd < bestcd then best, bestcd, bestname = stat, cd, tostring(t.name) end
+      end
+    end
+  end
+  return best, bestcd, bestname
+end
+
+--- Spend everything unspent. Returns a one-line report.
+function sk.autoSpend()
+  local p = game.player
+  if not p then return "no player" end
+  local stat, cd, tname = sk.primaryStat()
+  local out = {}
+
+  -- Stats: the primary, then Constitution, then anywhere legal. The spill is
+  -- not optional: the per-level cap stops a level-3 character putting a fourth
+  -- point into one stat, and without somewhere else to go the points stick and
+  -- the hand-back returns for ever.
+  local order = { stat, "con", "str", "dex", "mag", "wil", "cun" }
+  local spent = 0
+  while (p.unused_stats or 0) > 0 do
+    local did = false
+    for _, s in ipairs(order) do
+      if s and (p.unused_stats or 0) > 0 and sk.statOpen(p, s) then
+        p:incStat(s, 1) ; p.unused_stats = p.unused_stats - 1
+        spent = spent + 1 ; did = true ; break
+      end
+    end
+    if not did then break end
+  end
+  out[#out+1] = ("stats primary=%s(%s cd=%s) spent=%d left=%d"):format(
+    tostring(stat), tostring(tname), tostring(cd), spent, p.unused_stats or 0)
+
+  -- Talents: only into ones that ALREADY have a point, which is the owner's
+  -- rule and also the safe one -- learning something new changes the rotation
+  -- under the run, and picking what to learn is #88's job.
+  local tspent, gspent = 0, 0
+  local function pass(budget, wantGeneric)
+    local moved = true
+    while moved and (p[budget] or 0) > 0 do
+      moved = false
+      for _, tid in ipairs(sk.rotationTids()) do
+        local t = p:getTalentFromId(tid)
+        local raw = t and p:getTalentLevelRaw(tid) or 0
+        if t and raw >= 1 and raw < (t.points or 0) and p:canLearnTalent(t) then
+          local tt = p:getTalentTypeFrom(t.type[1])
+          local isGeneric = tt and tt.generic and true or false
+          if isGeneric == wantGeneric then
+            p:learnTalent(t.id, true)
+            p[budget] = p[budget] - 1
+            if wantGeneric then gspent = gspent + 1 else tspent = tspent + 1 end
+            moved = true ; break
+          end
+        end
+      end
+    end
+  end
+  pass("unused_talents", false)
+  pass("unused_generics", true)
+  out[#out+1] = ("talents class=%d generic=%d left=%s/%s"):format(
+    tspent, gspent, tostring(p.unused_talents or 0), tostring(p.unused_generics or 0))
+  return table.concat(out, " | ")
+end
+
 -- #138: a screenshot WITHOUT the engine's "Screenshot taken!" popup.
 -- game:saveScreenshot() opens one (engine/Game.lua:818), which would land on
 -- top of the very state being captured and change what the next shot shows.
@@ -813,6 +947,14 @@ return "installed save_name=" .. tostring(game.save_name)
         Write-Host "  stairs   $($sr.Status) TAKE_STAIRS=$TakeStairs ($($sr.Result))"
         if ($sr.Status -eq 'OK' -and $sr.Result -notmatch '^false') { $stairsApplied = $TakeStairs }
         else { Write-Host '[soak] WARNING: TAKE_STAIRS was not applied; the run may decline its own descent' }
+    }
+
+    # #158: spend whatever birth left unspent, before the first decision.
+    $buildApplied = $null
+    if (-not $NoAutoSpend) {
+        $as = Invoke-Bridge -Lua 'return sk.autoSpend()' -TimeoutSec 60
+        Write-Host "  build    $($as.Status) $($as.Result)"
+        if ($as.Status -eq 'OK') { $buildApplied = $as.Result }
     }
 
     # (g): the zone list, checked against the installed module. An id with no
@@ -1129,6 +1271,16 @@ return "installed save_name=" .. tostring(game.save_name)
         }
 
         # ----- (b) stairs, and (f)/(g) on stairs up or the wilderness exit -----
+        # #158: the character levelled up and has points sitting unspent. Spend
+        # them and carry on -- unspent points are a hand-back on nearly every
+        # run, and behind it a character that never gets stronger.
+        if (-not $NoAutoSpend -and $s.reason -match 'unspent points') {
+            $as = Invoke-Bridge -Lua 'return sk.autoSpend()' -TimeoutSec 60
+            Count-Resume 'auto-spend' $s $as.Result
+            Start-Bot $s $reason
+            continue
+        }
+
         if ($s.reason -match 'standing on a level change') {
             if ($s.stairs -in @('down', 'zone')) {
                 $cl = Invoke-Bridge -Lua 'return bridge.key("CHANGE_LEVEL")' -TimeoutSec 60
@@ -1335,6 +1487,8 @@ finally {
         }
         conditions   = @($conditionsApplied)
         take_stairs  = $stairsApplied
+        auto_spend   = $(if ($NoAutoSpend) { 'off' } else { 'on' })
+        build_at_start = $buildApplied
         scratch_save = $ScratchSave
     }
     $dir = Split-Path -Parent $OutFile
