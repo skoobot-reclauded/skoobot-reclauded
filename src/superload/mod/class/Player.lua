@@ -1919,7 +1919,12 @@ local function shouldEscort(ctx, hostiles)
     if ctx.score and ctx.score.posture ~= score.FIGHT then return false end
     local pol = getStopCondition(game.player, "ESCORT_ACTIVE")
     if not pol or pol.stoptype == "IGNORE" then return false end
-    return liveEscortee() ~= nil
+    local npc = liveEscortee()
+    if not npc then return false end
+    -- Already given up on this one here (#139): the player has been told, and
+    -- re-entering the branch only tells them again, every decision, for ever.
+    if bot.levelState("escortgaveup")[tostring(npc.uid)] then return false end
+    return true
 end
 
 --- Take the level change underfoot (#86).
@@ -2480,8 +2485,17 @@ function skoobot_act(noAction)
                 local anchor = bot.levelState("escortanchor")
                 local holds = escortm.holdCount(anchor, npc, core.fov.distance)
                 if holds > escortm.HOLD_LIMIT then
+                    -- Told once, then dropped for this level. #140 made the
+                    -- anchor survive the hand-back so a restart could not clear
+                    -- it, which turned a silent forever-wait into a LOUD one:
+                    -- eighteen hand-backs in eleven game turns, measured in
+                    -- sweep 1. The bound means "this escort is not going
+                    -- anywhere", so the answer is to stop escorting and get on
+                    -- with the level, not to keep announcing it. A player who
+                    -- restarts after the notice has already decided to carry on.
+                    bot.levelState("escortgaveup")[tostring(npc.uid)] = true
                     return stop(notice.HANDED_BACK,
-                        ("%s has not got anywhere in %d turns"):format(
+                        ("%s has not got anywhere in %d turns; leaving them to it"):format(
                             escortm.name(npc), escortm.HOLD_LIMIT))
                 end
             end
