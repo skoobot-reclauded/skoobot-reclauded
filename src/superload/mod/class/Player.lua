@@ -2181,19 +2181,19 @@ function skoobot_act(noAction)
             --
             -- Bounded on holds where the escortee did not move either: if
             -- neither of us is going anywhere, waiting cannot help.
+            -- #139: anchored, not compared with last turn. An escortee
+            -- shuffling between two tiles moves every turn and gets nowhere,
+            -- which the previous-position test read as movement and reset the
+            -- counter on, every turn.
             if act then
                 act.escorts = 0
-                local stillThere = (act.escortx == npc.x and act.escorty == npc.y)
-                act.escortx, act.escorty = npc.x, npc.y
-                if stillThere then
-                    act.escortholds = (act.escortholds or 0) + 1
-                    if act.escortholds > escortm.HOLD_LIMIT then
-                        act.escortholds = 0
-                        return stop(notice.HANDED_BACK, ("%s has not moved for %d turns"):format(
+                act.escortanchor = act.escortanchor or {}
+                local holds = escortm.holdCount(act.escortanchor, npc, core.fov.distance)
+                if holds > escortm.HOLD_LIMIT then
+                    act.escortanchor = nil
+                    return stop(notice.HANDED_BACK,
+                        ("%s has not got anywhere in %d turns"):format(
                             escortm.name(npc), escortm.HOLD_LIMIT))
-                    end
-                else
-                    act.escortholds = 0
                 end
             end
             chan.debug("[Escort] holding: %s", tostring(why))

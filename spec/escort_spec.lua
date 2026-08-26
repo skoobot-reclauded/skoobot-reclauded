@@ -187,4 +187,51 @@ describe("data/escort.lua", function()
       assert.is_true(M.FOLLOW_FAR < 10)
     end)
   end)
+
+  -- #139: the owner watched an escortee tremble back and forth on a poison
+  -- bush. It moved every turn, so a previous-position test reset the counter
+  -- every turn and #129's bound could not fire.
+  describe("getting nowhere, as opposed to not moving", function()
+    local function cheb(ax, ay, bx, by)
+      return math.max(math.abs(ax - bx), math.abs(ay - by))
+    end
+
+    it("counts an escortee that never moves", function()
+      local st, npc = {}, { x = 5, y = 5 }
+      assert.equals(0, M.holdCount(st, npc, cheb))
+      for i = 1, 5 do assert.equals(i, M.holdCount(st, npc, cheb)) end
+    end)
+
+    it("counts an escortee shuffling between two tiles", function()
+      local st, npc = {}, { x = 5, y = 5 }
+      M.holdCount(st, npc, cheb)
+      local n = 0
+      for i = 1, 10 do
+        npc.x = (i % 2 == 0) and 5 or 6
+        n = M.holdCount(st, npc, cheb)
+      end
+      assert.equals(10, n)
+    end)
+
+    it("resets when the escortee actually travels", function()
+      local st, npc = {}, { x = 5, y = 5 }
+      for _ = 1, 4 do M.holdCount(st, npc, cheb) end
+      npc.x, npc.y = 20, 20
+      assert.equals(0, M.holdCount(st, npc, cheb))
+    end)
+
+    it("re-anchors where it arrived, so a walk does not bank old holds", function()
+      local st, npc = {}, { x = 5, y = 5 }
+      for _ = 1, 4 do M.holdCount(st, npc, cheb) end
+      npc.x, npc.y = 20, 20
+      M.holdCount(st, npc, cheb)
+      assert.equals(1, M.holdCount(st, npc, cheb))
+    end)
+
+    it("survives nonsense without erroring", function()
+      assert.equals(0, M.holdCount(nil, { x = 1, y = 1 }, cheb))
+      assert.equals(0, M.holdCount({}, nil, cheb))
+    end)
+  end)
+
 end)

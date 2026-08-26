@@ -44,7 +44,37 @@ M.STEP_LIMIT = 80
 --- normal and only a long one means nothing is going to happen.
 M.HOLD_LIMIT = 20
 
+--- How far the escortee may drift from where it was and still count as having
+--- got nowhere.
+---
+--- #129 asked whether the escortee moved SINCE LAST TURN, which an escortee
+--- shuffling between two tiles answers "yes" to every turn -- so the counter
+--- reset every turn and the bound never fired. The owner watched one tremble
+--- back and forth on a poison bush for as long as it was left to. Movement is
+--- not progress; anchoring on a position and asking whether it has got
+--- anywhere since covers standing still and shuffling alike, and still resets
+--- the moment the escortee actually travels. See #139.
+M.HOLD_RADIUS = 1
+
 local function isTable(v) return type(v) == "table" end
+
+--- Consecutive turns of the escortee getting nowhere.
+---
+--- `st` carries {x, y, holds} across turns and is mutated. `dist` is passed in
+--- rather than reached for, so this stays testable off a running game -- the
+--- same arrangement the escort branch already uses for its other geometry.
+---
+--- Anchors: the anchor moves only when the escortee leaves HOLD_RADIUS of it,
+--- so a two-tile shuffle keeps counting and real travel resets. See #139.
+function M.holdCount(st, npc, dist)
+    if not isTable(st) or not isTable(npc) then return 0 end
+    if st.x == nil or dist(st.x, st.y, npc.x, npc.y) > M.HOLD_RADIUS then
+        st.x, st.y, st.holds = npc.x, npc.y, 0
+    else
+        st.holds = (st.holds or 0) + 1
+    end
+    return st.holds
+end
 
 --- The escortee among `actors`, or nil.
 ---
