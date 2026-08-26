@@ -1966,6 +1966,21 @@ local function atLevelChange(grid)
     local what = zoneExit and "the way out of this zone" or "the stairs"
     local mode = tonumber(cfg("TAKE_STAIRS")) or cfgfmt.STAIRS_ASK
 
+    -- #151: whatever TAKE_STAIRS says, not into the world map. bot.start()
+    -- refuses to run in the wilderness, so taking that exit walks into a place
+    -- the bot immediately hands back from -- and it is standing on the exit, so
+    -- it hands back from there for ever. Eleven classes did that in sweep 2, up
+    -- to eighteen times each, once TAKE_STAIRS=always let them through.
+    --
+    -- "Always take the stairs" is about descending a dungeon. Leaving the zone
+    -- for the overworld is a different decision and stays the player's until
+    -- the bot can actually cross it (#126).
+    if zoneExit and tostring(grid.change_zone):find("^wilderness") then
+        return stop(notice.HANDED_BACK,
+            "standing on the way out of this zone, which leads to the world map -- "
+            .. "the bot does not travel it")
+    end
+
     if mode == cfgfmt.STAIRS_NEVER then
         return stop(notice.HANDED_BACK, "standing on a level change")
     end
