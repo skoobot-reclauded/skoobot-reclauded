@@ -200,7 +200,18 @@ $script:RequiredSaveAddons = @('skoobot_reclauded', 'skoobot_devbridge')
 #>
 function Get-SaveDirName {
     param([Parameter(Mandatory)][string]$Name)
-    ([regex]::Replace($Name, '[^a-zA-Z0-9_]', '_')).ToLowerInvariant()
+    # TRUNCATED TO 25 FIRST, because the engine does: mod/class/Game.lua:204
+    #   name = name:removeColorCodes():gsub("#", " "):sub(1, 25)
+    #   self.save_name = name
+    # and the save directory follows save_name, not the name that was asked for.
+    #
+    # Without this a long name births perfectly, saves perfectly, and the
+    # harness then looks for the file in a directory that never existed. It cost
+    # Cultist of Entropy every sweep it has ever been in -- eight of them,
+    # reported as UNBIRTHABLE with a valid game.teag sitting on disk the whole
+    # time under sweep_cornac_cultist_of_e -- and Temporal Warden one.
+    $short = if ($Name.Length -gt 25) { $Name.Substring(0, 25) } else { $Name }
+    ([regex]::Replace($short, '[^a-zA-Z0-9_]', '_')).ToLowerInvariant()
 }
 
 function Get-SaveDescPath {
