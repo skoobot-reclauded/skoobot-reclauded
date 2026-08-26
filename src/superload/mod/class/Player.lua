@@ -1105,6 +1105,30 @@ local function markWalkedInto()
 end
 -- Through `bot`, because skoobot_act is at LuaJIT's 60-upvalue limit.
 bot.markWalkedInto = markWalkedInto
+
+--- A name for a dialog that is worth reading in a stop reason.
+---
+--- Not every dialog has a title -- QuestPopup and Chat do not -- and the
+--- hand-back was built from `title` alone, so the stop that most needs to name
+--- its cause said "a dialog is open: " and stopped there. Worse, every untitled
+--- dialog collapsed into that one string, so the sweep's stop table aggregated
+--- several different causes into a single row and read as one recurring
+--- problem. See #142.
+---
+--- The class name is the fallback, trimmed of its package: `QuestPopup` rather
+--- than `mod.dialogs.QuestPopup`. Not beautiful, and it is the difference
+--- between a diagnosable stop and a blank one.
+---
+--- It also stops a nil title reaching string.match, which raises rather than
+--- returning nil -- a crash waiting for the first dialog that has no title
+--- field at all rather than an empty one.
+local function dialogLabel(d)
+    local t = d and d.title
+    if type(t) == "string" and t ~= "" then return t end
+    local c = tostring((d and d.__CLASSNAME) or "?")
+    return c:match("([^.]+)$") or c
+end
+bot.dialogLabel = dialogLabel
 local function getNearestHostile()
     local seen = spotHostiles(game.player, true)
     local target = nil
@@ -2176,13 +2200,16 @@ function skoobot_act(noAction)
 
     if #game.dialogs > 0 then
         local top = game.dialogs[#game.dialogs]
-        if string.match(top.title, "Lore found:") and top.key.virtuals.EXIT then
+        -- #142: named, never raw `title`. Untitled dialogs are common and a
+        -- nil one would raise here rather than simply not matching.
+        local label = bot.dialogLabel(top)
+        if string.match(label, "Lore found:") and top.key.virtuals.EXIT then
             -- a lore dialog: the player may have configured it to be ignored
-            if tryStop(game.player, "DIALOG_LORE", "a dialog is open: " .. top.title, notice.HANDED_BACK) then
-                chan.debug("[Dialog] stopped for the dialog: %s", tostring(top.title))
+            if tryStop(game.player, "DIALOG_LORE", "a dialog is open: " .. label, notice.HANDED_BACK) then
+                chan.debug("[Dialog] stopped for the dialog: %s", label)
                 return
             else
-                chan.info("[Dialog] closing an ignored lore dialog: %s", tostring(top.title))
+                chan.info("[Dialog] closing an ignored lore dialog: %s", label)
                 top.key.virtuals.EXIT()
             end
         else
@@ -2191,7 +2218,7 @@ function skoobot_act(noAction)
             -- bot can be sure of it. Mark it, or explore targets it again the
             -- instant the dialog is closed and nothing downstream can tell.
             bot.markWalkedInto()
-            return stop(notice.HANDED_BACK, "a dialog is open: " .. top.title)
+            return stop(notice.HANDED_BACK, "a dialog is open: " .. label)
         end
     end
 
