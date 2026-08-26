@@ -303,6 +303,60 @@ if ((Test-Path $save) -and (Get-Item $save).Length -gt 0) {
     Write-Host "`n[new-character] PASS - $save ($((Get-Item $save).Length) bytes)"
     exit 0
 }
+# #163: leave evidence. A birth that fails writes nothing but one line, which
+# is how Cultist of Entropy has failed seven times across seven sweeps without
+# anyone being able to say what it was doing. This is #138's argument -- a
+# failure that leaves no picture cannot be diagnosed -- applied to the one place
+# it was never applied.
+#
+# Best effort throughout: the game may be gone, and a diagnostic that throws on
+# the way out of a failure is worse than none.
+$diagDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'build
+esults'
+if (-not (Test-Path $diagDir)) { $null = New-Item -ItemType Directory -Force -Path $diagDir }
+$stem = "birth-failed-$Name"
+try {
+    $st = (Invoke-Bridge -Lua 'return bridge.state()' -TimeoutSec 20).Result
+    $dl = (Invoke-Bridge -Lua 'return bridge.dialogs()' -TimeoutSec 20).Result
+    $ch = (Invoke-Bridge -TimeoutSec 20 -Lua @'
+local d = game.dialogs and game.dialogs[#game.dialogs]
+if not d then return "no dialog" end
+local out = { "class=" .. tostring(d.__CLASSNAME), "title=" .. tostring(d.title) }
+if type(d.list) == "table" then
+  for i, it in ipairs(d.list) do out[#out+1] = ("answer%d=%s"):format(i, tostring(it.name or it.text or "?")) end
+end
+local v = d.key and d.key.virtuals
+local ks = {}
+for k in pairs(v or {}) do ks[#ks+1] = tostring(k) end
+table.sort(ks)
+out[#out+1] = "binds=" .. table.concat(ks, ",")
+return table.concat(out, " | ")
+'@).Result
+    # Self-contained: sk.* are the SOAK's helpers and this script never installs
+    # them, so calling sk.shot here would have quietly produced text and no
+    # picture. takeScreenshot, not saveScreenshot -- the latter opens a
+    # "Screenshot taken!" popup on top of the state being captured (#138).
+    $shot = (Invoke-Bridge -TimeoutSec 40 -Lua @"
+local ok, img = pcall(game.takeScreenshot, game)
+if not ok then return "ERR " .. tostring(img) end
+if not img then return "ERR no image" end
+if not fs.exists("/screenshots") then fs.mkdir("/screenshots") end
+local path = "/screenshots/$stem.png"
+local f = fs.open(path, "w")
+if not f then return "ERR open " .. path end
+f:write(img) f:close()
+return "wrote " .. path
+"@).Result
+    $notes = @("birth failed for $Name ($Class / $Race)", "", "state   : $st", "dialogs : $dl", "top     : $ch", "shot    : $shot")
+    ($notes -join "`n") | Set-Content -Path (Join-Path $diagDir "$stem.txt") -Encoding utf8
+    Write-Host "  diag     state   : $st"
+    Write-Host "  diag     dialogs : $dl"
+    Write-Host "  diag     top     : $ch"
+    $src = Join-Path $env:USERPROFILE (Join-Path 'T-Engine.0	ome\screenshots' "$stem.png")
+    if (Test-Path $src) { Move-Item -Force $src (Join-Path $diagDir "$stem.png"); Write-Host "  diag     -> $stem.png + $stem.txt" }
+    else { Write-Host "  diag     -> $stem.txt (no screenshot: $shot)" }
+} catch { Write-Host "  diag     could not collect: $($_.Exception.Message)" }
+
 Write-Host "`n[new-character] FAILED - no completed save at $save"
 Get-ChildItem (Join-Path $script:SaveRoot (Get-SaveDirName -Name $Name)) -ErrorAction Ignore |
     Select-Object Name, Length | Format-Table -AutoSize
