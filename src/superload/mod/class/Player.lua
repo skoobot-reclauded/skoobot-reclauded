@@ -1878,6 +1878,93 @@ end
 --- through anyway (#133). Three, because a recovery that has not raised the
 --- pool in three turns is not going to, and the player should be told rather
 --- than watched over indefinitely.
+--- What a talent would clear RIGHT NOW, as the game itself counts it.
+---
+--- tactical.CURE is either a plain number or a function of the actor's current
+--- effects returning how many detrimental ones it would remove
+--- (data/talents/misc/inscriptions.lua:93, :143). The function form is the one
+--- worth asking, because it answers zero when the thing it cures is not
+--- present -- which is exactly "would this help me right now". Asking the
+--- game's own tactical beats any list of effect names kept here, for the same
+--- reason conditions.lua detects by capability and never by effect id.
+local function cureValue(p, tid)
+    local t = p.getTalentFromId and p:getTalentFromId(tid)
+    local c = t and t.tactical and t.tactical.CURE
+    if type(c) == "function" then
+        local ok, v = pcall(c, p, t, p)
+        return (ok and type(v) == "number") and v or 0
+    end
+    return type(c) == "number" and c or 0
+end
+
+--- The recovery that addresses the situation, rather than the first row.
+---
+--- #133 fired talents[1] unconditionally. With a regeneration infusion ahead
+--- of a wild infusion in Recovery that heals into an ice block it could have
+--- broken instead -- every time, decided by whatever order the loadout
+--- proposal happened to produce. A cure that is also a heal must not be passed
+--- over for a pure heal.
+local function bestRecovery(p, talents)
+    local best, bestv = talents[1], 0
+    for _, tid in ipairs(talents) do
+        local v = cureValue(p, tid)
+        if v > bestv then best, bestv = tid, v end
+    end
+    return best, bestv
+end
+
+local CLEANSE_TRIES = 3
+
+--- #92: clear a blocking effect before handing the turn back.
+---
+--- Watched twice on 2026-08-25: the bot stopped on `cannot act (frozen)` while
+--- carrying a wild infusion that would have broken the ice block, was
+--- restarted, and stopped again. Nothing it did ended the effect -- the effect
+--- expired. Same shape as #133, one trigger along.
+---
+--- Placed before the LIVENESS checks and not merely before the policy ones.
+--- ENCASED carries no `default`, so conditions.policy() never lists it and no
+--- stoptype a player or the harness can set applies to it; a run with
+--- DEBUFF_FROZEN=IGNORE locked up in an ice block regardless. A cleanse placed
+--- before the policy conditions alone would not have prevented it.
+---
+--- Fires only while something is actually blocked, so an infusion is not spent
+--- on a cosmetic debuff, and is bounded for the reason #133's is: a cure that
+--- has not freed the character in three turns is not going to, and the player
+--- should be told rather than watched over indefinitely.
+local function tryCleanse(ctx)
+    local p = game.player
+    if not ctx or not ctx.caps then return false end
+    if not (ctx.caps.move or ctx.caps.act or ctx.caps.target or impaired(p)) then
+        return false
+    end
+
+    local act = bot.activation
+    if act then
+        act.cleanse = (act.cleanse or 0) + 1
+        if act.cleanse > CLEANSE_TRIES then return false end
+    end
+
+    local talents = getRecoveryTalents()
+    if bot.loop then talents = filterFailedTalents(talents) end
+    if #talents == 0 then return false end
+    local tid, value = bestRecovery(p, talents)
+    if not tid or value <= 0 then return false end
+
+    local t = p:getTalentFromId(tid)
+    chan.info("[Survival] blocked, and %s would clear it: using it before handing back",
+              tostring(t and t.name or tid))
+    SAI_useTalent(tid)
+    checkForAdditionalAction()
+    return true
+end
+
+-- Reached through `bot` at the call sites inside skoobot_act. That function
+-- sits one under LuaJIT's 60-upvalue limit, so two new file locals push it
+-- over -- a parse error, not a lint one. `bot` is already an upvalue there.
+bot.tryCleanse   = function(ctx) return tryCleanse(ctx) end
+bot.bestRecovery = function(p, talents) return bestRecovery(p, talents) end
+
 local LOWLIFE_TRIES = 3
 
 --- #133: try to fix low life before handing it back.
@@ -1927,7 +2014,7 @@ local function tryLowLifeRecovery(ctx)
     -- these at the player is right and is #118's, which ships the placement
     -- guard with it; doing it here would be half of that change without the
     -- half that stops a mis-placed damage talent finishing the character off.
-    SAI_useTalent(talents[1])
+    SAI_useTalent((bestRecovery(game.player, talents)))
     checkForAdditionalAction()
     return true
 end
@@ -1989,6 +2076,7 @@ function skoobot_act(noAction)
         chan.debug("[Score] threat %s, posture %s: %s", ctx.score.suffix:sub(12), ctx.score.posture,
             table.concat(ctx.score.reasons, "; "))
     end
+    if bot.tryCleanse(ctx) then return end
     if tryLowLifeRecovery(ctx) then return end
     if checkConditions(conditions.SITE_TURN, ctx) then return end
     if #hostiles > 0 then
@@ -2365,7 +2453,7 @@ function skoobot_act(noAction)
                 if #talents > 0 then
                     chan.debug("[Survival] [Recovery] using recovery, missing more than %d%% life...",
                         math.floor(100 * cfg("LOWHEALTH_RATIO") / 4))
-                    SAI_useTalent(talents[1])
+                    SAI_useTalent((bot.bestRecovery(game.player, talents)))
                     checkForAdditionalAction()
                     return
                 else
