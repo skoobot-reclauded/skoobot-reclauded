@@ -339,8 +339,8 @@ if ((Test-Path $save) -and (Get-Item $save).Length -gt 0) {
 #
 # Best effort throughout: the game may be gone, and a diagnostic that throws on
 # the way out of a failure is worse than none.
-$diagDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'build
-esults'
+$diagDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'build\results'
+
 if (-not (Test-Path $diagDir)) { $null = New-Item -ItemType Directory -Force -Path $diagDir }
 $stem = "birth-failed-$Name"
 try {
@@ -380,7 +380,7 @@ return "wrote " .. path
     Write-Host "  diag     state   : $st"
     Write-Host "  diag     dialogs : $dl"
     Write-Host "  diag     top     : $ch"
-    $src = Join-Path $env:USERPROFILE (Join-Path 'T-Engine.0	ome\screenshots' "$stem.png")
+    $src = Join-Path $env:USERPROFILE "T-Engine\4.0\tome\screenshots\$stem.png"
     if (Test-Path $src) { Move-Item -Force $src (Join-Path $diagDir "$stem.png"); Write-Host "  diag     -> $stem.png + $stem.txt" }
     else { Write-Host "  diag     -> $stem.txt (no screenshot: $shot)" }
 } catch { Write-Host "  diag     could not collect: $($_.Exception.Message)" }
