@@ -152,6 +152,11 @@ param(
     # every activated talent the character knows. What #123 wants, since it
     # asks how the SUGGESTED build performs.
     [switch]$ProposedRules,
+    # Record creature dossiers at the moments that decide whether the power
+    # formula was right (#135). OFF by default and installed only when asked:
+    # not installed means no superload and no serialisation, so an ordinary run
+    # pays nothing. Written beside the summary as <name>.dossier.json.
+    [switch]$Dossier,
     # The player's stop-condition policies for this run, "CODE=WARN|STOP|IGNORE,..."
     # (e.g. "SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN"), applied through
     # skoobot_reclauded.conditions.set and recorded in the summary.
@@ -654,6 +659,12 @@ return "installed save_name=" .. tostring(game.save_name)
         Write-Host "  rules    $($rules.Status) $($rules.Result)"
     }
 
+    if ($Dossier) {
+        $don = Invoke-Bridge -Lua 'return bridge.dossierOn()' -TimeoutSec 30
+        Write-Host "  dossier  $($don.Status) $($don.Result)"
+        if ($don.Status -ne 'OK') { Write-Host '[soak] WARNING: dossiers requested but the hook did not install' }
+    }
+
     # The player's own stop-condition knobs, through the product's API. A
     # STOP condition whose cause stays in view -- an enemy above
     # MAX_DIFF_POWER, by default STOP -- stops every restart on the spot,
@@ -984,6 +995,33 @@ finally {
         }
     } catch { }
     $null = Invoke-Bridge -Lua 'if skoobot_reclauded and skoobot_reclauded.active then skoobot_reclauded.stop("soak ended") end return "stopped"' -TimeoutSec 15 -ErrorAction SilentlyContinue
+
+    # #135: drain BEFORE Stop-Game. The ledger lives in the game's memory, so
+    # the only chance to write it is while the game is still alive -- the first
+    # attempt at this sat next to the summary, after Stop-Game, and reported
+    # "CRASHED game not running" on a run that had recorded perfectly well.
+    # Written from inside the game because the result channel is the log and
+    # these are megabytes.
+    $dossierFile = $null
+    if ($Dossier) {
+        $dname = [IO.Path]::GetFileNameWithoutExtension($OutFile) + '.dossier.json'
+        $dw = Invoke-Bridge -Lua "return bridge.dossierWrite('$dname')" -TimeoutSec 120
+        Write-Host "  dossier  $($dw.Status) $($dw.Result)"
+        # The game writes into its own write path (the module dir), not the
+        # bridge dir -- see bridge.dossierWrite.
+        $dsrc = Join-Path $script:TomeHome (Join-Path 'tome\dossiers' $dname)
+        if (Test-Path $dsrc) {
+            $ddst = Join-Path (Split-Path -Parent $OutFile) $dname
+            $ddir = Split-Path -Parent $ddst
+            if ($ddir -and -not (Test-Path $ddir)) { New-Item -ItemType Directory -Force -Path $ddir | Out-Null }
+            Move-Item -Force $dsrc $ddst
+            Write-Host "  dossier  -> $ddst"
+            $dossierFile = $dname
+        } else {
+            Write-Host "  dossier  WARNING: no file at $dsrc"
+        }
+    }
+
     Stop-Game
 
     $ended = Get-Date
@@ -1019,6 +1057,7 @@ finally {
         polls        = $polls
         auto_rules   = (-not $NoAutoRules)
         rules_source = $(if ($NoAutoRules) { 'none' } elseif ($ProposedRules) { 'loadout-proposal' } else { 'every-known-talent' })
+        dossier      = $dossierFile
         conditions   = @($conditionsApplied)
         scratch_save = $ScratchSave
     }

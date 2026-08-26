@@ -255,6 +255,404 @@ local function installPump(ModGame)
 	end
 end
 
+
+-- ---------------------------------------------------------------------------
+-- Creature dossiers (#135). OFF unless a run asks for them.
+-- ---------------------------------------------------------------------------
+--
+-- A faithful record of a creature and of the character at the moments that
+-- decide whether the power-level formula was right: the blow that WOULD kill,
+-- the death, and the kill.
+--
+-- WHY THE WHOLE OBJECT rather than the fields the formula reads. The formula is
+-- the thing under suspicion, so recording only its inputs can re-weight the
+-- terms it already has and nothing else. #100's premise is that danger lives in
+-- what a creature KNOWS and CARRIES -- fields nothing currently looks at -- so a
+-- new TERM has to be proposable from an old record, or every idea costs another
+-- sweep. Owner's call, 2026-08-25.
+--
+-- WHY HERE AND NOT IN src/. Owner's call, same day: a harness function only,
+-- and off unless asked. A serializer in src/ is one that ships, and the first
+-- thing wired to it starts writing files on a player's machine. pack.ps1
+-- refuses anything under tools/, so this cannot.
+--
+-- The engine's own serializer is not reusable: Class:save() goes through
+-- core.serial, which is C-side and writes into the savefile zip, turning every
+-- cross-reference into a separate entry (engine/class.lua:443). It produces a
+-- savefile, not a self-contained record.
+
+local DOSSIER_SCHEMA = 1        -- bump when the shape changes; see below
+local DOSSIER_DIR    = "/dossiers/"
+local MAX_DEPTH      = 12
+local MAX_KEYS       = 400
+
+bridge.dossier = { on = false, schema = DOSSIER_SCHEMA, records = {}, creatures = {}, byform = {}, nform = 0,
+                   audit = { predicted = 0, deaths = 0, kills = 0, forms = 0, reused = 0, deltas = 0 } }
+
+--- Marks a key the form has and this instance does not, so that "absent" and
+--- "unchanged" stay distinguishable when a delta is reapplied. See #135.
+local DOSSIER_ABSENT = "__absent"
+
+--- Another game entity rather than part of this one?
+--
+-- A creature points at other creatures -- ai_target.actor, summoner,
+-- escort_target -- and following those drags in the level and then the game.
+-- Cut there and keep the neighbour's identity; the uid is enough to join
+-- records afterwards, which is what "what else was in the room" needs.
+local function dossierIsEntity(t)
+	return type(t) == "table" and rawget(t, "uid") ~= nil and rawget(t, "name") ~= nil
+end
+
+local function dossierStub(e)
+	return { __ref = "entity", uid = rawget(e, "uid"), name = tostring(rawget(e, "name")),
+	         rank = rawget(e, "rank") }
+end
+
+--- Deep copy into plain data. Functions, userdata and threads are not state and
+-- do not serialise. TRUNCATION IS ALWAYS MARKED: a silently trimmed field reads
+-- as absent, absent reads as zero, and a zero quietly changes what a candidate
+-- formula computes -- which is the error class this whole exercise exists to
+-- find.
+local function dossierWalk(v, depth, seen, skip)
+	local tv = type(v)
+	if tv == "number" or tv == "string" or tv == "boolean" then return v end
+	if tv ~= "table" then return nil end
+	if seen[v] then return { __ref = "cycle" } end
+	if depth > MAX_DEPTH then return { __truncated = "depth" } end
+
+	seen[v] = true
+	local out, n = {}, 0
+	for k, val in pairs(v) do
+		local tk = type(k)
+		if (tk == "string" or tk == "number") and not (skip and skip[k]) then
+			n = n + 1
+			if n > MAX_KEYS then out.__truncated = "keys" break end
+			if depth > 0 and dossierIsEntity(val) then
+				out[k] = dossierStub(val)
+			else
+				local w = dossierWalk(val, depth + 1, seen, nil)
+				if w ~= nil then out[k] = w end
+			end
+		end
+	end
+	seen[v] = nil
+	return out
+end
+
+--- What makes two actors the SAME creature rather than the same instance.
+-- Level belongs in it: a level 3 wolf is a different stat block from a level 2
+-- one, and collapsing them would invent data that was never measured.
+local function dossierIdent(a)
+	return table.concat({
+		tostring(rawget(a, "__CLASSNAME")), tostring(rawget(a, "name")),
+		tostring(rawget(a, "rank")), tostring(rawget(a, "level")),
+		tostring(rawget(a, "type")), tostring(rawget(a, "subtype")),
+		tostring(rawget(a, "unique")),
+	}, "|")
+end
+
+--- Deep difference: the parts of `now` that are not already in `base`.
+-- Returns nil when the two are identical, which is the common case and the
+-- one that makes this worth doing. Reapply by merging into the form, treating
+-- DOSSIER_ABSENT as a deletion.
+local function dossierDelta(base, now)
+	local out, any = {}, false
+	for k, v in pairs(now) do
+		local b = base[k]
+		if type(v) == "table" and type(b) == "table" then
+			local sub = dossierDelta(b, v)
+			if sub ~= nil then out[k] = sub ; any = true end
+		elseif v ~= b then
+			out[k] = v ; any = true
+		end
+	end
+	for k in pairs(base) do
+		if now[k] == nil then out[k] = DOSSIER_ABSENT ; any = true end
+	end
+	if not any then return nil end
+	return out
+end
+
+--- One actor, split into the part that identifies the CREATURE and the part
+--- that identifies this INSTANCE of it.
+---
+--- Most of a run is the same handful of species over and over -- a level's
+--- worth of giant brown mice have identical stat blocks and differ only in
+--- where they stand and how hurt they are. Storing the block once and
+--- referencing it is the difference between megabytes and kilobytes, and it
+--- costs nothing in fidelity: both halves are still recorded in full.
+function bridge.dossierActor(a)
+	if type(a) ~= "table" then return nil, nil end
+	-- _no_save_fields is the ENTITY'S OWN list of what is runtime noise rather
+	-- than state (engine/class.lua:445) -- a better answer than any list here.
+	local skip = {}
+	if type(a._no_save_fields) == "table" then
+		for k in pairs(a._no_save_fields) do skip[k] = true end
+	end
+	skip._mo, skip._last_mo, skip._mo_final, skip._hooks = true, true, true, true
+
+	local snap = dossierWalk(a, 0, {}, skip)
+	if type(snap) ~= "table" then return nil, nil end
+
+	-- The first snapshot of an identity becomes the form; later ones carry only
+	-- what differs from it. Nothing is curated and nothing is assumed volatile,
+	-- so a field nobody thought of still gets recorded the moment it moves.
+	local d = bridge.dossier
+	local key = dossierIdent(a)
+	local id = d.byform[key]
+	if not id then
+		d.nform = d.nform + 1
+		id = "c" .. d.nform
+		d.byform[key] = id
+		d.creatures[id] = snap
+		d.audit.forms = d.audit.forms + 1
+		return { form = id }, id
+	end
+	d.audit.reused = d.audit.reused + 1
+	local delta = dossierDelta(d.creatures[id], snap)
+	if delta == nil then return { form = id }, id end
+	d.audit.deltas = d.audit.deltas + 1
+	return { form = id, delta = delta }, id
+end
+
+--- What OUR formula makes of it -- recorded beside the raw fields and never
+-- instead of them. A replay compares a candidate against this.
+local function dossierFigures(a)
+	local b = rawget(_G, "skoobot_reclauded")
+	if not b or type(a) ~= "table" then return nil end
+	local ok, res = pcall(function() return b.power(a) end)
+	return ok and res or nil
+end
+
+--- Was anything WARNED about at this instant, and about whom? This is the
+-- diagonal that matters: a death with no flag raised is the formula failing to
+-- see it coming, which is worse than dying to something it did warn about.
+local function dossierScore(p)
+	local b = rawget(_G, "skoobot_reclauded")
+	if not b or not p then return nil end
+	local ok, s = pcall(function() return b.score(p) end)
+	if not ok or type(s) ~= "table" then return nil end
+	return dossierWalk({ flags = s.flags, terms = s.terms, figures = s.figures,
+	                     posture = s.posture, details = s.details }, 0, {}, nil)
+end
+
+--- Append one record. Keyed by turn and moment so several hits in one turn do
+-- not fill the ledger with near-identical rows.
+local function dossierRecord(moment, subject, src)
+	local d = bridge.dossier
+	if not d.on then return end
+	local p = game and game.player
+	local turn = game and game.turn or -1
+	local key = tostring(moment) .. ":" .. tostring(turn) .. ":" .. tostring(subject and subject.uid)
+	if d.last_key == key then return end
+	d.last_key = key
+
+	local ok, rec = pcall(function()
+		-- On a kill the player IS the source, and its delta is the largest thing
+		-- on the row (the damage logs grow all run). Snapshot it once and let the
+		-- other slot point at it rather than repeating it.
+		local pRef = bridge.dossierActor(p)
+		local sRef
+		if src == p then sRef = { same = "player" }
+		elseif src then sRef = bridge.dossierActor(src) end
+		return {
+			moment  = moment,
+			turn    = turn,
+			zone    = game.zone and game.zone.short_name,
+			level   = game.level and game.level.level,
+			subject = (subject == p) and { same = "player" } or bridge.dossierActor(subject),
+			source  = sRef,
+			player  = pRef,
+			figures = { subject = dossierFigures(subject), source = src and dossierFigures(src) or nil,
+			            player = dossierFigures(p) },
+			score   = dossierScore(p),
+		}
+	end)
+	if not ok then
+		d.records[#d.records + 1] = { moment = moment, turn = turn, error = tostring(rec) }
+		return
+	end
+	d.records[#d.records + 1] = rec
+end
+
+--- Install the hooks. Not installed means NOT INSTALLED -- no superload, no
+-- serialisation, no cost -- rather than a hook that runs and discards, so the
+-- ordinary dev loop pays nothing for this.
+function bridge.dossierOn()
+	local d = bridge.dossier
+	if d.on then return "already on" end
+	d.on = true
+
+	local Actor = require "mod.class.Actor"
+
+	-- THE SEAM (owner's idea, 2026-08-25). engine/interface/ActorLife.lua:71:
+	--   if self.onTakeHit then value = self:onTakeHit(value, src) end   -- 72
+	--   self.life = self.life - value                                   -- 73
+	-- Between those the damage is FINAL -- shields and resists already applied
+	-- by onTakeHit -- and life is still PRE-HIT. So the character is whole here
+	-- in a way it never is again: effects, cooldowns, resources, position.
+	--
+	-- onTakeHit rather than takeHit: the interesting point is mid-function, so a
+	-- takeHit superload would have to reimplement it, and calling onTakeHit
+	-- ourselves before delegating would run it TWICE, applying shields a second
+	-- time. That is a correctness bug, not a style one.
+	if not Actor.__skoobot_dossier_hit then
+		Actor.__skoobot_dossier_hit = true
+		local old = Actor.onTakeHit
+		function Actor:onTakeHit(value, src, death_note)
+			local adjusted = old(self, value, src, death_note)
+			if self.player and not self.dead and type(adjusted) == "number"
+			   and (self.life - adjusted) <= (self.die_at or 0) then
+				bridge.dossier.audit.predicted = bridge.dossier.audit.predicted + 1
+				-- PREDICTED, not confirmed: on_kill can cancel the death
+				-- (ActorLife.lua:76), and self-resurrect can follow it. A blow
+				-- that would have killed and did not is a near-death, which is
+				-- the evidence that a warning was RIGHT -- so it is kept and
+				-- labelled, not filtered out.
+				dossierRecord("predicted_lethal", self, src)
+			end
+			return adjusted
+		end
+	end
+
+	-- Confirmed deaths, and the audit. die() wipes the state inside itself --
+	-- self-resurrect sets life/mana/stamina back to full and strips effects
+	-- BEFORE any hook fires (mod/class/Actor.lua:3153-3175) -- so this is not
+	-- where the snapshot comes from. It is where the death is COUNTED, and the
+	-- gap against `predicted` measures what the damage seam misses: instadeath
+	-- effects and anything calling die() directly never pass through takeHit.
+	if not Actor.__skoobot_dossier_die then
+		Actor.__skoobot_dossier_die = true
+		local olddie = Actor.die
+		function Actor:die(src, death_note)
+			local dos = bridge.dossier
+			if dos.on and not self.dead then
+				local p = game and game.player
+				if self.player then
+					dos.audit.deaths = dos.audit.deaths + 1
+					dossierRecord("death", self, src)
+				elseif src and src == p then
+					dos.audit.kills = dos.audit.kills + 1
+					-- The character's state at the kill is the COST proxy: a
+					-- warned enemy killed at 95% life is a dud, the same enemy
+					-- killed at 5% means the warning was right, and "dispatched"
+					-- alone cannot tell them apart.
+					dossierRecord("kill", self, src)
+				end
+			end
+			return olddie(self, src, death_note)
+		end
+	end
+	return ("on schema=%d"):format(DOSSIER_SCHEMA)
+end
+
+--- Drain: hand the ledger over and forget it, so a long run does not grow
+-- without bound and the harness owns the only copy.
+function bridge.dossierDrain()
+	local d = bridge.dossier
+	local out = d.records
+	d.records = {}
+	d.last_key = nil
+	return out
+end
+
+--- After a write, forget the interned forms too -- a drained file is
+--- self-contained, and keeping them would make the next file reference ids
+--- whose definitions it does not carry.
+local function dossierForget()
+	local d = bridge.dossier
+	d.creatures, d.byform, d.nform = {}, {}, 0
+end
+
+--- Strict JSON, because the engine's encoder does not emit it: Json2 escapes
+-- an apostrophe as \' (thirdparty/Json2.lua:334), which JSON has no such escape
+-- for, so every file written through it failed to parse. See #135.
+local JSON_ESC = { ['"'] = '\\"', ['\\'] = '\\\\', ['\b'] = '\\b',
+                   ['\f'] = '\\f', ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t' }
+
+local function jsonStr(s)
+	return '"' .. s:gsub('[%c"\\]', function(c)
+		return JSON_ESC[c] or ("\\u%04x"):format(c:byte())
+	end) .. '"'
+end
+
+-- inf has no JSON literal but 1e999 parses back to it in both Python and JS;
+-- nan has neither, so it is marked rather than silently turned into null.
+local function jsonNum(n)
+	if n ~= n then return '"__nan"' end
+	if n == math.huge then return "1e999" end
+	if n == -math.huge then return "-1e999" end
+	return ("%.14g"):format(n)
+end
+
+local function jsonEnc(v, out)
+	local tv = type(v)
+	if v == nil then out[#out+1] = "null"
+	elseif tv == "boolean" then out[#out+1] = tostring(v)
+	elseif tv == "number" then out[#out+1] = jsonNum(v)
+	elseif tv == "string" then out[#out+1] = jsonStr(v)
+	elseif tv ~= "table" then out[#out+1] = jsonStr(tostring(v))
+	else
+		local n, total = #v, 0
+		for _ in pairs(v) do total = total + 1 end
+		if n > 0 and total == n then
+			out[#out+1] = "["
+			for i = 1, n do
+				if i > 1 then out[#out+1] = "," end
+				jsonEnc(v[i], out)
+			end
+			out[#out+1] = "]"
+		else
+			out[#out+1] = "{"
+			local first = true
+			for k, val in pairs(v) do
+				if not first then out[#out+1] = "," end
+				first = false
+				out[#out+1] = jsonStr(tostring(k))
+				out[#out+1] = ":"
+				jsonEnc(val, out)
+			end
+			out[#out+1] = "}"
+		end
+	end
+end
+
+--- Write the ledger to a file and forget it.
+--
+-- NOT returned through the result channel: that is the log, and a run's
+-- dossiers are megabytes.
+function bridge.dossierWrite(name)
+	local recs = bridge.dossierDrain()
+	-- creatures[] holds each distinct stat block once; every record points at
+	-- one by id. A reader joins them back with record.subject.form.
+	local payload = { schema = DOSSIER_SCHEMA, audit = bridge.dossier.audit,
+	                  creatures = bridge.dossier.creatures, records = recs }
+	local buf = {}
+	local ok, err = pcall(jsonEnc, payload, buf)
+	if not ok then return "ERR encode " .. tostring(err) end
+	local encoded = table.concat(buf)
+	-- NOT the bridge dir: that is mounted readable but is not under PhysFS's
+	-- write path, so fs.open there returns nil without raising. The write path
+	-- is the module dir (measured: C:\...\T-Engine.0	ome), and /dossiers/
+	-- lands inside it.
+	if not fs.exists(DOSSIER_DIR) then fs.mkdir(DOSSIER_DIR) end
+	local path = DOSSIER_DIR .. tostring(name)
+	local f = fs.open(path, "w")
+	if not f then return "ERR open " .. path end
+	f:write(encoded)
+	f:close()
+	local forms = bridge.dossier.audit.forms
+	dossierForget()
+	return ("wrote %s records=%d forms=%d bytes=%d"):format(path, #recs, forms, #encoded)
+end
+
+function bridge.dossierStatus()
+	local d = bridge.dossier
+	return ("on=%s schema=%d pending=%d predicted=%d deaths=%d kills=%d forms=%d reused=%d deltas=%d"):format(
+		tostring(d.on), d.schema, #d.records, d.audit.predicted, d.audit.deaths, d.audit.kills,
+		d.audit.forms, d.audit.reused, d.audit.deltas)
+end
+
 class:bindHook("ToME:run", function()
 	if not fs.exists(DIR) then fs.mkdir(DIR) end
 	installPump(require "mod.class.Game")

@@ -99,7 +99,9 @@ param(
     [int]$BirthTimeoutSec = 900,
     [int]$LeaseWaitMin = 60,
     # Do not take a lease. For running under an outer host that holds one.
-    [switch]$NoRunLease
+    [switch]$NoRunLease,
+    # Record creature dossiers (#135). Off by default; see soak.ps1 -Dossier.
+    [switch]$Dossier
 )
 
 $ErrorActionPreference = 'Stop'
@@ -260,6 +262,7 @@ try {
         $sargs = @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'soak.ps1'),
                    '-SaveName', $save, '-MaxMinutes', $Minutes, '-MaxLevel', 50,
                    '-OutFile', $soakOut, '-NoRunLease', '-ProposedRules')
+        if ($Dossier) { $sargs += '-Dossier' }
         $null = & powershell @sargs 2>&1
 
         if (-not (Test-Path $soakOut)) {
