@@ -496,7 +496,10 @@ local function dossierSightings(p)
 	local lvl = game and game.level
 	if not lvl or not lvl.entities or not lvl.map then return end
 	local seen = d.seen_uids
-	for _, a in ipairs(lvl.entities) do
+	-- pairs, not ipairs: game.level.entities is keyed by uid, not an array, so
+	-- ipairs walks nothing and the sampler silently recorded zero. escort.lua
+	-- has always used pairs on this same table.
+	for _, a in pairs(lvl.entities) do
 		local uid = a and rawget(a, "uid")
 		if uid and a ~= p and not seen[uid] and a.x and a.y and not a.dead then
 			if lvl.map.seens(a.x, a.y) and p:canSee(a) then
