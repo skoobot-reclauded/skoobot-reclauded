@@ -42,6 +42,7 @@ local conditions = dofile("/data-skoobot_reclauded/conditions.lua")
 local score = dofile("/data-skoobot_reclauded/score.lua")
 local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 local lifem = dofile("/data-skoobot_reclauded/life.lua")
+local resources = dofile("/data-skoobot_reclauded/resources.lua")
 local escortm = dofile("/data-skoobot_reclauded/escort.lua")
 
 local STATE_REST    = 10
@@ -2444,16 +2445,30 @@ function bot.runonce()
 end
 
 --- One line for the harness and for bug reports.
+--- The class pools this character runs on, worst first (#128). Read through
+--- the engine's own registry rather than a list of names, so an addon that
+--- adds a resource is covered.
+function bot.resources(p)
+    p = p or game.player
+    local ActorResource = require "engine.interface.ActorResource"
+    return resources.of(p, ActorResource.resources_def or {},
+        function(tid) return p:knowTalent(tid) end)
+end
+
 function bot.inspect()
     local p = game and game.player
     if not p then return "no player" end
     local hostiles = #spotHostiles(p, true)
     local act = bot.activation
+    -- #128: the pools go on the status line so every soak and every sweep run
+    -- becomes evidence about starvation, which is the thing the bot cannot
+    -- currently see and the player reports as "it just melees".
+    local res = resources.describe(bot.resources(p))
     return ("turn=%s hostiles=%d life=%s/%s air=%s resting=%s running=%s wilderness=%s "
-        .. "active=%s state=%s actions=%d iterations=%s stalled=%s reason=%s"):format(
+        .. "res=[%s] active=%s state=%s actions=%d iterations=%s stalled=%s reason=%s"):format(
         tostring(game.turn), hostiles, tostring(p.life), tostring(p.max_life), tostring(p.air),
         tostring(p.resting ~= nil), tostring(p.running ~= nil),
-        tostring(game.zone and game.zone.wilderness or false),
+        tostring(game.zone and game.zone.wilderness or false), res,
         tostring(bot.active), aiStateString(), bot.actions,
         tostring(act and act.iterations), tostring(act and act.stalled), tostring(bot.last_reason))
 end
