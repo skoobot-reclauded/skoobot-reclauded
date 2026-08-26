@@ -148,6 +148,10 @@ param(
     [string]$OutFile,
     [int]$PollSec = 4,
     [switch]$NoAutoRules,
+    # Fill the rotation from the PRODUCT's loadout proposal rather than from
+    # every activated talent the character knows. What #123 wants, since it
+    # asks how the SUGGESTED build performs.
+    [switch]$ProposedRules,
     # The player's stop-condition policies for this run, "CODE=WARN|STOP|IGNORE,..."
     # (e.g. "SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN"), applied through
     # skoobot_reclauded.conditions.set and recorded in the summary.
@@ -433,6 +437,29 @@ end
 -- The rules a player would have set: what the character can fire, then the
 -- innate Attack last; sustains kept up; inscriptions that need no target as
 -- recovery and damage prevention.
+-- The PRODUCT's own discovery, which is what a player who accepts the talent
+-- screen's proposal would be running. sk.rules() below is a much cruder
+-- superset -- every activated talent the character knows -- and measuring a
+-- class against that answers a different question from "how does the
+-- suggested build do" (#123, #130).
+function sk.proposedRules()
+  local p = game.player
+  local r = b.rules.get(p)
+  for _, s in ipairs(b.rules.module.SECTIONS) do
+    local l = r[s] for i = #l, 1, -1 do l[i] = nil end
+  end
+  local prop = b.loadout.propose(p)
+  if not prop then return "ERR discovery proposed nothing" end
+  b.loadout.apply(prop, "replace", p)
+  -- Attack is the floor: discovery may legitimately propose no attack at all
+  -- for a character whose talents are all situational, and a rotation with
+  -- nothing in it measures the empty-Combat dead end (#96) rather than the class.
+  if #b.rules.tids(p, "Combat") == 0 then b.rules.module.place(r, {tid="T_ATTACK"}, "Combat") end
+  return ("combat=%s sustain=%s recovery=%s"):format(
+    table.concat(b.rules.tids(p, "Combat"), ","), table.concat(b.rules.tids(p, "Sustain"), ","),
+    table.concat(b.rules.tids(p, "Recovery"), ","))
+end
+
 function sk.rules()
   local p = game.player
   local r = b.rules.get(p)
@@ -622,7 +649,8 @@ return "installed save_name=" .. tostring(game.save_name)
     Write-Host "  $($install.Result)"
 
     if (-not $NoAutoRules) {
-        $rules = Invoke-Bridge -Lua 'return sk.rules()' -TimeoutSec 30
+        $call  = $(if ($ProposedRules) { 'return sk.proposedRules()' } else { 'return sk.rules()' })
+        $rules = Invoke-Bridge -Lua $call -TimeoutSec 30
         Write-Host "  rules    $($rules.Status) $($rules.Result)"
     }
 
@@ -990,6 +1018,7 @@ finally {
         tainted      = $tainted
         polls        = $polls
         auto_rules   = (-not $NoAutoRules)
+        rules_source = $(if ($NoAutoRules) { 'none' } elseif ($ProposedRules) { 'loadout-proposal' } else { 'every-known-talent' })
         conditions   = @($conditionsApplied)
         scratch_save = $ScratchSave
     }

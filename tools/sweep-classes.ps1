@@ -54,19 +54,16 @@
       * the four Steamtech classes never appear in a Maj'Eyal roster at all --
         they are campaign-gated, and are their own sweep (owner, 2026-08-25).
 
-    WHAT THE ROTATION ACTUALLY IS, which is not what this file claimed until
-    #130 went looking. The rules come from tools/soak.ps1's own `sk.rules()`,
-    which is NOT the loadout proposal: it walks p.talents and puts every
-    activated talent into Combat, filtered only by no_npc_use / no_dumb_use /
-    hide. So this measures A CRUDE SUPERSET of the suggested build, and a
-    class that does badly here may be carrying talents the product would never
-    have proposed.
+    WHAT THE ROTATION IS. The product's own loadout proposal -- what a player
+    who accepted the talent screen's suggestion would be running -- via
+    soak.ps1 -ProposedRules. That is the point: "classes that perform
+    sub-optimally with the suggested build" is the question this exists for.
 
-    That matters for reading the results: "classes that perform sub-optimally
-    with the suggested build" is the question this was built for, and it is
-    NOT yet the question being answered. Pointing the sweep at
-    bot.loadout.propose is the change that would make the claim true, and it
-    is worth making before the numbers are used to judge classes.
+    It was NOT that for the first pass, and the results of that run should be
+    read accordingly. Until #130 went looking, the rotation came from
+    soak.ps1's sk.rules(), which walks p.talents and puts every activated
+    talent into Combat -- a crude superset that a player would never have.
+    The run's `rules_source` field records which was used.
 
     COST. The game is single-occupancy and this holds the lease from start to
     finish (#83), so it is serial and cannot interleave with scenario work.
@@ -231,7 +228,7 @@ try {
         $soakOut = Join-Path $OutDir "$slug.soak.json"
         $sargs = @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'soak.ps1'),
                    '-SaveName', $save, '-MaxMinutes', $Minutes, '-MaxLevel', 50,
-                   '-OutFile', $soakOut, '-NoRunLease')
+                   '-OutFile', $soakOut, '-NoRunLease', '-ProposedRules')
         $null = & powershell @sargs 2>&1
 
         if (-not (Test-Path $soakOut)) {
