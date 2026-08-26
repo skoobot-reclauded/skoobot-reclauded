@@ -1271,6 +1271,34 @@ return "installed save_name=" .. tostring(game.save_name)
         }
 
         # ----- (b) stairs, and (f)/(g) on stairs up or the wilderness exit -----
+        # #159: "this level is explored" is a DEFINITIVE statement, not a
+        # transient one -- the level is finished and the only exit is one the
+        # bot will not take (#151, #152). Nothing about it changes by asking
+        # again, so waiting for -LoopAfter to believe it is the harness
+        # disbelieving the bot on principle. Act on it at once: descend if
+        # there is a seen way down, otherwise change zone (#157 removed the
+        # depth restriction that used to block that).
+        if ($s.reason -match 'this level is explored') {
+            $key = "$($s.zone):$($s.zlevel)"
+            if (-not $NoDescend -and $s.downs -gt 0) {
+                $walk = @{ action = 'descend'; phase = 'walking'; key = $key; moves = 0; waits = 0
+                           from = "$($s.x),$($s.y)"; how = ''; target = $null; loop = $false }
+                $descendWalks++
+                Write-Host "  walk     descend from ${key}: explored, $($s.downs) seen down staircase(s)"
+                continue
+            }
+            if ($zoneList.Count -gt 0) {
+                $visited = @(((Invoke-Bridge -Lua 'return sk.visitedZones()' -TimeoutSec 30).Result -split ',') | Where-Object { $_ })
+                $next = $zoneList | Where-Object { $_.id -ne $s.zone -and $_.id -notin $visited -and $_.min -le ($s.level + 2) } | Select-Object -First 1
+                if ($next) {
+                    $walk = @{ action = 'next-zone'; phase = 'taking'; key = $key; moves = 0; waits = 0
+                               from = "$($s.x),$($s.y)"; how = ''; target = $next.id; loop = $false }
+                    Write-Host "  walk     next-zone from $key (explored) -> $($next.id)"
+                    continue
+                }
+            }
+        }
+
         # #158: the character levelled up and has points sitting unspent. Spend
         # them and carry on -- unspent points are a hand-back on nearly every
         # run, and behind it a character that never gets stronger.
