@@ -1091,7 +1091,19 @@ return "installed save_name=" .. tostring(game.save_name)
                     Write-Host "  walk     descend from $key at $($s.x),$($s.y): $($s.downs) seen down staircase(s), $why"
                     continue
                 }
-                if ($zoneList.Count -gt 0 -and $s.zmax -gt 0 -and $s.zlevel -ge $s.zmax) {
+                # #156: NOT only at the bottom of a zone. The trigger used to
+                # require zlevel >= zmax, on the assumption that a run leaves a
+                # zone when it has finished it -- but a run that is LOOPING has
+                # finished with the zone whatever depth it is at, and Doomed
+                # proved it: 26,000 turns on trollmire:1 of 3, fifteen
+                # hand-backs saying the only way on is the world map, and
+                # next-zone never once fired because 1 < 3.
+                #
+                # Descending is still preferred and still tried first. This is
+                # the fallback for a loop with nowhere down to go, and it is
+                # strictly better than the alternative it replaces, which was
+                # to keep going until MAX_MINUTES.
+                if ($zoneList.Count -gt 0) {
                     $visited = @(((Invoke-Bridge -Lua 'return sk.visitedZones()' -TimeoutSec 30).Result -split ',') | Where-Object { $_ })
                     $next = $zoneList | Where-Object { $_.id -ne $s.zone -and $_.id -notin $visited -and $_.min -le ($s.level + 2) } | Select-Object -First 1
                     if ($next) {
