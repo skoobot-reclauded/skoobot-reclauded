@@ -606,7 +606,19 @@ function sk.walkStep(loop)
   end
   local nx, ny = path[1].x, path[1].y
   local a = map(nx, ny, engine.Map.ACTOR)
-  if a then return "blocked by " .. tostring(a.name or "?") end
+  if a then
+    -- An actor on the next grid used to abandon the walk outright, which cost
+    -- two of Doomed's three descend walks in sweep 1 -- "blocked by shadow",
+    -- twice, on a level it had already explored.
+    --
+    -- A non-hostile is not a wall: moving into one swaps places. A hostile is
+    -- the BOT's business and not the walk's, so that one still hands back --
+    -- and note the hostile check above only sees SPOTTED ones, which is why
+    -- anything reaches here at all.
+    if p:reactionToward(a) < 0 then
+      return "blocked by hostile " .. tostring(a.name or "?")
+    end
+  end
   local ox, oy = p.x, p.y
   local ok, err = pcall(p.move, p, nx, ny)
   if not ok then return "error " .. tostring(err) end
