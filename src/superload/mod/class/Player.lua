@@ -544,6 +544,60 @@ local function validateRest(turns)
     bot.state = STATE_EXPLORE
 end
 
+--- Talents this character has seen raise a Lua error, and will not use again
+--- (#130). Kept on the character, so it survives a save and a talent that is
+--- broken for this build is not rediscovered every session.
+local function retiredTalents(p)
+    local d = data(p or game.player)
+    d.talent_errors = d.talent_errors or {}
+    return d.talent_errors
+end
+
+--- Retire one, and say so once. The player is told because a talent silently
+--- vanishing from the rotation is the kind of thing that reads as the bot
+--- ignoring their configuration.
+local function retireTalent(tid, name)
+    local out = retiredTalents(game.player)
+    if out[tid] then return end
+    out[tid] = true
+    chan.warn("[Talent] %s raised an engine error and will not be used again on this character", tostring(name))
+    game.log("#YELLOW#[SkooBot] %s raised an error and has been dropped from the rotation for this character.",
+        tostring(name))
+end
+
+bot.retiredTalents = function(p) return retiredTalents(p) end
+
+--- Retire every talent that has raised since we last looked (#130).
+---
+--- NOT checked after useTalent returns, which is where this began and why it
+--- did not work: a talent that opens a dialog SUSPENDS ITS COROUTINE
+--- (Command Staff calls talentDialog), so useTalent returns with the talent
+--- still in flight and `talent_error` still nil. The error arrives later, when
+--- the chat is answered and the coroutine resumes. So the check has to be a
+--- sweep of the engine's own global log at the top of a decision, not a test
+--- beside the call.
+---
+--- The log entry's shape is {[talent_id] = talent_def, Actor = ..., ...}
+--- (engine/interface/ActorTalents.lua:424), so the id is a KEY, not a field.
+local ActorTalents = require "engine.interface.ActorTalents"
+local function harvestTalentErrors()
+    local log = ActorTalents._talent_errors
+    if type(log) ~= "table" then return end
+    local seen = bot.talent_errors_seen or 0
+    if #log <= seen then return end
+    for i = seen + 1, #log do
+        local e = log[i]
+        if type(e) == "table" and e.Actor == game.player then
+            for k, v in pairs(e) do
+                if type(k) == "string" and k:find("^T_") then
+                    retireTalent(k, type(v) == "table" and v.name or k)
+                end
+            end
+        end
+    end
+    bot.talent_errors_seen = #log
+end
+
 local function SAI_useTalent(tid, who, force_level, ignore_cd, target)
     local name = game.player:getTalentFromId(tid).name
     if bot.do_nothing then
@@ -567,6 +621,16 @@ local function SAI_useTalent(tid, who, force_level, ignore_cd, target)
     -- (scenario-t010-marked-target).
     local ret = game.player:useTalent(tid, who, force_level, ignore_cd, target, false, true)
     if ret == false and bot.loop then bot.loop.talentfailed[tid] = true end
+
+    -- #130: a talent that RAISED is not a talent that refused, and marking it
+    -- failed for the iteration is not enough -- the next iteration tries it
+    -- again. Three staff classes raised on Command Staff fourteen to sixteen
+    -- times in a four-minute run.
+    --
+    -- useTalent clears talent_error at its start (engine/interface/
+    -- ActorTalents.lua:146), so a non-nil one here belongs to THIS call and
+    -- nothing else. Retire the talent for the character: it cannot be made to
+    -- work by trying harder, and the reason it failed will not change.
     return ret
 end
 
@@ -1442,11 +1506,15 @@ end
 --- that already failed, and (#59) a built-in action whose step was refused.
 local function filterFailedTalents(t)
     local out = {}
+    -- #130: a retired talent is dropped here as well as at use, so it never
+    -- reaches the rotation again -- including on a later activation, which is
+    -- what talentfailed alone does not cover.
+    local retired = retiredTalents(game.player)
     for _, v in ipairs(t) do
         if type(v) == "table" then
-            if bot.loop.talentfailed[rules.key(v)] == nil then out[#out + 1] = v end
+            if bot.loop.talentfailed[rules.key(v)] == nil and not retired[rules.key(v)] then out[#out + 1] = v end
         elseif not game.player:isTalentCoolingDown(game.player:getTalentFromId(v))
-               and bot.loop.talentfailed[v] == nil then
+               and bot.loop.talentfailed[v] == nil and not retired[v] then
             out[#out + 1] = v
         end
     end
@@ -1760,6 +1828,11 @@ function skoobot_act(noAction)
     if bot.loop.thinkCount > THINK_LIMIT then
         return stop(notice.CANNOT_ACT, "could not settle on an action after " .. THINK_LIMIT .. " tries")
     end
+
+    -- #130: before choosing anything, retire whatever raised since the last
+    -- decision. A talent that opens a dialog raises after its coroutine
+    -- resumes, so this is the first point at which the error is visible.
+    harvestTalentErrors()
 
     if activateSustained() then return end
 
