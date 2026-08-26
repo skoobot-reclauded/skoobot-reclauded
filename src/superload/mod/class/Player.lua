@@ -1889,7 +1889,18 @@ end
 --- reason conditions.lua detects by capability and never by effect id.
 local function cureValue(p, tid)
     local t = p.getTalentFromId and p:getTalentFromId(tid)
-    local c = t and t.tactical and t.tactical.CURE
+    local tac = t and t.tactical
+    -- `tactical` is sometimes a function returning the table, as
+    -- loadout.lua's resolveTactical already allows for.
+    if type(tac) == "function" then
+        local ok, res = pcall(tac, p, t, nil)
+        tac = (ok and type(res) == "table") and res or nil
+    end
+    -- Lower case at RUNTIME: aiLowerTacticals rewrites the keys as the talent
+    -- loads, so a live `tactical.CURE` is nil however the data file spells it
+    -- (docs/api-surface-1.7.6.md, "t.tactical keys are LOWERCASED on load").
+    -- Both accepted, as loadout.lua does.
+    local c = type(tac) == "table" and (tac.cure or tac.CURE) or nil
     if type(c) == "function" then
         local ok, v = pcall(c, p, t, p)
         return (ok and type(v) == "number") and v or 0
