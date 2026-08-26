@@ -172,6 +172,20 @@ param(
     # which run would need it. It costs nothing on a run that ends by its own
     # limits with something to show for it, and three PNGs when it does not.
     [int]$TimeoutActionCaptures = 3,
+    # #86's stairs offer, for THIS CHARACTER only (never the account -- that
+    # leak has been fixed once already).
+    #
+    # An unattended run must answer the offer, and the generic dialog closer
+    # cannot: it presses EXIT first, and #86 deliberately made Escape on the
+    # StairsDialog mean "not now". So the harness was declining its own descent
+    # every time -- measured on Doomed in sweep 1, which spent 12,302 turns on
+    # a fully explored trollmire:1 with a down staircase it had already found.
+    #
+    # 'always' answers it before it is ever asked. 'ask' leaves the product's
+    # default in place and is what to use when the OFFER is what is being
+    # measured rather than the depth.
+    [ValidateSet('always', 'ask', 'never', 'leave')]
+    [string]$TakeStairs = 'always',
     # The player's stop-condition policies for this run, "CODE=WARN|STOP|IGNORE,..."
     # (e.g. "SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN"), applied through
     # skoobot_reclauded.conditions.set and recorded in the summary.
@@ -759,6 +773,18 @@ return "installed save_name=" .. tostring(game.save_name)
         }
     }
 
+    # #86 / #123: the stairs answer, per character. Set through the product's
+    # own writer so it lands where a player's choice would, and recorded so no
+    # run is ambiguous about whether it was allowed to descend.
+    $stairsApplied = 'leave'
+    if ($TakeStairs -ne 'leave') {
+        $vals = @{ ask = 0; always = 1; never = 2 }
+        $sr = Invoke-Bridge -TimeoutSec 30 -Lua ("local ok = skoobot_reclauded.setCharSetting('TAKE_STAIRS', {0}) return tostring(ok) .. ' ' .. tostring(skoobot_reclauded.cfg and skoobot_reclauded.cfg('TAKE_STAIRS'))" -f $vals[$TakeStairs])
+        Write-Host "  stairs   $($sr.Status) TAKE_STAIRS=$TakeStairs ($($sr.Result))"
+        if ($sr.Status -eq 'OK' -and $sr.Result -notmatch '^false') { $stairsApplied = $TakeStairs }
+        else { Write-Host '[soak] WARNING: TAKE_STAIRS was not applied; the run may decline its own descent' }
+    }
+
     # (g): the zone list, checked against the installed module. An id with no
     # zone.lua is dropped here and reported, not discovered at the transition.
     foreach ($z in $ZoneIds) {
@@ -1243,6 +1269,7 @@ finally {
             rows      = @($escortRows)
         }
         conditions   = @($conditionsApplied)
+        take_stairs  = $stairsApplied
         scratch_save = $ScratchSave
     }
     $dir = Split-Path -Parent $OutFile
@@ -1273,6 +1300,7 @@ finally {
     $md.Add("| Lua errors | $($luaErrors.Count) |")
     $md.Add("| tainted | $tainted |")
     $md.Add("| conditions | $(if ($conditionsApplied.Count -gt 0) { $conditionsApplied -join ', ' } else { 'defaults' }) |")
+    $md.Add("| take_stairs | $stairsApplied |")
     $md.Add("| polls | $polls every $PollSec s |")
     $md.Add('')
     $md.Add('| stop reason | count | severity | first turn | last turn |')
