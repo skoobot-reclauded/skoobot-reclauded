@@ -116,7 +116,16 @@ param(
     # still raised and recorded -- which is exactly what #135's corpus needs to
     # tell "died to a warned enemy" from "died with nothing raised". Pass
     # IGNORE for raw capability, or '' to measure the shipped defaults.
-    [string]$Conditions = 'SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN,SCOUTER_CROWDPOWER=WARN,SCOUTER_ENEMYCOUNT=WARN'
+    #
+    # LIFE_LOWLIFE is in the list for the same reason and it is the bigger one:
+    # it ships as STOP, so any class that drops below the ratio with an enemy
+    # in view stops there for good and scores STUCK. A six-minute soak on the
+    # fixture ended exactly that way. A class that would have died should die
+    # -- the death is a measurement and #135 records it, with the flags that
+    # were raised -- whereas STUCK says only that the product handed over.
+    # Expect more deaths in the table than the first sweeps showed, and expect
+    # them to mean something.
+    [string]$Conditions = 'SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN,SCOUTER_CROWDPOWER=WARN,SCOUTER_ENEMYCOUNT=WARN,LIFE_LOWLIFE=WARN'
 )
 
 $ErrorActionPreference = 'Stop'

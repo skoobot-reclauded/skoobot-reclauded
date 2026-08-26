@@ -2091,11 +2091,30 @@ local LOWLIFE_TRIES = 3
 --- Returns true when it acted, in which case the caller must not go on to
 --- evaluate the stop this turn.
 local function tryLowLifeRecovery(ctx)
-    if not ctx or (ctx.hostiles or 0) == 0 then return false end
     local def = conditions.find("LIFE_LOWLIFE")
     if not def or not def.detect then return false end
-    local firing = def.detect(game.player, ctx)
-    if not firing then return false end
+    -- Nothing in view ends the episode as surely as recovering does: the
+    -- condition needs a hostile, so the count has to reset here too or a quiet
+    -- moment banks the failures for the next fight.
+    if not ctx or (ctx.hostiles or 0) == 0 then
+        local q = levelState("lowlife")
+        q.tries, q.life = 0, nil
+        return false
+    end
+    -- #140: consecutive FAILURES, held on the level so a restart cannot clear
+    -- them. Per activation this bounded nothing under the harness. Counting
+    -- failures rather than attempts is the other half: the point was never
+    -- "heal at most three times on a level", it was "a heal that has not
+    -- raised the pool is not going to", so a heal that works resets it.
+    local st = levelState("lowlife")
+    if not def.detect(game.player, ctx) then
+        -- Out of it. The allowance covers ONE continuous stretch at low life,
+        -- not the whole level: the first version reset only while the
+        -- condition was still firing, so a character that recovered fully
+        -- never reset at all and gave up instantly on its next bad moment.
+        st.tries, st.life = 0, nil
+        return false
+    end
 
     -- IGNORE is the player saying they do not want to be stopped for this, so
     -- there is nothing here to save them from and the ordinary rotation --
@@ -2103,12 +2122,6 @@ local function tryLowLifeRecovery(ctx)
     local pol = getStopCondition(game.player, "LIFE_LOWLIFE")
     if not pol or pol.stoptype == "IGNORE" then return false end
 
-    -- #140: consecutive FAILURES, held on the level so a restart cannot clear
-    -- them. Per activation this bounded nothing under the harness. Counting
-    -- failures rather than attempts is the other half: the point was never
-    -- "heal at most three times on a level", it was "a heal that has not
-    -- raised the pool is not going to", so a heal that works resets it.
-    local st = levelState("lowlife")
     local pool = game.player.life
     if st.life and pool and pool > st.life then st.tries = 0 end
     st.life = pool
