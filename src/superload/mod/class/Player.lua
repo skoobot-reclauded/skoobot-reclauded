@@ -1975,6 +1975,23 @@ local function atLevelChange(grid)
     -- "Always take the stairs" is about descending a dungeon. Leaving the zone
     -- for the overworld is a different decision and stays the player's until
     -- the bot can actually cross it (#126).
+    -- #152: ALWAYS means DOWN. Doomed took the stairs fifteen times in one run
+    -- and never left trollmire:1 -- it descended, explored, found the way back
+    -- up, took that too, and bounced. "Always take the stairs" is a statement
+    -- about making progress, and up is not progress; the harness has drawn the
+    -- same distinction from the start (soak.ps1's isDown).
+    --
+    -- Same arithmetic as the harness: change_level is a DELTA unless
+    -- change_level_abs says it is a level number.
+    if mode == cfgfmt.STAIRS_ALWAYS and not zoneExit and grid.change_level then
+        local target = grid.change_level_abs and grid.change_level
+            or ((game.level and game.level.level or 0) + grid.change_level)
+        if target <= (game.level and game.level.level or 0) then
+            return stop(notice.HANDED_BACK,
+                "standing on the way back up; taking it is not progress")
+        end
+    end
+
     if zoneExit and tostring(grid.change_zone):find("^wilderness") then
         return stop(notice.HANDED_BACK,
             "standing on the way out of this zone, which leads to the world map -- "
