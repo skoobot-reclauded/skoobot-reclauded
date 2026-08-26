@@ -145,6 +145,25 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 # below, which needs no list and covers whatever an addon adds.
 $TOWN_STARTS = @('Archmage', 'Sun Paladin', 'Anorithil', 'Paradox Mage', 'Temporal Warden')
 
+# Classes whose result says more about the BUILD than about the class, and so
+# measures nothing until build automation (#88) exists.
+#
+# Owner, 2026-08-26, on Adventurer: "it's a naked class ... intended to spend
+# category points to select from any tree in the game. its performance will be
+# incredibly build related ... testing a dude punching forest trolls one by one
+# and chugging infusion heals until it gets in a 1v2 that it can't outheal isn't
+# very informative."
+#
+# Sweep 1 bears that out exactly: DIED to a forest troll at character level 3,
+# having spent the run in melee with no talents worth the name.
+#
+# Skipped BY DEFAULT, not removed: -Only Adventurer still runs it, because the
+# day there are builds tailored for the bot this is the most interesting class
+# on the roster rather than the least.
+$BUILD_DEPENDENT = @{
+    'Adventurer' = 'build-dependent: no class talents of its own, and no build automation yet (#88)'
+}
+
 # A zone id that is a town. ToME names them consistently -- town-angolwen,
 # town-point-zero, cults+town-kroshkkur -- so the segment test covers the DLC
 # ones without naming them.
@@ -197,7 +216,12 @@ $plan = @()
 foreach ($r in $rows) {
     $skip = $null
     if ($TOWN_STARTS -contains $r.Class) { $skip = "town start" }
+    if ($BUILD_DEPENDENT.ContainsKey($r.Class)) { $skip = $BUILD_DEPENDENT[$r.Class] }
     if ($wanted.Count -gt 0 -and $wanted -notcontains $r.Class) { continue }
+    # Asking for a class by name overrides a default skip: the skips are about
+    # what a WHOLE-ROSTER sweep should spend its time on, not about what may be
+    # run.
+    if ($wanted -contains $r.Class) { $skip = $null }
     $plan += [pscustomobject]@{
         Tree  = $r.Tree
         Class = $r.Class
@@ -428,6 +452,8 @@ $md.Add('')
 $md.Add('`Descents` counts stairs the HARNESS took, so it says how much of a `CLEARED` was injected; the clearing itself is the bot''s. A `STUCK` row is not necessarily a class problem -- read the stop column first, because a known bug eating the whole budget (a sealed door, #64; a talent that opens a dialog every turn) looks exactly like a class that cannot cope.')
 $md.Add('')
 $md.Add('Skipped: town-start classes (#123) -- ' + ($TOWN_STARTS -join ', ') + '. Steamtech classes are campaign-gated and never appear in a Maj''Eyal roster.')
+$md.Add('')
+$md.Add('Also skipped as build-dependent, which measures the build rather than the class until #88: ' + (($BUILD_DEPENDENT.Keys | Sort-Object) -join ', ') + '. Run one anyway with ``-Only <class>``.')
 
 $mdPath = Join-Path $OutDir 'summary.md'
 Set-Content -Path $mdPath -Value $md -Encoding utf8
