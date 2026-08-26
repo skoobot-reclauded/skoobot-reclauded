@@ -2796,6 +2796,24 @@ function skoobot_act(noAction)
             -- (#67), or the posture is to hold (#11) and a turn is spent
             -- waiting for them to come.
             if caps.move then
+                -- #163: the same storm #150 fixed, at the OTHER site. This
+                -- check returns before the posture is ever consulted, so #150's
+                -- wait -- which lives in the HANDBACK branch -- never sees it.
+                -- Paradox Mage handed back fifteen times at a single game turn,
+                -- pinned, on the first run that class has ever had.
+                --
+                -- Shares #150's budget deliberately: it is the same condition
+                -- and the same reasoning, and two separate allowances would let
+                -- one fight spend both.
+                local bw = bot.levelState("blockwait")
+                bw.tries = (bw.tries or 0) + 1
+                if bw.tries <= bot.BLOCK_WAIT_TRIES and not bot.do_nothing then
+                    chan.info("[Survival] pinned and nothing reaches %s; waiting (%d/%d)",
+                        tostring(targets[1].name), bw.tries, bot.BLOCK_WAIT_TRIES)
+                    bot.actions = bot.actions + 1
+                    game.player:waitTurn()
+                    return
+                end
                 return stop(notice.CANNOT_ACT, "cannot move (" .. conditions.blockedText(caps.move)
                     .. "), and no Combat talent reaches " .. targets[1].name)
             end
