@@ -913,13 +913,9 @@ local function SAI_beginRest()
     -- everything full -- so asking whether resting WOULD help means modelling
     -- something this addon does not know. Asking whether the last one DID is
     -- a fact.
-    local st = bot.levelState("rest")
-    if (st.noop or 0) >= 2 and (game.player.life or 0) >= (game.player.max_life or 0) then
-        chan.debug("[Rest] the last %d rests moved no turns and life is full; not resting", st.noop)
-        return false
-    end
     local t0 = game.turn
     local ok, err = pcall(game.player.restInit, game.player, nil, nil, nil, validateRest)
+    local st = bot.levelState("rest")
     if game.turn == t0 then st.noop = (st.noop or 0) + 1 else st.noop = 0 end
     if not ok then
         chan.warn("[Action] The engine stopped the rest as it began: %s", tostring(err))
@@ -2359,6 +2355,17 @@ function skoobot_act(noAction)
         -- max_air, since it is 200 for a Yeek, not the flat 50 v1 assumed.
         if p.max_air and p.max_air > 0 and (p.air / p.max_air) < 0.5 then
             return stop(notice.STOPPED, "below half breath")
+        end
+        -- #154: a rest that moved no turns, twice, at full life, is not going
+        -- to move one now. Explore instead -- returning without acting spends
+        -- no turn either, which is the same idle with an extra step, and is
+        -- exactly what the first version of this did: a two-minute soak
+        -- advanced ZERO game turns.
+        local rst = bot.levelState("rest")
+        if (rst.noop or 0) >= 2 and (p.life or 0) >= (p.max_life or 0) then
+            chan.debug("[Rest] %d rests moved no turns and life is full; exploring instead", rst.noop)
+            bot.state = STATE_EXPLORE
+            return skoobot_act(true)
         end
         return SAI_beginRest()
 
