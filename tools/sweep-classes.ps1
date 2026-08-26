@@ -323,7 +323,14 @@ try {
         }
 
         # --- birth -------------------------------------------------------
-        $saveDir = Join-Path $env:USERPROFILE ("T-Engine\4.0\tome\save\" + ($save -replace '-', '_'))
+        # Get-SaveDirName, not a second copy of the rule. This line had its own
+        # and it was wrong: it never truncated, so a class whose save name is
+        # over 25 characters was looked for in a directory the engine never
+        # creates. Cultist of Entropy was reported UNBIRTHABLE in eight sweeps
+        # with a valid save on disk the whole time, and fixing harness.ps1 alone
+        # left this copy still wrong -- exactly what #121 records about a fact
+        # kept in two places.
+        $saveDir = Join-Path $script:SaveRoot (Get-SaveDirName -Name $save)
         $born = $SkipBirth -and (Test-Path (Join-Path $saveDir 'game.teag'))
         if (-not $born) {
             Write-Host "$tag  birthing as $($p.Race)..."
