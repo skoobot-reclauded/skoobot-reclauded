@@ -54,9 +54,19 @@
       * the four Steamtech classes never appear in a Maj'Eyal roster at all --
         they are campaign-gated, and are their own sweep (owner, 2026-08-25).
 
-    The rules are auto-filled from the loadout proposal, which is the point:
-    this measures THE SUGGESTED BUILD, which is what "classes that perform
-    sub-optimally with the suggested build" is about.
+    WHAT THE ROTATION ACTUALLY IS, which is not what this file claimed until
+    #130 went looking. The rules come from tools/soak.ps1's own `sk.rules()`,
+    which is NOT the loadout proposal: it walks p.talents and puts every
+    activated talent into Combat, filtered only by no_npc_use / no_dumb_use /
+    hide. So this measures A CRUDE SUPERSET of the suggested build, and a
+    class that does badly here may be carrying talents the product would never
+    have proposed.
+
+    That matters for reading the results: "classes that perform sub-optimally
+    with the suggested build" is the question this was built for, and it is
+    NOT yet the question being answered. Pointing the sweep at
+    bot.loadout.propose is the change that would make the claim true, and it
+    is worth making before the numbers are used to judge classes.
 
     COST. The game is single-occupancy and this holds the lease from start to
     finish (#83), so it is serial and cannot interleave with scenario work.
