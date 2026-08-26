@@ -101,7 +101,22 @@ param(
     # Do not take a lease. For running under an outer host that holds one.
     [switch]$NoRunLease,
     # Record creature dossiers (#135). Off by default; see soak.ps1 -Dossier.
-    [switch]$Dossier
+    [switch]$Dossier,
+    # The player's stop-condition knobs for every run, passed to soak.ps1.
+    #
+    # The power conditions ship as STOP, and a STOP whose cause stays in view
+    # stops on the spot at every restart -- by design, that is the product
+    # handing the game to the player. For a MEASUREMENT run it means any class
+    # that meets a boss above MAX_DIFF_POWER scores STUCK for a reason that has
+    # nothing to do with the class, and the sweep passed nothing at all until
+    # now (#123). fixture-berserker meeting Prox the Mighty is the case that
+    # surfaced it.
+    #
+    # WARN rather than IGNORE by default: the run continues, and the flag is
+    # still raised and recorded -- which is exactly what #135's corpus needs to
+    # tell "died to a warned enemy" from "died with nothing raised". Pass
+    # IGNORE for raw capability, or '' to measure the shipped defaults.
+    [string]$Conditions = 'SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN,SCOUTER_CROWDPOWER=WARN,SCOUTER_ENEMYCOUNT=WARN'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -263,6 +278,7 @@ try {
                    '-SaveName', $save, '-MaxMinutes', $Minutes, '-MaxLevel', 50,
                    '-OutFile', $soakOut, '-NoRunLease', '-ProposedRules')
         if ($Dossier) { $sargs += '-Dossier' }
+        if ($Conditions) { $sargs += @('-Conditions', $Conditions) }
         $null = & powershell @sargs 2>&1
 
         if (-not (Test-Path $soakOut)) {
@@ -374,6 +390,13 @@ $md = New-Object System.Collections.Generic.List[string]
 $md.Add("# Class baseline sweep -- $Race, $Minutes min per class")
 $md.Add('')
 $md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in Trollmire. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
+$md.Add('')
+# What the numbers mean depends entirely on this, so it is never left implied.
+if ($Conditions) {
+    $md.Add("Stop conditions for every run: ``$Conditions``. The power conditions ship as STOP, which ends a run on the spot wherever a boss stays in view -- so a sweep left at the defaults measures where the product hands over, not what the class can do.")
+} else {
+    $md.Add('Stop conditions: **the shipped defaults**. The power conditions are STOP, so any class that met an enemy above MAX_DIFF_POWER stopped there and its outcome says nothing about the class.')
+}
 if ($offZone.Count -gt 0) {
     $md.Add('')
     $md.Add("Reported but NOT in that percentage, because they do not start in Trollmire and so did not clear the same floor: " + (($offZone | ForEach-Object { "$($_.Class) ($($_.StartZone))" }) -join ', ') + '.')
