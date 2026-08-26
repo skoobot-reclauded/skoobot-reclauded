@@ -2053,6 +2053,15 @@ end
 
 local CLEANSE_TRIES = 3
 
+--- Turns to wait out a block nothing can cure before handing it back (#150).
+--- Sleep, daze and an ice block are all measured in a handful of turns; ten is
+--- past all of them and far short of a run.
+---
+--- On `bot` rather than a file local because skoobot_act reads it and that
+--- function is at LuaJIT's 60-upvalue limit -- a new local there is a parse
+--- error, not a lint one.
+bot.BLOCK_WAIT_TRIES = 10
+
 --- #92: clear a blocking effect before handing the turn back.
 ---
 --- Watched twice on 2026-08-25: the bot stopped on `cannot act (frozen)` while
@@ -2080,8 +2089,10 @@ local function tryCleanse(ctx)
     if not (ctx.caps.move or ctx.caps.act or ctx.caps.target or impaired(p)) then
         -- Free again: whatever ended it, the next block starts from zero. So
         -- being blocked twice on one level is not rationed, while a cure that
-        -- does not work still stops after three.
+        -- does not work still stops after three. #150's wait budget rides
+        -- along, for the same reason and on the same event.
         st.tries = 0
+        levelState("blockwait").tries = 0
         return false
     end
 
@@ -2544,6 +2555,27 @@ function skoobot_act(noAction)
         local caps = ctx.caps
         local verdict = ctx.score
         if verdict.posture == score.HANDBACK then
+            -- #150: an act or target block cannot clear while the bot hands
+            -- back. stop() spends no game time, so the effect never ticks down
+            -- and the harness restarts into the identical state -- Bulwark did
+            -- that 37 times at a single game turn, encased in ice, and
+            -- Solipsist 15 times asleep. Waiting is the only thing that ends
+            -- one, and it is what a player would do.
+            --
+            -- After tryCleanse, never instead of it: if something in Recovery
+            -- clears the effect that has already been tried and this is the
+            -- case where nothing can.
+            if (caps.act or caps.target) and not bot.do_nothing then
+                local bw = bot.levelState("blockwait")
+                bw.tries = (bw.tries or 0) + 1
+                if bw.tries <= bot.BLOCK_WAIT_TRIES then
+                    chan.info("[Survival] %s; nothing clears it, waiting (%d/%d)",
+                        table.concat(verdict.reasons, "; "), bw.tries, bot.BLOCK_WAIT_TRIES)
+                    bot.actions = bot.actions + 1
+                    game.player:waitTurn()
+                    return
+                end
+            end
             local severity = (caps.act or caps.target) and notice.CANNOT_ACT or notice.STOPPED
             return stop(severity, table.concat(verdict.reasons, "; "))
         end
