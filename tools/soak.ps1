@@ -203,6 +203,15 @@ param(
     # #158: spend stat and talent points automatically, so the sweep measures a
     # character that levelled up rather than one that never did. A band-aid for
     # the sweeps; the real feature is #88.
+    # #160: put the character in this zone before the run starts, whatever
+    # birth decided. Cheating, deliberately -- the harness is not bound to fair
+    # play and the point is to exercise the logic on a comparable floor. Empty
+    # leaves the character where birth put it.
+    #
+    # It retires two exclusions that were never about the class: town starts
+    # (#123) and island starts (#149) are both about where birth HAPPENS to put
+    # someone, which is exactly the variable a controlled measurement removes.
+    [string]$StartZone = '',
     [switch]$NoAutoSpend,
     [int]$IdleAfter = 15,
     # Distinct grids in that window that still count as going nowhere. 3 covers
@@ -949,6 +958,20 @@ return "installed save_name=" .. tostring(game.save_name)
         else { Write-Host '[soak] WARNING: TAKE_STAIRS was not applied; the run may decline its own descent' }
     }
 
+    # #160: place the character, before anything reads the zone. Dialogs first
+    # -- a town start leaves several, and changeLevel under an open dialog is
+    # asking for trouble -- then the move, then whatever the arrival puts up.
+    $placedIn = $null
+    if ($StartZone) {
+        $null = Invoke-Bridge -Lua 'local out = {} for i = 1, 8 do local r = sk.closeDialog() if r == "none" then break end out[#out+1] = r end return table.concat(out, "; ")' -TimeoutSec 30
+        $tp = Invoke-Bridge -Lua "return sk.nextZone('$StartZone')" -TimeoutSec 120
+        $null = Invoke-Bridge -Lua 'local out = {} for i = 1, 8 do local r = sk.closeDialog() if r == "none" then break end out[#out+1] = r end return table.concat(out, "; ")' -TimeoutSec 30
+        $where = (Invoke-Bridge -Lua 'return sk.where()' -TimeoutSec 30).Result
+        Write-Host "  placed   $($tp.Status) -> $where ($($tp.Result))"
+        if ($where -like "$StartZone*") { $placedIn = $where }
+        else { Write-Host "[soak] WARNING: asked for $StartZone and landed in $where" }
+    }
+
     # #158: spend whatever birth left unspent, before the first decision.
     $buildApplied = $null
     if (-not $NoAutoSpend) {
@@ -1515,6 +1538,7 @@ finally {
         }
         conditions   = @($conditionsApplied)
         take_stairs  = $stairsApplied
+        placed_in    = $placedIn
         auto_spend   = $(if ($NoAutoSpend) { 'off' } else { 'on' })
         build_at_start = $buildApplied
         scratch_save = $ScratchSave
@@ -1548,6 +1572,7 @@ finally {
     $md.Add("| tainted | $tainted |")
     $md.Add("| conditions | $(if ($conditionsApplied.Count -gt 0) { $conditionsApplied -join ', ' } else { 'defaults' }) |")
     $md.Add("| take_stairs | $stairsApplied |")
+    if ($placedIn) { $md.Add("| placed_in | $placedIn -- the character was PUT here, it did not walk (#160) |") }
     $md.Add("| polls | $polls every $PollSec s |")
     $md.Add('')
     $md.Add('| stop reason | count | severity | first turn | last turn |')

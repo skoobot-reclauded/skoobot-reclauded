@@ -102,6 +102,13 @@ param(
     [switch]$NoRunLease,
     # Skip pointing the game's junctions at this checkout.
     [switch]$NoSetup,
+    # #160: put every class in this zone before its run, whatever birth chose.
+    # Cheating on purpose. It retires the two exclusions that were never about
+    # the class -- town starts (#123) and island starts (#149) -- because both
+    # are about where birth HAPPENS to put someone, which is exactly the
+    # variable a controlled measurement should remove. '' restores the old
+    # behaviour and the exclusions with it.
+    [string]$StartZone = 'trollmire',
     # Record creature dossiers (#135). Off by default; see soak.ps1 -Dossier.
     [switch]$Dossier,
     # The player's stop-condition knobs for every run, passed to soak.ps1.
@@ -242,7 +249,7 @@ if ($Only) { $wanted = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Obje
 $plan = @()
 foreach ($r in $rows) {
     $skip = $null
-    if ($TOWN_STARTS -contains $r.Class) { $skip = "town start" }
+    if (-not $StartZone -and $TOWN_STARTS -contains $r.Class) { $skip = "town start" }
     if ($BUILD_DEPENDENT.ContainsKey($r.Class)) { $skip = $BUILD_DEPENDENT[$r.Class] }
     if ($wanted.Count -gt 0 -and $wanted -notcontains $r.Class) { continue }
     # Asking for a class by name overrides a default skip: the skips are about
@@ -339,8 +346,8 @@ try {
         # is still caught (#134).
         $zone = & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'read-save-zone.ps1') -SaveName $save 2>&1 |
                 Select-String '^ZONE ' | ForEach-Object { ($_ -split ' ')[1] } | Select-Object -First 1
-        $unnav = Test-UnnavigableZone $zone
-        if ((Test-TownZone $zone) -or $unnav) {
+        $unnav = $(if ($StartZone) { $null } else { Test-UnnavigableZone $zone })
+        if ((-not $StartZone) -and ((Test-TownZone $zone) -or $unnav)) {
             $why = $(if ($unnav) { "$unnav ($zone)" } else { "town start: $zone" })
             Write-Host "$tag  SKIPPED ($why)"
             $row = [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'SKIPPED'
@@ -358,6 +365,7 @@ try {
                    '-OutFile', $soakOut, '-NoRunLease', '-ProposedRules')
         if ($Dossier) { $sargs += '-Dossier' }
         if ($Conditions) { $sargs += @('-Conditions', $Conditions) }
+        if ($StartZone) { $sargs += @('-StartZone', $StartZone) }
         $null = & powershell @sargs 2>&1
 
         if (-not (Test-Path $soakOut)) {
@@ -497,6 +505,7 @@ foreach ($r in ($results | Sort-Object @{e={$_.Outcome}}, @{e={$_.Class}})) {
 $md.Add('')
 $md.Add('`Descents` counts stairs the HARNESS took, so it says how much of a `CLEARED` was injected; the clearing itself is the bot''s. A `STUCK` row is not necessarily a class problem -- read the stop column first, because a known bug eating the whole budget (a sealed door, #64; a talent that opens a dialog every turn) looks exactly like a class that cannot cope.')
 $md.Add('')
+if ($StartZone) { $md.Add("Every class was PLACED in ``$StartZone`` before its run (#160) -- it did not walk there. Town-start and island-start exclusions do not apply."); $md.Add('') }
 $md.Add('Skipped: town-start classes (#123) -- ' + ($TOWN_STARTS -join ', ') + '. Steamtech classes are campaign-gated and never appear in a Maj''Eyal roster.')
 $md.Add('')
 $md.Add('')
