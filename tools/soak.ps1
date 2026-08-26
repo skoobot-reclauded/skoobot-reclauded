@@ -113,7 +113,9 @@
     touched and the scratch save is overwritten by the next run.
 
     Ends on -MaxMinutes, -MaxLevel, -MaxTurns (game.turn units: 10 per player
-    turn), death, STUCK, a crash, or a bridge that stops answering. Writes a
+    turn), death, the Eidolon taking the character (#141 -- which is a death
+    the engine intercepted, and does NOT set `dead`), STUCK, a crash, or a
+    bridge that stops answering. Writes a
     JSON summary to -OutFile (default build/results/soak-<stamp>.json), a
     markdown twin beside it, and prints the markdown.
 
@@ -747,6 +749,25 @@ return "installed save_name=" .. tostring(game.save_name)
         Write-Host ('  poll     turn={0} L{1} {2} life={3} active={4} dialogs={5} {6}' -f $s.turn, $s.level, $zl, $lifeText, $s.active, $s.ndialogs, $(if ($s.active -eq 'true') { '' } elseif ($walking) { "walk=$($s.walk)" } else { "reason=$($s.reason)" }))
 
         # ----- ends -----
+        # #141: the Eidolon does not kill the character, it takes them. die()
+        # self-resurrects and moves them to `eidolon-plane`, so `dead` stays
+        # false and the loop below never fires -- the run would poll out the
+        # rest of its minutes in a zone that is not part of the game being
+        # measured, then report MAX_MINUTES and zero deaths. Arrival IS the
+        # death, and it is recorded as one; the distinct end reason keeps a
+        # death the Eidolon intercepted tellable from one that ended the
+        # character, which is a distinction #135's corpus wants.
+        if ($s.zone -eq 'eidolon-plane') {
+            $deaths++
+            $killer = $s.killer
+            if (-not $killer) {
+                # Only knowable from before the move: nothing in the plane did it.
+                $tailLog = @(Get-GameLogLines | Select-Object -Last 40)
+                $killer = (@($tailLog | Where-Object { $_ -match 'kill|slain|die' } | Select-Object -Last 1) -join '')
+            }
+            Write-Host "  eidolon  taken at turn=$($s.turn) L$($s.level)$(if ($killer) { " (killed by $killer)" })"
+            $endReason = 'EIDOLON'; break
+        }
         if ($s.dead -eq 'true') {
             $deaths++
             $killer = $s.killer
