@@ -411,15 +411,17 @@ end
 
 -- Check `condition` to see whether the bot should stop. A WARN condition
 -- stops once, is then remembered as acknowledged, and re-arms when it clears.
-local function checkStop(p, stopcategory, condition, text, severity, opts)
+local function checkStop(p, stopcategory, condition, text, severity, opts, ctx)
     local stoptype = getStopCondition(p, stopcategory).stoptype
     local d = data(p)
 
     if stoptype == "WARN" then
         if condition then
             if not d.stopwarn then d.stopwarn = {} end
-            if d.stopwarn[stopcategory] == true then return false end
-            d.stopwarn[stopcategory] = true
+            local now = conditions.warnKey(stopcategory,
+                ctx and ctx.score and ctx.score.figures)
+            if conditions.warnCovers(d.stopwarn[stopcategory], now) then return false end
+            d.stopwarn[stopcategory] = now
             return tryStop(p, stopcategory, text, severity, opts)
         else
             if d.stopwarn then d.stopwarn[stopcategory] = nil end
@@ -1811,7 +1813,7 @@ local function acceptedFlags(p)
         local def = conditions.find(code)
         if def and def.default then
             local stoptype = getStopCondition(p, code).stoptype
-            if stoptype == "IGNORE" or (stoptype == "WARN" and d.stopwarn and d.stopwarn[code] == true) then
+            if stoptype == "IGNORE" or (stoptype == "WARN" and d.stopwarn and d.stopwarn[code] ~= nil) then
                 out[code] = true
             end
         end
@@ -2183,7 +2185,8 @@ local function checkConditions(site, ctx)
     for _, def in ipairs(conditions.LIST) do
         if def.site == site and def.default and def.detect then
             local hit = def.detect(p, ctx) and true or false
-            if checkStop(p, def.code, hit, hit and conditions.message(def, p, ctx) or nil, def.severity) then
+            if checkStop(p, def.code, hit, hit and conditions.message(def, p, ctx) or nil,
+                         def.severity, nil, ctx) then
                 return true
             end
         end

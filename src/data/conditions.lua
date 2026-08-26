@@ -362,4 +362,52 @@ function M.reconcile(list)
     return true
 end
 
+--- A crowd has to grow by this much to be a new warning rather than the one
+--- already accepted. Shrinking never re-warns.
+M.WARN_GROWTH = 1.25
+
+--- What raised this flag, as something an acknowledgement can be keyed to (#117).
+---
+--- The acknowledgement used to be keyed by condition CODE alone, so accepting
+--- "an enemy above Maximum Enemy Power" for the elite in front of you also,
+--- silently, accepted the boss that walked in three turns later: the flag never
+--- cleared in between, so it stayed acknowledged and the bot never warned again.
+---
+--- The two single-enemy conditions key on that enemy's uid. The two crowd ones
+--- have no single actor, so they key on the magnitude that triggered them and
+--- re-warn when it rises materially -- a crowd that grows is news, a crowd that
+--- shrinks is the one already accepted. Everything else keeps `true`, which is
+--- the old behaviour and is right for a condition that is about the character
+--- rather than about something out there.
+---
+--- One entry per condition and never per enemy: `stopwarn` rides in the
+--- character save, so a row per enemy ever acknowledged would grow for the life
+--- of the character.
+function M.warnKey(code, figures)
+    local f = figures
+    if not f then return true end
+    if code == "SCOUTER_BIGENEMY" or code == "SCOUTER_STRONGERENEMY" then
+        local a = f.strongest and f.strongest.actor
+        local uid = a and rawget(a, "uid")
+        return uid and ("uid:" .. tostring(uid)) or true
+    end
+    if code == "SCOUTER_ENEMYCOUNT" then return tonumber(f.count) or true end
+    if code == "SCOUTER_CROWDPOWER" then return tonumber(f.sum) or true end
+    return true
+end
+
+--- Does an acknowledgement of `had` still cover a flag now raised by `now`?
+---
+--- `true` covers everything: that is both the unscoped conditions and every
+--- acknowledgement written before #117, which ride in existing saves and must
+--- not start re-warning on load.
+function M.warnCovers(had, now)
+    if had == nil then return false end
+    if had == true then return true end
+    if type(had) == "number" and type(now) == "number" then
+        return now <= had * M.WARN_GROWTH
+    end
+    return had == now
+end
+
 return M

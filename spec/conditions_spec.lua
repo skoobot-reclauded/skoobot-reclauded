@@ -527,4 +527,68 @@ describe("data/conditions.lua", function()
       end
     end)
   end)
+
+  -- #117: an acknowledgement used to be keyed by condition code alone, so
+  -- accepting a warning about the elite in front of you silently accepted the
+  -- boss that arrived three turns later.
+  describe("what an acknowledgement is keyed to", function()
+    local function figs(t) return t end
+
+    it("keys the single-enemy conditions on that enemy", function()
+      local f = figs{ strongest = { actor = { uid = 77 } }, count = 3, sum = 40 }
+      assert.equals("uid:77", C.warnKey("SCOUTER_BIGENEMY", f))
+      assert.equals("uid:77", C.warnKey("SCOUTER_STRONGERENEMY", f))
+    end)
+
+    it("keys the crowd conditions on their magnitude", function()
+      local f = figs{ strongest = { actor = { uid = 1 } }, count = 5, sum = 42.5 }
+      assert.equals(5, C.warnKey("SCOUTER_ENEMYCOUNT", f))
+      assert.equals(42.5, C.warnKey("SCOUTER_CROWDPOWER", f))
+    end)
+
+    it("leaves everything else unscoped", function()
+      local f = figs{ strongest = { actor = { uid = 1 } } }
+      assert.is_true(C.warnKey("DEBUFF_STUNNED", f))
+      assert.is_true(C.warnKey("LIFE_LOWLIFE", f))
+    end)
+
+    it("falls back to unscoped when there are no figures", function()
+      assert.is_true(C.warnKey("SCOUTER_BIGENEMY", nil))
+      assert.is_true(C.warnKey("SCOUTER_BIGENEMY", { strongest = nil }))
+    end)
+  end)
+
+  describe("whether an acknowledgement still covers a flag", function()
+    it("does not cover anything when nothing was acknowledged", function()
+      assert.is_false(C.warnCovers(nil, "uid:5"))
+    end)
+
+    it("covers everything once acknowledged unscoped", function()
+      -- legacy saves wrote `true`, and must not start re-warning on load
+      assert.is_true(C.warnCovers(true, "uid:5"))
+      assert.is_true(C.warnCovers(true, 12))
+    end)
+
+    it("covers the same enemy and not a different one", function()
+      assert.is_true(C.warnCovers("uid:5", "uid:5"))
+      assert.is_false(C.warnCovers("uid:5", "uid:6"))
+    end)
+
+    it("covers a crowd that has not grown materially", function()
+      assert.is_true(C.warnCovers(8, 8))
+      assert.is_true(C.warnCovers(8, 4))    -- shrinking is never news
+      assert.is_true(C.warnCovers(8, 10))   -- within WARN_GROWTH
+    end)
+
+    it("re-warns on a crowd that has grown past the margin", function()
+      assert.is_false(C.warnCovers(8, 11))
+      assert.is_false(C.warnCovers(100, 200))
+    end)
+
+    it("re-warns when a stale uid no longer matches", function()
+      -- the map rides in the save; a uid from a previous level simply misses
+      assert.is_false(C.warnCovers("uid:9999", "uid:3"))
+    end)
+  end)
+
 end)
