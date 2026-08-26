@@ -107,11 +107,26 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
-# The five that begin in a town rather than on a dungeon floor. Identified by
-# their descriptors' starting_zone (data/birth/classes/{mage,celestial,
-# chronomancer}.lua), not guessed: town-angolwen, town-gates-of-morning and
-# town-point-zero. Skipped by decision (#123) and unbirthable in any case.
+# Classes known to begin in a town rather than on a dungeon floor, from their
+# descriptors' starting_zone (data/birth/classes/{mage,celestial,
+# chronomancer}.lua): town-angolwen, town-gates-of-morning, town-point-zero.
+# Skipped by decision (#123) and unbirthable in any case.
+#
+# This list is a HINT, not the test. It cannot see the DLC classes -- their
+# descriptors ship in .teaac and cannot be read -- and Writhing One duly slipped
+# through it and spent a whole run walking into a shop in cults+town-kroshkkur
+# (#134). The zone the character actually lands in is checked after birth
+# below, which needs no list and covers whatever an addon adds.
 $TOWN_STARTS = @('Archmage', 'Sun Paladin', 'Anorithil', 'Paradox Mage', 'Temporal Warden')
+
+# A zone id that is a town. ToME names them consistently -- town-angolwen,
+# town-point-zero, cults+town-kroshkkur -- so the segment test covers the DLC
+# ones without naming them.
+function Test-TownZone([string]$zone) {
+    if (-not $zone) { return $false }
+    foreach ($seg in ($zone -split '\+')) { if ($seg -like 'town-*') { return $true } }
+    return $false
+}
 
 # A class that refuses the standing race needs its own. Stone Warden's
 # special_check rejects anything but a Dwarf (data/birth/classes/wilder.lua).
@@ -221,6 +236,22 @@ try {
                 $results += $row
                 continue
             }
+        }
+
+        # --- where did it land? ------------------------------------------
+        # A town start cannot be compared with a dungeon floor and has nothing
+        # to explore, so it is skipped here rather than after burning the
+        # budget. Read from the save's own zone, so a class no list knows about
+        # is still caught (#134).
+        $zone = & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'read-save-zone.ps1') -SaveName $save 2>&1 |
+                Select-String '^ZONE ' | ForEach-Object { ($_ -split ' ')[1] } | Select-Object -First 1
+        if (Test-TownZone $zone) {
+            Write-Host "$tag  SKIPPED (town start: $zone)"
+            $row = [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'SKIPPED'
+                                      Detail = "town start: $zone"; Save = $save; StartZone = $zone; Comparable = $false }
+            ($row | ConvertTo-Json -Depth 4) | Set-Content $json -Encoding utf8
+            $results += $row
+            continue
         }
 
         # --- run ---------------------------------------------------------

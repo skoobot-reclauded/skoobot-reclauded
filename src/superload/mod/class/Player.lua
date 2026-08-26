@@ -882,18 +882,28 @@ end
 
 
 --- A grid the player must CONSENT to enter (#64): a vault door, a locked door,
---- a loose rock. None sets `block_move`, so Astar routes straight through and
---- the bot walks into a popup -- see docs/api-surface-1.7.6.md.
+--- a loose rock, a shop entrance. None sets `block_move`, so Astar routes
+--- straight through and the bot walks into a popup -- see
+--- docs/api-surface-1.7.6.md.
 ---
 --- The bot never PLANS a route through one. Not a matter of remembering a
 --- refusal: a grid the player must be asked about is not a grid the bot may
 --- decide to enter, asked or not. If a vault door is the only way to a hostile,
 --- "no path to <name>" is the honest answer. Opening one deliberately is
 --- unaffected -- the player walks in themselves.
+---
+--- The shop (#134) is on the TRAP layer rather than TERRAIN, which is the one
+--- wrinkle: a store is an entity carrying `is_store` and stepping on it opens
+--- the shop (mod/class/Player.lua:315). ToME's own auto-explore refuses them
+--- too, returning "store entrance spotted" rather than entering (:1265, :1272),
+--- so this is the bot catching up with the game rather than a new policy.
 local function needsConsent(x, y)
     if not game.level or not game.level.map then return false end
-    local t = game.level.map(x, y, engine.Map.TERRAIN)
-    return (t and (t.door_player_check or t.door_player_stop)) and true or false
+    local map = game.level.map
+    local t = map(x, y, engine.Map.TERRAIN)
+    if t and (t.door_player_check or t.door_player_stop) then return true end
+    if map:checkEntity(x, y, engine.Map.TRAP, "is_store") then return true end
+    return false
 end
 bot.needsConsent = function(x, y) return needsConsent(x, y) end
 local function getNearestHostile()
