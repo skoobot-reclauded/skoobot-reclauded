@@ -260,8 +260,23 @@ $ErrorActionPreference = 'Stop'
 # (g): the measurement carriage, in the order tried. Verified against ToME
 # 1.7.6 data/zones/<id>/zone.lua (see the header); the ranges are re-read
 # from the installed module at start and an id without a zone.lua is dropped.
-$DefaultZones = @('trollmire', 'ruins-kor-pul', 'norgos-lair', 'scintillating-caves', 'rhaloren-camp',
+# #162: a recommended progression, in order. next-zone takes the first entry it
+# can use, so the ORDER here IS the route -- no travel code knows about it.
+#
+# From a community guide, with two of the owner's changes: Kor'Pul last, because
+# its light-radius requirement is inventory work (#87) and the bot has none; and
+# Trollmire just before it, because floor 4 is genuinely dangerous and the
+# gentler zones are worth having first.
+#
+# Deep Bellow is Dwarf-only and is dropped below for anyone else.
+$DefaultZones = @('norgos-lair', 'scintillating-caves', 'rhaloren-camp', 'heart-gloom',
+                  'deep-bellow', 'trollmire', 'ruins-kor-pul',
                   'old-forest', 'daikara', 'maze', 'sandworm-lair')
+
+# Zones only some races may enter. Left in the order and filtered per character,
+# rather than omitted -- changeLevel would happily put a Cornac in the Deep
+# Bellow and the run would be off-plan without saying so.
+$ZONE_RACE = @{ 'deep-bellow' = 'Dwarf' }
 $ZoneIds = @(if ($Zones) { $Zones -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } } else { $DefaultZones })
 foreach ($z in $ZoneIds) { if ($z -notmatch '^[a-z0-9+-]+$') { throw "[soak] -Zones: '$z' is not a zone id" } }
 
@@ -985,7 +1000,12 @@ return "installed save_name=" .. tostring(game.save_name)
 
     # (g): the zone list, checked against the installed module. An id with no
     # zone.lua is dropped here and reported, not discovered at the transition.
+    $myRace = (Invoke-Bridge -Lua 'local d = game.player.descriptor or {} return tostring(d.subrace or d.race or "?")' -TimeoutSec 30).Result
     foreach ($z in $ZoneIds) {
+        if ($ZONE_RACE.ContainsKey($z) -and $myRace -notmatch $ZONE_RACE[$z]) {
+            Write-Host "  zone     SKIPPED '$z' ($($ZONE_RACE[$z]) only; this is $myRace)"
+            continue
+        }
         $zi = Invoke-Bridge -Lua "return sk.zoneInfo('$z')" -TimeoutSec 30
         if ($zi.Status -eq 'OK' -and $zi.Result -match '^min=(\d+) max=(\d+)') {
             $zoneList += [pscustomobject]@{ id = $z; min = [int]$Matches[1]; max = [int]$Matches[2] }

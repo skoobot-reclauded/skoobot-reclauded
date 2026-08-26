@@ -108,7 +108,7 @@ param(
     # are about where birth HAPPENS to put someone, which is exactly the
     # variable a controlled measurement should remove. '' restores the old
     # behaviour and the exclusions with it.
-    [string]$StartZone = 'trollmire',
+    [string]$StartZone = 'norgos-lair',
     # Record creature dossiers (#135). Off by default; see soak.ps1 -Dossier.
     [switch]$Dossier,
     # The player's stop-condition knobs for every run, passed to soak.ps1.
@@ -141,6 +141,9 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'harness.ps1')
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+# Where a comparable run begins: the zone every class is placed in (#160), or
+# Trollmire when placement is off and birth decides.
+$expectedStart = $(if ($StartZone) { $StartZone } else { 'trollmire' })
 
 # Classes known to begin in a town rather than on a dungeon floor, from their
 # descriptors' starting_zone (data/birth/classes/{mage,celestial,
@@ -407,7 +410,12 @@ try {
         # Whether this run is comparable with the rest. A class that begins in
         # a DLC zone cleared *a* first floor, but not the same one, so its row
         # is reported and left out of the headline.
-        $comparable = ($startZone -eq 'trollmire')
+        # #162: keyed on where the run ACTUALLY started, not on a hardcoded
+        # zone name. That hardcoding was right while birth chose the zone and
+        # Trollmire was simply where most classes began; #160 made the start a
+        # choice, and leaving it would have printed 0% comparable the moment the
+        # choice was anything else.
+        $comparable = ($startZone -eq $expectedStart)
 
         # CLEARED outranks DIED, because the question this sweep answers is
         # "did this class get off its FIRST floor" and the run keeps going for
@@ -483,7 +491,7 @@ $pct     = $(if ($ran -gt 0) { [math]::Round(100 * $cleared / $ran) } else { 0 }
 $md = New-Object System.Collections.Generic.List[string]
 $md.Add("# Class baseline sweep -- $Race, $Minutes min per class")
 $md.Add('')
-$md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in Trollmire. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
+$md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in ``$expectedStart``. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
 $md.Add('')
 # What the numbers mean depends entirely on this, so it is never left implied.
 if ($Conditions) {
@@ -493,7 +501,7 @@ if ($Conditions) {
 }
 if ($offZone.Count -gt 0) {
     $md.Add('')
-    $md.Add("Reported but NOT in that percentage, because they do not start in Trollmire and so did not clear the same floor: " + (($offZone | ForEach-Object { "$($_.Class) ($($_.StartZone))" }) -join ', ') + '.')
+    $md.Add("Reported but NOT in that percentage, because they do not start in $expectedStart and so did not clear the same floor: " + (($offZone | ForEach-Object { "$($_.Class) ($($_.StartZone))" }) -join ', ') + '.')
 }
 $md.Add('')
 $md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | Escorts | Most common stops |')
