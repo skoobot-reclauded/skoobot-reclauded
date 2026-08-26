@@ -226,12 +226,42 @@ for ($i = 0; $i -lt 16 -and -not $settled; $i++) {
     $r = Invoke-Bridge -Lua @'
 local d = game.dialogs and game.dialogs[#game.dialogs]
 if not d then return "none" end
-local title = tostring(d.title or d.__CLASSNAME or "?")
-if d.key and d.key.virtuals and d.key.virtuals.EXIT then
+-- #147: NAME it. `d.title or d.__CLASSNAME` looks right and is not: an empty
+-- string is truthy in Lua, so an untitled dialog reported as "stuck " with
+-- nothing after it -- the same defect #142 fixed in the product, and the reason
+-- three classes failed to birth with no evidence of what stopped them.
+local t = d.title
+local title = (type(t) == "string" and t ~= "") and t or tostring(d.__CLASSNAME or "?")
+local v = d.key and d.key.virtuals
+if v and v.EXIT then
   d.key:triggerVirtual("EXIT")
   return "closed " .. title .. " -> " .. bridge.dialogs()
 end
-return "stuck " .. title
+-- Then ACCEPT, the ladder sk.closeDialog has always used: a dialog that cannot
+-- be escaped can usually be answered, and birth dialogs for Archmage, Paradox
+-- Mage and Temporal Warden are of that kind.
+if v and v.ACCEPT then
+  d.key:triggerVirtual("ACCEPT")
+  return "accepted " .. title .. " -> " .. bridge.dialogs()
+end
+-- A Chat has NO binds at all -- an answer is picked by typing its letter,
+-- which calls self:use(self.list[n]) (engine/dialogs/Chat.lua:49). The town
+-- starts open one as their intro, which is why Archmage, Paradox Mage and
+-- Temporal Warden could never be birthed: `stuck mod.dialogs.Chat
+-- binds=SCREENSHOT`. sk.closeDialog has had this rung since it was written.
+if d.use and type(d.list) == "table" and d.list[1]
+   and tostring(d.__CLASSNAME or ""):find("Chat") then
+  local item = d.list[1]
+  bridge.injecting = true
+  local ok, err = pcall(d.use, d, item)
+  bridge.injecting = false
+  if not ok then return "stuck " .. title .. " chat error " .. tostring(err) end
+  return "answered " .. title .. " -> " .. tostring(item.name) .. " -> " .. bridge.dialogs()
+end
+local keys = {}
+for k in pairs(v or {}) do keys[#keys+1] = tostring(k) end
+table.sort(keys)
+return "stuck " .. title .. " binds=" .. table.concat(keys, ",")
 '@ -TimeoutSec 30
     Write-Host ('  dialog   {0,-8} {1}' -f $r.Status, $r.Result)
     if ($r.Status -ne 'OK') { break }
