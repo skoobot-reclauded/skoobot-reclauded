@@ -890,6 +890,7 @@ local function SAI_beginRest()
         game.log("[SkooBot] AI would begin resting.")
         return false
     end
+
     chan.info("[Action] Beginning to rest.")
     bot.actions = bot.actions + 1
     -- restInit is not re-entrant: it sets self.resting, then useEnergy fires
@@ -899,7 +900,27 @@ local function SAI_beginRest()
     -- measured from the bridge, outside a turn, with the same result. The
     -- engine still drives the rest; this stops its bug reaching the player.
     -- See #114.
+    -- #153: a rest that achieves nothing still counts as an action, so #13's
+    -- liveness invariant is satisfied and nothing reports it. Doomed spent
+    -- 21,000 game turns on this, logged verbatim:
+    --
+    --   Ran for 2 turns (stop reason: hostile spotted ... (poison ivy))
+    --   Resting starts...
+    --   Rested for 0 turns (stop reason: all resources and life at maximum)
+    --
+    -- MEASURED, not predicted. Which pools a rest actually restores is the
+    -- engine's judgement -- Doomed sat at 26/100 Hate while the engine called
+    -- everything full -- so asking whether resting WOULD help means modelling
+    -- something this addon does not know. Asking whether the last one DID is
+    -- a fact.
+    local st = bot.levelState("rest")
+    if (st.noop or 0) >= 2 and (game.player.life or 0) >= (game.player.max_life or 0) then
+        chan.debug("[Rest] the last %d rests moved no turns and life is full; not resting", st.noop)
+        return false
+    end
+    local t0 = game.turn
     local ok, err = pcall(game.player.restInit, game.player, nil, nil, nil, validateRest)
+    if game.turn == t0 then st.noop = (st.noop or 0) + 1 else st.noop = 0 end
     if not ok then
         chan.warn("[Action] The engine stopped the rest as it began: %s", tostring(err))
         -- restStop already ran validateRest and cleared the state; clear it
