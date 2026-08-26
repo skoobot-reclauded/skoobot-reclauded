@@ -164,6 +164,31 @@ $BUILD_DEPENDENT = @{
     'Adventurer' = 'build-dependent: no class talents of its own, and no build automation yet (#88)'
 }
 
+# Zones the bot cannot cross, so a class that starts in one cannot produce a
+# comparable floor however well it plays.
+#
+# Owner, 2026-08-26: "demonologist and at least one other class spawn on an
+# island with nontrivial navigation. I think they have to use some temporary
+# teleport ability to island hop."
+#
+# Sweep 1 measured exactly that: Demonologist and Doombringer are the only two
+# ashes-urhrok+searing-halls starters and both ended STUCK on floor 1 without
+# ever leaving it -- one pacing an island edge for 130,393 turns with no stops
+# (#145), the other handing back "no path to losgoroth" thirty-seven times
+# (#146). Both are the same cause: what they could see, they could not walk to.
+#
+# Keyed on the ZONE rather than the class, as the town skip is, so a class
+# added later that starts there is covered without being named.
+$UNNAVIGABLE_ZONES = @{
+    'ashes-urhrok+searing-halls' = 'island start: needs a traversal the bot does not have (#149)'
+}
+
+function Test-UnnavigableZone([string]$zone) {
+    if (-not $zone) { return $null }
+    foreach ($k in $UNNAVIGABLE_ZONES.Keys) { if ($zone -like "$k*") { return $UNNAVIGABLE_ZONES[$k] } }
+    return $null
+}
+
 # A zone id that is a town. ToME names them consistently -- town-angolwen,
 # town-point-zero, cults+town-kroshkkur -- so the segment test covers the DLC
 # ones without naming them.
@@ -295,10 +320,12 @@ try {
         # is still caught (#134).
         $zone = & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'read-save-zone.ps1') -SaveName $save 2>&1 |
                 Select-String '^ZONE ' | ForEach-Object { ($_ -split ' ')[1] } | Select-Object -First 1
-        if (Test-TownZone $zone) {
-            Write-Host "$tag  SKIPPED (town start: $zone)"
+        $unnav = Test-UnnavigableZone $zone
+        if ((Test-TownZone $zone) -or $unnav) {
+            $why = $(if ($unnav) { "$unnav ($zone)" } else { "town start: $zone" })
+            Write-Host "$tag  SKIPPED ($why)"
             $row = [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'SKIPPED'
-                                      Detail = "town start: $zone"; Save = $save; StartZone = $zone; Comparable = $false }
+                                      Detail = $why; Save = $save; StartZone = $zone; Comparable = $false }
             ($row | ConvertTo-Json -Depth 4) | Set-Content $json -Encoding utf8
             $results += $row
             continue
@@ -453,6 +480,8 @@ $md.Add('`Descents` counts stairs the HARNESS took, so it says how much of a `CL
 $md.Add('')
 $md.Add('Skipped: town-start classes (#123) -- ' + ($TOWN_STARTS -join ', ') + '. Steamtech classes are campaign-gated and never appear in a Maj''Eyal roster.')
 $md.Add('')
+$md.Add('')
+$md.Add('Also skipped on arrival, because the bot cannot cross them: ' + (($UNNAVIGABLE_ZONES.Keys | Sort-Object) -join ', ') + ' (#149).')
 $md.Add('Also skipped as build-dependent, which measures the build rather than the class until #88: ' + (($BUILD_DEPENDENT.Keys | Sort-Object) -join ', ') + '. Run one anyway with ``-Only <class>``.')
 
 $mdPath = Join-Path $OutDir 'summary.md'
