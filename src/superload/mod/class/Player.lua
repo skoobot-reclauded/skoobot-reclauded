@@ -1214,9 +1214,14 @@ bot.seekProgressExit = seekProgressExit
 --- Measured rather than read off the reason string, which works today and
 --- breaks on a translated game -- the reason is built with tformat and its
 --- " - offscreen" suffix is itself translatable.
+--- Gated on bot.active, so the wrapper is INERT while a human plays. The
+--- guard exists to stop the bot re-issuing its own explore; a person running
+--- by hand decides for themselves and is owed no measurement. That keeps the
+--- cost of growing the superload surface at one boolean for anyone not using
+--- the bot, which is the honest answer to why a second wrapper is acceptable.
 local function noteRunStop(self, old, ...)
     local spot = self.spotHostiles
-    if self ~= game.player or not spot then return old(self, ...) end
+    if not bot.active or self ~= game.player or not spot then return old(self, ...) end
     local wide = #spot(self, true)
     local ret = old(self, ...)
     explorestall.note(levelState("explorestall"), wide, #spot(self, true))

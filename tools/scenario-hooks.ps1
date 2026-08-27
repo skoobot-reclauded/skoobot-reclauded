@@ -272,7 +272,18 @@ return ("player=%s actor=%s | act=%s postUseTalent_ours=%s postUseTalent_resolve
     $null = Assert-Result $surface "the engine's Player:act is this addon's wrapper" -Match '\| act=true '
     $null = Assert-Result $surface "Player:postUseTalent is NOT (the wrapper went with #76)" -Match ' postUseTalent_ours=false '
     $null = Assert-Result $surface 'and still resolves through the class chain, so nothing was broken taking it off' -Match ' postUseTalent_resolves=true \|'
-    $null = Assert-Result $surface 'act is the only function this addon put on mod.class.Player' -Match 'ours_on_player=\[act\]'
+    # act and runStopped, and nothing else. This is the RUNTIME half of the
+    # superload-surface guard -- spec/surface_spec.lua is the source half, and
+    # growing the list is a decision made in both places or in neither.
+    # runStopped was added for #153: the engine's runCheck reads a seens map
+    # that accumulates over a run, runStopped's own body is what cleans it, and
+    # the disagreement that live-locks the bot (#164) only exists as the
+    # difference between the same call either side of it. No hook exists --
+    # the only triggerHook in mod/class/Player.lua is
+    # Player:onEnterLevel:generateEscort -- so api-surface-1.7.6.md's rule
+    # applies: keep the wrapper, say why, one delegating line. It is inert
+    # unless bot.active.
+    $null = Assert-Result $surface 'act and runStopped are the only functions this addon put on mod.class.Player' -Match 'ours_on_player=\[act,runStopped\]'
     $null = Assert-Result $surface 'and none on mod.class.Actor' -Match 'ours_on_actor=\[\]'
     $null = Assert-Result $surface "Actor:tooltip is not this addon's (the line is a hook)" -Match 'actor_tooltip=(?![^ ]*skoobot_reclauded)[^ ]+ '
     $null = Assert-Result $surface "nor is Player:tooltip" -Match 'player_tooltip=(?![^ ]*skoobot_reclauded)[^ ]+ '
