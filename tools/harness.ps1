@@ -512,6 +512,44 @@ return "loading"
     $loaded = (Invoke-Bridge -Lua 'return bridge.addons()' -TimeoutSec 30).Result
     Write-Host "[harness] loaded addons: $loaded"
 
+    <#
+        #127: autosaves must never land on the fixture.
+
+        The game autosaves on every level change, under game.save_name. So a
+        scenario that drives the bot through one WRITES THE SAVE IT BORROWED,
+        and the next scenario in the library run loads a fixture that has
+        moved. That is #127's open question -- "why does a library run leave
+        the level explored for a later scenario, when every scenario loads the
+        save fresh and no scenario writes it" -- and the answer is that no
+        scenario writes it *deliberately*: nothing here calls saveGame. The
+        writes are the engine's own.
+
+        Only soak.ps1 and scenario-first-run.ps1 ever defended against it, each
+        with its own copy of this line. The other thirty-five did not.
+
+        The evidence is on disk rather than inferred: save/fixture_berserker
+        holds a zero-byte zone-trollmire.teaz.tmp stamped in the middle of a
+        harness run, and completed zone-*.teaz files exist in other saves -- so
+        the write is real, it is sometimes interrupted by Stop-Game killing the
+        process mid-save, and when it is NOT interrupted the level state
+        persists between processes.
+
+        This is the likeliest common cause of the whole flaky-fixture family
+        (#122, #124, #127, #176): four scenarios that build a situation and
+        then measure, all failing on the state they happen to get.
+
+        One place, because every scenario reaches the game through here.
+    #>
+    $scratch = 'scenario-scratch'
+    $sn = Invoke-Bridge -TimeoutSec 30 -Lua "game.save_name = '$scratch' return tostring(game.save_name)"
+    if ($sn.Status -ne 'OK' -or "$($sn.Result)" -ne $scratch) {
+        # Loud, but not fatal: the scenario can still measure what it came for.
+        # What is at risk is the FIXTURE, and therefore every run after this
+        # one -- which is exactly the failure mode that is hard to trace back.
+        Write-Host "[harness] WARNING: could not redirect autosaves off the fixture (got '$($sn.Result)')."
+        Write-Host "[harness]          This run may write to save '$Name'; see #127."
+    }
+
     [pscustomobject]@{
         Ready       = $true
         AddonsIntact = $intact
