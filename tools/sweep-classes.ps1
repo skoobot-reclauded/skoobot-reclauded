@@ -440,10 +440,23 @@ try {
         # histogram stays in the .soak.json beside this.
         $top3 = @(@($s.stops) | Select-Object -First 3 | ForEach-Object { "$($_.reason) x$($_.count)" })
         $top  = ($top3 -join ' ; ')
+        # #178: light radius, surfaced per class rather than left in the soak
+        # JSON, because the prediction it tests is a PER-CLASS one -- starting
+        # equipment differs by class, and a column nobody sees is a column
+        # nobody correlates. "start->end" because a lantern found on floor one
+        # is the interesting case.
+        $lite = '?'
+        if ($s.vision -and $s.vision.start) {
+            $lite = "$($s.vision.start.lite)"
+            if ($s.vision.end -and $s.vision.end.lite -ne $s.vision.start.lite) {
+                $lite += "->$($s.vision.end.lite)"
+            }
+        }
         $row = [pscustomobject]@{
             Class    = $p.Class
             Tree     = $p.Tree
             Race     = $p.Race
+            Lite     = $lite
             Outcome  = $outcome
             Save     = $save
             Trail    = ($trail -join ' > ')
