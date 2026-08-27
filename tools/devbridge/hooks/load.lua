@@ -656,6 +656,14 @@ function bridge.dossierOn()
 	return ("on schema=%d"):format(DOSSIER_SCHEMA)
 end
 
+--- Who killed the character, and when, or "none". The harness asks after an
+--- eidolon arrival, where nothing on the plane can answer. See #174.
+function bridge.lastDeath()
+	local d = bridge.last_death
+	if not d then return "none" end
+	return ("turn=%s|killer=%s"):format(tostring(d.turn), tostring(d.killer))
+end
+
 --- Drain: hand the ledger over and forget it, so a long run does not grow
 -- without bound and the harness owns the only copy.
 function bridge.dossierDrain()
@@ -765,8 +773,33 @@ function bridge.dossierStatus()
 		d.audit.forms, d.audit.reused, d.audit.deltas)
 end
 
+--- Remember who killed the character, at the only moment the name exists.
+---
+--- Installed ALWAYS, and deliberately not with the dossier: the dossier's own
+--- die hook is only installed by dossierOn(), so a run without -Dossier never
+--- had one at all. By the time any harness poll sees the death the Eidolon has
+--- already self-resurrected the character onto its plane with killedBy cleared
+--- (#141), so there is nothing left to read afterwards. See #174.
+local function installDeathWatch()
+	local Actor = require "mod.class.Actor"
+	if Actor.__skoobot_deathwatch then return end
+	Actor.__skoobot_deathwatch = true
+	local olddie = Actor.die
+	function Actor:die(src, death_note)
+		if self.player and not self.dead then
+			bridge.last_death = {
+				turn = game and game.turn,
+				killer = (src and ((src.getName and src:getName()) or src.name)) or "?",
+			}
+		end
+		return olddie(self, src, death_note)
+	end
+end
+
 class:bindHook("ToME:run", function()
 	if not fs.exists(DIR) then fs.mkdir(DIR) end
 	installPump(require "mod.class.Game")
+	local ok, err = pcall(installDeathWatch)
+	if not ok then emit("ERR deathwatch " .. tostring(err)) end
 	emit("ready tier=tome turn="..tostring(game and game.turn))
 end)

@@ -1117,9 +1117,14 @@ return "installed save_name=" .. tostring(game.save_name)
             $deaths++
             $killer = $s.killer
             if (-not $killer) {
-                # Only knowable from before the move: nothing in the plane did it.
-                $tailLog = @(Get-GameLogLines | Select-Object -Last 40)
-                $killer = (@($tailLog | Where-Object { $_ -match 'kill|slain|die' } | Select-Object -Last 1) -join '')
+                # Only knowable from before the move: nothing on the plane did
+                # it. #174: ASK, do not grep. The old fallback matched the game
+                # log for 'kill|slain|die' and the bridge echoes its own state
+                # into that log -- a state string containing "killer=" matches
+                # "kill", so every eidolon death recorded a [BRIDGE] line as
+                # its killer and the field was useless.
+                $ld = Invoke-Bridge -Lua 'return bridge.lastDeath()' -TimeoutSec 30
+                if ($ld.Status -eq 'OK' -and "$($ld.Result)" -match 'killer=(.+)$') { $killer = $Matches[1] }
             }
             Write-Host "  eidolon  taken at turn=$($s.turn) L$($s.level)$(if ($killer) { " (killed by $killer)" })"
             $endReason = 'EIDOLON'; break
@@ -1128,8 +1133,9 @@ return "installed save_name=" .. tostring(game.save_name)
             $deaths++
             $killer = $s.killer
             if (-not $killer) {
-                $tailLog = @(Get-GameLogLines | Select-Object -Last 30)
-                $killer = (@($tailLog | Where-Object { $_ -match 'kill|slain|die' } | Select-Object -Last 1) -join '')
+                # #174, as above: ask the bridge, which recorded it in die().
+                $ld = Invoke-Bridge -Lua 'return bridge.lastDeath()' -TimeoutSec 30
+                if ($ld.Status -eq 'OK' -and "$($ld.Result)" -match 'killer=(.+)$') { $killer = $Matches[1] }
             }
             $endReason = 'DEATH'; break
         }
