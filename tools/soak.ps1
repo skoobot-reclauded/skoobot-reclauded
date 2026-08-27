@@ -1,4 +1,4 @@
-<#
+﻿<#
     Soak (#61): an unattended long run of the bot on the fixture, measured.
 
     The question this answers is not "does it pass" but "how far does it get,
@@ -212,6 +212,16 @@ param(
     # (#123) and island starts (#149) are both about where birth HAPPENS to put
     # someone, which is exactly the variable a controlled measurement removes.
     [string]$StartZone = '',
+    # #173 trials: which FLOOR of -StartZone to drop into. The interesting
+    # creatures are rarely on floor 1 -- every Spellblaze Crystal death in the
+    # corpus is on scintillating-caves 3 or 5 -- and walking down to them costs
+    # most of a run's budget. Cheating, like -StartZone itself (#160).
+    [int]$StartFloor = 1,
+    # Level the character to this before starting, so a trial on a deep floor
+    # is not just a level-1 character being deleted. XP only: the points are
+    # then spent by the ordinary -NoAutoSpend path, so the build is the same
+    # one a real run would have had.
+    [int]$PreLevel = 0,
     [switch]$NoAutoSpend,
     # #161: polls to wait out a bindless progress dialog before calling it stuck.
     [int]$DialogWaitPolls = 12,
@@ -706,12 +716,33 @@ end
 -- entrance on the world map makes (mod/class/Game.lua:2292). With a zone
 -- given the player lands on the new level's up staircase (old_lev is -1000
 -- there, Game.lua:1079 and :1294), exactly as when walking in.
-function sk.nextZone(id)
-  if game.zone and game.zone.short_name == id then return "already in " .. id end
+function sk.nextZone(id, floor)
+  floor = tonumber(floor) or 1
+  if game.zone and game.zone.short_name == id and floor <= 1 then return "already in " .. id end
   local before = sk.where()
-  local ok, err = pcall(game.changeLevel, game, 1, id)
+  local ok, err = pcall(game.changeLevel, game, floor, id)
   if not ok then return "error " .. tostring(err) end
   return outcome(before)
+end
+
+--- Gain XP up to a character level. Points are left unspent on purpose: the
+--- ordinary auto-spend path picks them up, so a pre-levelled trial character
+--- has the build a real run would have given it. See #173.
+function sk.preLevel(n)
+  local p = game.player
+  n = tonumber(n) or 0
+  if not p or n <= 0 then return "skipped" end
+  local guard = 0
+  while p.level < n and guard < 60 do
+    guard = guard + 1
+    local need = p:getExpChart(p.level + 1)
+    if not need then break end
+    local delta = need - p.exp
+    if delta <= 0 then delta = 1 end
+    p:gainExp(delta + 1)
+  end
+  return ("level=%d stats=%s talents=%s generics=%s"):format(p.level,
+    tostring(p.unused_stats), tostring(p.unused_talents), tostring(p.unused_generics))
 end
 -- The zone's level_range as the installed module declares it (some zones
 -- declare two layouts; the widest range is taken), or "missing".
@@ -982,12 +1013,17 @@ return "installed save_name=" .. tostring(game.save_name)
     $placedIn = $null
     if ($StartZone) {
         $null = Invoke-Bridge -Lua 'local out = {} for i = 1, 8 do local r = sk.closeDialog() if r == "none" then break end out[#out+1] = r end return table.concat(out, "; ")' -TimeoutSec 30
-        $tp = Invoke-Bridge -Lua "return sk.nextZone('$StartZone')" -TimeoutSec 120
+        $tp = Invoke-Bridge -Lua "return sk.nextZone('$StartZone', $StartFloor)" -TimeoutSec 120
         $null = Invoke-Bridge -Lua 'local out = {} for i = 1, 8 do local r = sk.closeDialog() if r == "none" then break end out[#out+1] = r end return table.concat(out, "; ")' -TimeoutSec 30
         $where = (Invoke-Bridge -Lua 'return sk.where()' -TimeoutSec 30).Result
         Write-Host "  placed   $($tp.Status) -> $where ($($tp.Result))"
         if ($where -like "$StartZone*") { $placedIn = $where }
         else { Write-Host "[soak] WARNING: asked for $StartZone and landed in $where" }
+    }
+
+    if ($PreLevel -gt 0) {
+        $pl = Invoke-Bridge -Lua "return sk.preLevel($PreLevel)" -TimeoutSec 120
+        Write-Host "  prelevel $($pl.Status) $($pl.Result)"
     }
 
     # #158: spend whatever birth left unspent, before the first decision.

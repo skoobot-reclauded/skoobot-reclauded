@@ -2406,7 +2406,17 @@ local function projectileThreats(p)
            and map.seens(e.x, e.y) then
             local tx, ty
             if type(e.project) == "table" and type(e.project.def) == "table" then
-                tx, ty = e.project.def.x, e.project.def.y
+                -- Bolts only, and now actually enforced. A ball carries a
+                -- radius and is not escaped by leaving the line -- the first
+                -- version stepped out of the Spellblaze Crystal's Ice Shards
+                -- as though it were a bolt, which is the confident-and-wrong
+                -- case this was supposed to refuse.
+                local typ = e.project.def.typ
+                if type(typ) == "table" and tonumber(typ.radius) and tonumber(typ.radius) > 0 then
+                    tx, ty = nil, nil
+                else
+                    tx, ty = e.project.def.x, e.project.def.y
+                end
             elseif type(e.homing) == "table" and type(e.homing.target) == "table" then
                 tx, ty = e.homing.target.x, e.homing.target.y
             end
@@ -2484,6 +2494,12 @@ end
 --- when none is reachable within `maxSteps`. Bounded on purpose: safety that
 --- cannot be reached in time is not safety.
 ---
+--- The caller always allows at least ONE step, however fast the bolt. This is
+--- a turn-based game: if the bot has been handed the turn, its action resolves
+--- before anything else moves, so a clean grid one step away is always
+--- reachable -- even against a speed-20 Flame Bolt already adjacent. Only
+--- safety FURTHER than one step has to beat the clock.
+---
 --- Breadth-first, so grids come out nearest-first, and a grid out of melee
 --- reach of everything visible WINS OUTRIGHT over a nearer one that is not --
 --- the first clean grid found is therefore also the nearest clean grid. A grid
@@ -2539,7 +2555,10 @@ local function handleIncoming(hostiles)
     -- the brace. Asking by capability rather than by effect name, as #12 does.
     local step, how = nil, nil
     if not p:attr("never_move") then
-        step, how = safeStepWithin(p, threats, math.floor(impact), hostiles)
+        -- max(1, ...): the turn we are holding is itself an action, so one
+        -- step is always on offer -- see safeStepWithin. floor() alone braced
+        -- against a Flame Bolt 0.4 turns out with an open grid beside us.
+        step, how = safeStepWithin(p, threats, math.max(1, math.floor(impact)), hostiles)
     end
     if step then
         if levelBump("dodge") > DODGE_TRIES then
