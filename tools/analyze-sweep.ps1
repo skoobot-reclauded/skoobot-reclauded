@@ -53,7 +53,12 @@ if (-not (Test-Path $Dir)) { Write-Host "[analyze] no directory at $Dir"; exit 1
 
 # The per-class rows are the small files; the .soak.json twins are the runs.
 $rows = @()
-foreach ($f in (Get-ChildItem (Join-Path $Dir '*.json') | Where-Object { $_.Name -notlike '*.soak.json' })) {
+# A dossier is not a class result. `*.soak.dossier.json` does not match
+# `*.soak.json`, so every one of them used to be parsed as a row -- 58 files
+# read where 29 exist, and one unparseable dossier killed the whole run (#172).
+# The sections that want dossiers open them by name.
+foreach ($f in (Get-ChildItem (Join-Path $Dir '*.json') |
+                Where-Object { $_.Name -notlike '*.soak.json' -and $_.Name -notlike '*.dossier.json' })) {
     $j = Get-Content $f.FullName -Raw | ConvertFrom-Json
     $soakPath = Join-Path $Dir ($f.BaseName + '.soak.json')
     $soak = if (Test-Path $soakPath) { Get-Content $soakPath -Raw | ConvertFrom-Json } else { $null }

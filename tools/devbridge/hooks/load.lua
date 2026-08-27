@@ -315,6 +315,17 @@ end
 -- as absent, absent reads as zero, and a zero quietly changes what a candidate
 -- formula computes -- which is the error class this whole exercise exists to
 -- find.
+-- Presentation, never state, and skipped at EVERY depth -- unlike the
+-- per-entity skip list below, which dossierWalk deliberately does not carry
+-- into nested tables. A particle emitter's colour range keys are rM/rm and
+-- gM/gm, which differ only in case: PowerShell's ConvertFrom-Json folds them
+-- together and refuses the whole file, so one sparkle on one buff took out a
+-- 29-class analysis. See #172.
+local DOSSIER_NOISE = {
+	particles = true, particle = true, particle1 = true, particle2 = true,
+	_shader = true, shader = true, __particles = true,
+}
+
 local function dossierWalk(v, depth, seen, skip)
 	local tv = type(v)
 	if tv == "number" or tv == "string" or tv == "boolean" then return v end
@@ -326,7 +337,7 @@ local function dossierWalk(v, depth, seen, skip)
 	local out, n = {}, 0
 	for k, val in pairs(v) do
 		local tk = type(k)
-		if (tk == "string" or tk == "number") and not (skip and skip[k]) then
+		if (tk == "string" or tk == "number") and not (skip and skip[k]) and not DOSSIER_NOISE[k] then
 			n = n + 1
 			if n > MAX_KEYS then out.__truncated = "keys" break end
 			if depth > 0 and dossierIsEntity(val) then
