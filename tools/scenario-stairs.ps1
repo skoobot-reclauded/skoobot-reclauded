@@ -87,15 +87,33 @@ st.b = b
 st.saved = select(2, b.settingSource("TAKE_STAIRS"))
 if st.saved == nil then return "ERR TAKE_STAIRS is not a setting" end
 
+-- Prefer a level change that is NOT a way out to the world map.
+--
+-- #169: the product returns early for those, with its own message, BEFORE the
+-- branches this scenario tests (src/superload/mod/class/Player.lua:2185). A
+-- naive scan finds Trollmire's wilderness exit at 0,26 first, so probes B and
+-- C measured that guard instead and read as "the message changed". It had not
+-- -- "standing on a level change" is still there, three times, behind a guard
+-- added in front of it.
+--
+-- Returns the change_zone STRING rather than a boolean, because "is a zone
+-- exit" is not the disqualifying property: the guard keys on `^wilderness`.
 function st.findStairs()
   local map = game.level.map
+  local fx, fy, fname, fzone     -- fallback: a wilderness exit, if that is all there is
   for x = 0, map.w - 1 do
     for y = 0, map.h - 1 do
       local grid = map(x, y, engine.Map.TERRAIN)
-      if grid and grid.change_level then return x, y, tostring(grid.name), grid.change_zone and true or false end
+      if grid and grid.change_level then
+        local cz = grid.change_zone and tostring(grid.change_zone) or nil
+        if not (cz and cz:find("^wilderness")) then
+          return x, y, tostring(grid.name), cz
+        end
+        if not fx then fx, fy, fname, fzone = x, y, tostring(grid.name), cz end
+      end
     end
   end
-  return nil
+  return fx, fy, fname, fzone
 end
 function st.pacify()
   local p = game.player
@@ -160,7 +178,7 @@ return "installed"
     Write-Host ''
     Write-Host '  --- A. a real level change on this level, and a grid beside it'
     $find = Probe @'
-local x, y, name, zoneExit = st.findStairs()
+local x, y, name, zone = st.findStairs()
 if not x then return "SETUP no change_level grid on this level" end
 st.sx, st.sy = x, y
 for _, c in pairs(util.adjacentCoords(x, y)) do
@@ -170,12 +188,18 @@ for _, c in pairs(util.adjacentCoords(x, y)) do
 end
 if not st.offx then return "SETUP no free grid beside the level change" end
 local n = st.pacify()
-return ("OK stairs=%d,%d name=%s zoneexit=%s off=%d,%d pacified=%d"):format(
-  x, y, name, tostring(zoneExit), st.offx, st.offy, n)
+return ("OK stairs=%d,%d name=%s zone=%s off=%d,%d pacified=%d"):format(
+  x, y, name, tostring(zone), st.offx, st.offy, n)
 '@ 120
     Write-Host "  $($find.Result)"
     if ($find.Result -match '^SETUP') { Inconclusive $find.Result }
     $null = Assert-Result $find 'a level change was found and a grid beside it' -Match ' stairs=\d+,\d+ '
+    # A precondition, not a product claim (#169, #176). A wilderness exit is
+    # short-circuited before the branches B and C test, so measuring one says
+    # nothing about them -- and said it convincingly enough to be filed as a
+    # changed message.
+    $null = Require-Staged -Tag 'stairs' -Ok ($find.Result -notmatch ' zone=wilderness') -Detail $find.Result `
+        -What 'the level change found is an ordinary one, not a way out to the world map'
 
     # ----- B: never ---------------------------------------------------------
     Write-Host ''
