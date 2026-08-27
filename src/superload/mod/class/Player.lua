@@ -2466,14 +2466,36 @@ local function soonestImpact(threats, gx, gy)
     return best, who
 end
 
+--- Is a grid within melee reach of something hostile the character can see?
+--- Stepping out of a spitball and into an ogre's fist is not a dodge, and the
+--- bolt may well have been the smaller problem. Hostiles come from the caller's
+--- LOS-gated list, so this knows only what the character does (D-18).
+local function besideHostile(gx, gy, hostiles)
+    for _, h in ipairs(hostiles or {}) do
+        if h.x and h.actor and not h.actor.dead
+           and core.fov.distance(gx, gy, h.x, h.y) <= 1 then
+            return true
+        end
+    end
+    return false
+end
+
 --- First step of the shortest walk to a grid no live bolt will cross, or nil
 --- when none is reachable within `maxSteps`. Bounded on purpose: safety that
 --- cannot be reached in time is not safety.
-local function safeStepWithin(p, threats, maxSteps)
+---
+--- Breadth-first, so grids come out nearest-first, and a grid out of melee
+--- reach of everything visible WINS OUTRIGHT over a nearer one that is not --
+--- the first clean grid found is therefore also the nearest clean grid. A grid
+--- beside a hostile is kept only as a fallback, because taking a punch can
+--- still beat taking the bolt, and returned with a different reason so a run
+--- log says which happened.
+local function safeStepWithin(p, threats, maxSteps, hostiles)
     if maxSteps < 1 then return nil end
     local map = game.level.map
     local seen = { [p.x .. "," .. p.y] = true }
     local queue, head = { { x = p.x, y = p.y, first = nil, d = 0 } }, 1
+    local fallback
     while head <= #queue do
         local n = queue[head] ; head = head + 1
         if n.d < maxSteps then
@@ -2484,12 +2506,16 @@ local function safeStepWithin(p, threats, maxSteps)
                    and p:canMove(nx, ny) and not needsConsent(nx, ny) then
                     seen[k] = true
                     local first = n.first or { x = nx, y = ny }
-                    if not inFlightPath(nx, ny, threats) then return first end
+                    if not inFlightPath(nx, ny, threats) then
+                        if not besideHostile(nx, ny, hostiles) then return first, "clear" end
+                        fallback = fallback or first
+                    end
                     queue[#queue + 1] = { x = nx, y = ny, first = first, d = n.d + 1 }
                 end
             end
         end
     end
+    if fallback then return fallback, "into melee reach" end
     return nil
 end
 
@@ -2501,7 +2527,7 @@ end
 --- otherwise take it and carry on. Never hand back -- "nowhere to go" is the
 --- expected answer in a corridor, not an error, and #146 is what treating it
 --- as one costs.
-local function handleIncoming()
+local function handleIncoming(hostiles)
     local p = game.player
     if not p or not p.x or bot.do_nothing then return false end
     local threats = currentThreats()
@@ -2511,17 +2537,17 @@ local function handleIncoming()
 
     -- Pinned, frozen or held: no dodge is on offer, so this goes straight to
     -- the brace. Asking by capability rather than by effect name, as #12 does.
-    local step = nil
+    local step, how = nil, nil
     if not p:attr("never_move") then
-        step = safeStepWithin(p, threats, math.floor(impact))
+        step, how = safeStepWithin(p, threats, math.floor(impact), hostiles)
     end
     if step then
         if levelBump("dodge") > DODGE_TRIES then
             chan.debug("[Incoming] %d dodges on this level already; standing.", DODGE_TRIES)
             return false
         end
-        chan.info("[Incoming] %s reaches us in %.1f turn(s); stepping out of its path.",
-            tostring(who and who.name), impact)
+        chan.info("[Incoming] %s reaches us in %.1f turn(s); stepping out of its path (%s).",
+            tostring(who and who.name), impact, tostring(how))
         if SAI_movePlayer(step.x, step.y) then
             checkForAdditionalAction()
             return true
@@ -2603,7 +2629,7 @@ function skoobot_act(noAction)
     -- recovery and the stop conditions above, which are the player's own
     -- emergencies, and it hands to Damage Prevention itself when no dodge is
     -- reachable in time.
-    if bot.handleIncoming() then return end
+    if bot.handleIncoming(hostiles) then return end
     if #hostiles > 0 then
         bot.state = STATE_FIGHT
     end

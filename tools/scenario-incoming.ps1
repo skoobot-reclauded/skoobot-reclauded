@@ -38,6 +38,10 @@
       F. THE GATE: with the character unable to move, the same decision does
          NOT move it, does not raise, and does not hand back -- the corridor
          case, where running at unreachable safety is worse than standing.
+      G. it does not dodge INTO melee reach when it has a choice: a hostile
+         beside one escape sends it to another. The hostile is synthetic --
+         handleIncoming takes the list, and what is under test is which grid
+         gets picked, not spotHostiles, which is exercised everywhere else.
 
     Exit codes:  0 pass   1 fail   2 tainted   3 inconclusive (no room to stage
     a line -- a setup problem, never a product failure)
@@ -100,8 +104,10 @@ function pr.line(span)
       for i = -span, span do
         if not open(cx + i, cy) then clear = false break end
       end
-      -- and somewhere off the line to dodge to
-      if clear and (open(cx, cy - 1) or open(cx, cy + 1)) then
+      -- BOTH sides open, so G has a real choice to make: with only one escape
+      -- and a hostile beside it, "prefer not to step into melee" is untestable
+      -- because there is nothing else to prefer.
+      if clear and open(cx, cy - 1) and open(cx, cy + 1) then
         p:move(cx, cy, true)
         -- Recompute what the character can see. The detector is gated on
         -- map.seens (D-18: the bot reacts only to what a player could), so a
@@ -222,6 +228,7 @@ return ("me=%s side=%s behind=%s"):format(
     $dodge = (Invoke-Bridge -TimeoutSec 120 -Lua @'
 pr.line(6) ; pr.fire(2)
 local p = game.player
+p.energy.value = game.energy_to_act          -- Actor:move refuses without it
 local x0, y0 = p.x, p.y
 skoobot_reclauded.threat_turn = nil          -- per game turn, and we staged mid-turn
 local was = pr.at(x0, y0)
@@ -240,6 +247,35 @@ return ("was=%s acted=%s moved=%s nowInPath=%s | threats=%d proj=%s,%s seens=%s 
         Check ($dodge -match 'acted=true')      'E: the decision took the turn'
         Check ($dodge -match 'moved=true')      'E: and it actually moved'
         Check ($dodge -match 'nowInPath=false') 'E: to somewhere the bolt will not cross'
+    }
+
+    # ---- G: do not dodge into a fist -----------------------------------------
+    $melee = (Invoke-Bridge -TimeoutSec 120 -Lua @'
+pr.clear() ; pr.line(6) ; pr.fire(2)
+local p = game.player
+-- Actor:move refuses without energy, and E's dodge just spent the turn's.
+p.energy.value = game.energy_to_act
+local x0, y0 = p.x, p.y
+-- Something hostile beside the escape directly "above" the line of flight.
+local ogre = { x = x0, y = y0 - 1, actor = { dead = false, name = "an ogre" } }
+skoobot_reclauded.threat_turn = nil
+local a0 = skoobot_reclauded.actions or 0
+local acted = skoobot_reclauded.handleIncoming({ ogre })
+local a1 = skoobot_reclauded.actions or 0
+local d = core.fov.distance(p.x, p.y, ogre.x, ogre.y)
+return ("acted=%s moved=%s toOgre=%d nowInPath=%s | from=%d,%d ogre=%d,%d moves=%d"):format(
+  tostring(acted), tostring(p.x ~= x0 or p.y ~= y0), d, pr.at(p.x, p.y),
+  x0, y0, ogre.x, ogre.y, a1 - a0)
+'@).Result
+    Write-Host "  melee    $melee"
+    if (Ok $melee 'the melee-aware choice runs') {
+        Check ($melee -match 'acted=true')      'G: it still dodges'
+        Check ($melee -match 'nowInPath=false') 'G: to somewhere out of the flight path'
+        if ($melee -match 'toOgre=(\d+)') {
+            Check ([int]$Matches[1] -gt 1) "G: and not into melee reach (distance $($Matches[1]) from the hostile)"
+        } else {
+            Check $false 'G: the distance was reported'
+        }
     }
 
     # ---- F: no dodge possible must not move, raise, or hand back ------------
