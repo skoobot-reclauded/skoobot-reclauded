@@ -684,6 +684,8 @@ end
 -- oscillation: step off, get drawn back, step off again. After this many the
 -- run says so and hands over.
 local STEPOFF_TRIES = 3
+-- #165: a backstop on stepping towards a level change, per level.
+local SEEKEXIT_STEPS = 400
 
 --- Counters that survive the bot being restarted (#140).
 ---
@@ -1124,6 +1126,57 @@ local function markWalkedInto()
 end
 -- Through `bot`, because skoobot_act is at LuaJIT's 60-upvalue limit.
 bot.markWalkedInto = markWalkedInto
+
+--- Remember a level change this character refused, per level. Explore targets
+--- exits (#121), so without this the bot is walked back to the one it just
+--- turned down for ever -- see #165.
+local function markRefusedExit()
+    local p = game.player
+    if not p or not p.x then return end
+    levelState("refusedexit")[("%d,%d"):format(p.x, p.y)] = true
+end
+bot.markRefusedExit = markRefusedExit
+
+--- The nearest seen level change that has NOT been refused, or nil when every
+--- one this character has found is refused. See #165.
+local function progressExit()
+    local map, p = game.level and game.level.map, game.player
+    if not map or not p or not p.x then return nil end
+    local refused = levelState("refusedexit")
+    local bx, by, bd
+    for x = 0, map.w - 1 do
+        for y = 0, map.h - 1 do
+            if map.has_seens(x, y)
+               and not refused[("%d,%d"):format(x, y)]
+               and map:checkEntity(x, y, engine.Map.TERRAIN, "change_level") then
+                local d = core.fov.distance(p.x, p.y, x, y)
+                if not bd or d < bd then bx, by, bd = x, y, d end
+            end
+        end
+    end
+    return bx, by
+end
+
+--- Step towards a level change that has not been refused; true when a step was
+--- taken, so the explore branch knows not to explore. See #165.
+---
+--- It terminates without needing a counter: the refused set only grows, so once
+--- every known exit is in it this returns false and explore hands back as it
+--- did before. SEEKEXIT_STEPS is the backstop for a path that never arrives.
+local function seekProgressExit()
+    if not next(levelState("refusedexit")) then return false end
+    local p = game.player
+    local x, y = progressExit()
+    if not x or (x == p.x and y == p.y) then return false end
+    if levelBump("seekexit") > SEEKEXIT_STEPS then return false end
+    local path = Astar.new(game.level.map, p):calc(p.x, p.y, x, y, nil, nil,
+        function(ax, ay) return not needsConsent(ax, ay) end)
+    if not path or #path == 0 then return false end
+    chan.info("[Action] This level is explored and the way out was refused; heading for the level change at %d,%d.",
+              x, y)
+    return SAI_movePlayer(path[1].x, path[1].y) and true or false
+end
+bot.seekProgressExit = seekProgressExit
 
 --- A name for a dialog that is worth reading in a stop reason.
 ---
@@ -2004,12 +2057,14 @@ local function atLevelChange(grid)
         local target = grid.change_level_abs and grid.change_level
             or ((game.level and game.level.level or 0) + grid.change_level)
         if target <= (game.level and game.level.level or 0) then
+            markRefusedExit()
             return stop(notice.HANDED_BACK,
                 "standing on the way back up; taking it is not progress")
         end
     end
 
     if zoneExit and tostring(grid.change_zone):find("^wilderness") then
+        markRefusedExit()
         return stop(notice.HANDED_BACK,
             "standing on the way out of this zone, which leads to the world map -- "
             .. "the bot does not travel it")
@@ -2426,7 +2481,7 @@ function skoobot_act(noAction)
         local caps = ctx.caps
         if caps.move then
             stop(notice.STOPPED, "cannot move (" .. conditions.blockedText(caps.move) .. ")")
-        else
+        elseif not bot.seekProgressExit() then
             SAI_beginExplore()
         end
         return
