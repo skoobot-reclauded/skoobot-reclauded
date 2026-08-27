@@ -1713,7 +1713,10 @@ local function fleeStep(entry, hostiles)
         -- #64: a grid the player must consent to enter is not a step the
         -- bot may take either -- fleeing into a sealed door opens its popup
         -- just as surely as pathing into one.
+        -- #173: and not into the path of something already in the air --
+        -- fleeing across a bolt's line trades one threat for a certain hit.
         if p:canMove(sx, sy) and not needsConsent(sx, sy)
+           and not bot.inFlightPath(sx, sy)
            and (not keepLos or p:hasLOS(a.x, a.y, nil, nil, sx, sy)) then
             local dist = core.fov.distance(sx, sy, a.x, a.y)
             local cmap, better
@@ -2356,6 +2359,191 @@ local function checkConditions(site, ctx)
 end
 
 -------------------------------------------------------------------------------
+-- Incoming fire (#173)
+-------------------------------------------------------------------------------
+--
+-- A bolt in flight is treated as TERRAIN, not as an attack: the grids it still
+-- has to cross are somewhere not to be standing. That one idea covers both the
+-- dodge (we are on one, so step off) and the movement rule (do not walk back
+-- across one), which is why there is no separate dodge state.
+--
+-- BOLTS ONLY, on purpose. `engine/Target.lua:629` gives the bolt type
+-- `stop_block`, so it hits the first blocking grid along its path -- leaving
+-- the LINE is what saves you, not leaving the grid it was aimed at. A ball or
+-- a beam is not escaped that way at all, and handling them here would make the
+-- bot confident and wrong.
+--
+-- THE FEASIBILITY GATE IS THE POINT. Elemental Bolt travels 2 grids a turn
+-- over a range of 20, so a bolt can be in the air for ten turns and a one-tile
+-- corridor can be longer than the character can clear. Walking at safety it
+-- will not reach is strictly worse than standing still: the hit lands either
+-- way and the turns bought nothing, when they could have raised a shield.
+
+-- engine/Projectile.lua:39 defaults energy.mod to 10 where a talent sets no
+-- proj_speed. Read from the entity so a bolt from a hasted caster is right.
+local PROJ_SPEED_DEFAULT = 10
+-- Per level (#140), so a room full of turrets cannot spend a whole run
+-- stepping sideways.
+local DODGE_TRIES = 60
+
+--- Live bolts the character can SEE, with where each still has to go. Sight is
+--- the fairness line the rest of the bot keeps (D-18) and the engine keeps it
+--- too -- the tooltip and the character sheet are both canSee-gated.
+---
+--- game.level.entities is keyed by uid, so `pairs`: `#` is 0 on it and `ipairs`
+--- yields nothing.
+local function projectileThreats(p)
+    local out = {}
+    if not game.level or not p or not p.x then return out end
+    local map = game.level.map
+    for _, e in pairs(game.level.entities or {}) do
+        -- e.__is_projectile, NOT rawget: engine/Projectile.lua sets it on the
+        -- CLASS (_M.__is_projectile = true) and instances inherit it through
+        -- the metatable, which rawget skips. rawget here found nothing, ever.
+        if type(e) == "table" and e.__is_projectile
+           and e.x and e.y and not e.dead
+           and not (e.src and e.src == p)
+           and map.seens(e.x, e.y) then
+            local tx, ty
+            if type(e.project) == "table" and type(e.project.def) == "table" then
+                tx, ty = e.project.def.x, e.project.def.y
+            elseif type(e.homing) == "table" and type(e.homing.target) == "table" then
+                tx, ty = e.homing.target.x, e.homing.target.y
+            end
+            if tx and ty then
+                local sp = type(e.energy) == "table" and tonumber(e.energy.mod) or nil
+                if not sp or sp <= 0 then sp = PROJ_SPEED_DEFAULT end
+                out[#out + 1] = { x = e.x, y = e.y, tx = tx, ty = ty, speed = sp,
+                    name = (e.getName and e:getName()) or e.name or "a projectile" }
+            end
+        end
+    end
+    return out
+end
+
+--- Once a turn, because the movement predicate asks per candidate grid.
+local function currentThreats()
+    local turn = game.turn
+    if bot.threat_turn ~= turn then
+        bot.threat_turn = turn
+        bot.threats = projectileThreats(game.player)
+    end
+    return bot.threats or {}
+end
+
+--- Is a grid on the flight this bolt has LEFT to make? The stretch behind it is
+--- harmless and shrinks as it travels, which is what the dot product tests --
+--- the same arithmetic v1 carried in spotHostiles and never ran, generalised
+--- off the player's own grid so movement can ask about any other.
+local function gridInFlight(t, gx, gy)
+    local len = core.fov.distance(t.x, t.y, t.tx, t.ty)
+    if len <= 0 then return false end
+    if core.fov.distance(t.x, t.y, gx, gy) > len then return false end
+    local off = math.abs((gx - t.x) * (t.ty - t.y) - (gy - t.y) * (t.tx - t.x)) / len
+    if off >= 1.0 then return false end
+    return ((gx - t.x) * (t.tx - t.x) + (gy - t.y) * (t.ty - t.y)) >= 0
+end
+
+--- Will any live bolt cross this grid? The question movement asks.
+local function inFlightPath(gx, gy, threats)
+    for _, t in ipairs(threats or currentThreats()) do
+        if gridInFlight(t, gx, gy) then return true end
+    end
+    return false
+end
+bot.inFlightPath = function(x, y) return inFlightPath(x, y, nil) end
+
+--- Turns until the soonest bolt reaches a grid, and which one, or nil if none
+--- will. Speed is grids per turn.
+local function soonestImpact(threats, gx, gy)
+    local best, who
+    for _, t in ipairs(threats) do
+        if gridInFlight(t, gx, gy) then
+            local n = core.fov.distance(t.x, t.y, gx, gy) / t.speed
+            if not best or n < best then best, who = n, t end
+        end
+    end
+    return best, who
+end
+
+--- First step of the shortest walk to a grid no live bolt will cross, or nil
+--- when none is reachable within `maxSteps`. Bounded on purpose: safety that
+--- cannot be reached in time is not safety.
+local function safeStepWithin(p, threats, maxSteps)
+    if maxSteps < 1 then return nil end
+    local map = game.level.map
+    local seen = { [p.x .. "," .. p.y] = true }
+    local queue, head = { { x = p.x, y = p.y, first = nil, d = 0 } }, 1
+    while head <= #queue do
+        local n = queue[head] ; head = head + 1
+        if n.d < maxSteps then
+            for _, dir in ipairs(util.adjacentDirs()) do
+                local nx, ny = util.coordAddDir(n.x, n.y, dir)
+                local k = nx .. "," .. ny
+                if not seen[k] and map:isBound(nx, ny)
+                   and p:canMove(nx, ny) and not needsConsent(nx, ny) then
+                    seen[k] = true
+                    local first = n.first or { x = nx, y = ny }
+                    if not inFlightPath(nx, ny, threats) then return first end
+                    queue[#queue + 1] = { x = nx, y = ny, first = first, d = n.d + 1 }
+                end
+            end
+        end
+    end
+    return nil
+end
+
+--- Decide about incoming fire before anything else is chosen this turn. True
+--- when the turn was spent on it.
+---
+--- Three outcomes, and the third is not a failure: dodge if a safe grid is
+--- reachable in time; brace if it is not and something can absorb the hit;
+--- otherwise take it and carry on. Never hand back -- "nowhere to go" is the
+--- expected answer in a corridor, not an error, and #146 is what treating it
+--- as one costs.
+local function handleIncoming()
+    local p = game.player
+    if not p or not p.x or bot.do_nothing then return false end
+    local threats = currentThreats()
+    if #threats == 0 then return false end
+    local impact, who = soonestImpact(threats, p.x, p.y)
+    if not impact then return false end
+
+    -- Pinned, frozen or held: no dodge is on offer, so this goes straight to
+    -- the brace. Asking by capability rather than by effect name, as #12 does.
+    local step = nil
+    if not p:attr("never_move") then
+        step = safeStepWithin(p, threats, math.floor(impact))
+    end
+    if step then
+        if levelBump("dodge") > DODGE_TRIES then
+            chan.debug("[Incoming] %d dodges on this level already; standing.", DODGE_TRIES)
+            return false
+        end
+        chan.info("[Incoming] %s reaches us in %.1f turn(s); stepping out of its path.",
+            tostring(who and who.name), impact)
+        if SAI_movePlayer(step.x, step.y) then
+            checkForAdditionalAction()
+            return true
+        end
+        return false
+    end
+
+    local talents = filterFailedTalents(getPreventionTalents())
+    if #talents > 0 then
+        chan.info("[Incoming] no way out of %s in %.1f turn(s); bracing.",
+            tostring(who and who.name), impact)
+        SAI_useTalent(talents[1])
+        checkForAdditionalAction()
+        return true
+    end
+    chan.debug("[Incoming] %s is unavoidable and there is nothing to brace with; taking it.",
+        tostring(who and who.name))
+    return false
+end
+bot.handleIncoming = handleIncoming
+
+-------------------------------------------------------------------------------
 -- The decision (v1 skoobot_act)
 -------------------------------------------------------------------------------
 
@@ -2410,6 +2598,12 @@ function skoobot_act(noAction)
     if bot.tryCleanse(ctx) then return end
     if tryLowLifeRecovery(ctx) then return end
     if checkConditions(conditions.SITE_TURN, ctx) then return end
+    -- #173: incoming fire is settled before a branch is chosen, so it outranks
+    -- attacking, exploring and escorting. It sits UNDER cleanse, low-life
+    -- recovery and the stop conditions above, which are the player's own
+    -- emergencies, and it hands to Damage Prevention itself when no dodge is
+    -- reachable in time.
+    if bot.handleIncoming() then return end
     if #hostiles > 0 then
         bot.state = STATE_FIGHT
     end
@@ -2965,7 +3159,14 @@ function skoobot_act(noAction)
             -- each candidate grid; a sealed door sets no block_move, so without
             -- this the path runs through it and the bot walks into a popup it
             -- can only hand back on.
+            -- #173: prefer a route that does not cross a live bolt, but fall
+            -- back to the plain path rather than report no route. A flight
+            -- lasts a few turns; turning it into "no path to X" would mark the
+            -- enemy unreachable (#146) over something that clears itself.
             local function pathTo(tx, ty)
+                local clear = a:calc(game.player.x, game.player.y, tx, ty, nil, nil,
+                    function(x, y) return not needsConsent(x, y) and not bot.inFlightPath(x, y) end)
+                if clear and #clear > 0 then return clear end
                 return a:calc(game.player.x, game.player.y, tx, ty,
                     nil, nil, function(x, y) return not needsConsent(x, y) end)
             end
