@@ -217,21 +217,38 @@ function Get-LinkTarget($path) {
     product, and the state of a machine that has not run setup-dev yet.
     Throws, with the command that fixes it.
 #>
-# Which commit will the game actually load? (#175)
+# What will the game actually EXECUTE? (#175)
 #
-# Resolved from the JUNCTION, not from wherever this script lives. Pointing the
-# junctions at another checkout is routine -- every scenario run does it, and
-# #173's A/B did it deliberately to run main's product against a worktree's
-# harness -- so a sweep launched from main can easily be measuring something
-# else. `dirty` matters as much as the hash: a commit alone lies whenever
-# someone is mid-edit, which is the case this exists for.
+# Two things this deliberately does NOT do.
+#
+# It does not read the current directory. Pointing the junctions at another
+# checkout is routine -- every scenario run does it, and #173's A/B did it on
+# purpose to run main's product against a worktree's harness -- so the question
+# is answered from the JUNCTION and nowhere else.
+#
+# And it does not report the whole repository's state. The game loads exactly
+# three paths, and work elsewhere in the same checkout -- docs, other tools, a
+# second session's edits -- changes neither what runs nor what a sweep measures.
+# Reporting those as drift would flag every sweep as unattributable and teach
+# everyone to ignore the flag.
+#
+# So the identity is the TREE of each loaded path (`git rev-parse HEAD:src`),
+# which moves only when that path's content moves, plus the count of
+# uncommitted files WITHIN those paths. The commit is carried too, for
+# provenance, but it is the trees that say whether two runs executed the same
+# code.
+$script:LoadedPaths = @('src', 'tools/devbridge', 'tools/devbridge-boot')
+
 function Get-BuildStamp {
     param([string]$GameDir)
     if (-not $GameDir) { $GameDir = $script:GameDir }
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'      # git writes progress to stderr
     try {
-        $stamp = [ordered]@{ repo = ''; commit = 'unknown'; short = 'unknown'; dirty = -1; subject = '' }
+        $stamp = [ordered]@{
+            repo = ''; commit = 'unknown'; short = 'unknown'
+            trees = ''; dirty = -1; dirty_elsewhere = -1; subject = ''
+        }
         $link = Get-LinkTarget (Join-Path (Join-Path $GameDir 'gameddons') 'tome-skoobot_reclauded')
         $repo = $null
         if ($link -and $link -notmatch '^<') {
@@ -245,8 +262,19 @@ function Get-BuildStamp {
                 if ($h) { $stamp.commit = "$h".Trim(); $stamp.short = $stamp.commit.Substring(0, 7) }
                 $subj = (& git -C $repo log -1 --format=%s)
                 if ($subj) { $stamp.subject = "$subj".Trim() }
-                $porc = @(& git -C $repo status --porcelain)
-                $stamp.dirty = @($porc | Where-Object { "$_".Trim() }).Count
+
+                $ids = @()
+                foreach ($p in $script:LoadedPaths) {
+                    $t = (& git -C $repo rev-parse "HEAD:$p")
+                    $ids += if ($t) { "$t".Trim().Substring(0, 8) } else { '????????' }
+                }
+                $stamp.trees = ($ids -join '/')
+
+                $inLoaded = @(& git -C $repo status --porcelain -- $script:LoadedPaths)
+                $stamp.dirty = @($inLoaded | Where-Object { "$_".Trim() }).Count
+                $all = @(& git -C $repo status --porcelain)
+                $allN = @($all | Where-Object { "$_".Trim() }).Count
+                $stamp.dirty_elsewhere = $allN - $stamp.dirty
             } catch { }
         }
         return $stamp
@@ -256,8 +284,11 @@ function Get-BuildStamp {
 function Format-BuildStamp {
     param($Stamp)
     if (-not $Stamp) { return 'build=unknown' }
-    $d = if ($Stamp.dirty -gt 0) { " +$($Stamp.dirty) uncommitted" } elseif ($Stamp.dirty -eq 0) { '' } else { ' (dirty unknown)' }
-    return ("build={0}{1} [{2}] {3}" -f $Stamp.short, $d, (Split-Path -Leaf $Stamp.repo), $Stamp.subject)
+    $d = if ($Stamp.dirty -gt 0) { " +$($Stamp.dirty) UNCOMMITTED in loaded paths" }
+         elseif ($Stamp.dirty -eq 0) { '' } else { ' (dirty unknown)' }
+    $e = if ($Stamp.dirty_elsewhere -gt 0) { " ($($Stamp.dirty_elsewhere) elsewhere, not loaded)" } else { '' }
+    return ("build={0} trees={1}{2}{3} [{4}] {5}" -f
+        $Stamp.short, $Stamp.trees, $d, $e, (Split-Path -Leaf $Stamp.repo), $Stamp.subject)
 }
 
 function Assert-JunctionsOwned {
