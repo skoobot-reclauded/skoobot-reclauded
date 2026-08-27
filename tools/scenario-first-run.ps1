@@ -1,4 +1,4 @@
-<#
+﻿<#
     #54: the first-run and new-character walk, as a player would take it.
 
     Two audiences: someone new to SkooBot: Reclauded (from the original, or
@@ -544,7 +544,7 @@ local out = ("picker=[%s] items=%d [%s] | policy=[%s] options=[%s] | after=%s to
 fr.closeAll()
 return out
 '@
-    Check ($sc -match 'picker=\[Stop conditions: pick one to change\] items=15 ') 'choice b) lists the fifteen conditions'
+    Check ($sc -match 'picker=\[Stop conditions: pick one to change\] items=16 ') 'choice b) lists the sixteen conditions'
     Check ($sc -match 'policy=\[Stunned -- what should the bot do\?\] options=\[a\) IGNORE -- never stop for this \| b\) WARN -- stop once, then carry on if restarted \| c\) STOP -- stop every time it applies\]') 'picking one names it and explains IGNORE, WARN and STOP'
     Check ($sc -match 'after=WARN top=none') 'the choice is applied and every dialog closes'
     Note "stop conditions: $sc"

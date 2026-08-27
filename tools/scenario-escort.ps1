@@ -1,4 +1,4 @@
-<#
+﻿<#
     Escort automation (#93): a live escort quest switches the bot out of
     exploring and into keeping up with, and guarding, the escortee.
 
@@ -313,25 +313,31 @@ es.b.start()
 if not es.b.activation then return "SETUP the start left no activation" end
 -- Stage the counter at the limit, with the escortee recorded where it now
 -- stands, so the next decision is the one that must give up.
-es.b.activation.escortholds = e.HOLD_LIMIT
-es.b.activation.escortx, es.b.activation.escorty = npc.x, npc.y
+-- #140 moved this counter off the activation and onto the LEVEL. This block
+-- went on staging activation.escortholds, a field the product no longer reads,
+-- so the bound it exists to test was never reached and the three checks below
+-- had been failing against a message that no longer exists either.
+local anchor = es.b.levelState("escortanchor")
+anchor.x, anchor.y, anchor.holds = npc.x, npc.y, e.HOLD_LIMIT
 es.b.active = false; es.b.last_reason = nil
 while #game.dialogs > 0 do game:unregisterDialog(game.dialogs[#game.dialogs]) end
 es.b.query()
-local out = ("limit=%d holds=%s state=%s reason=%s"):format(
-  e.HOLD_LIMIT, tostring(es.b.activation and es.b.activation.escortholds),
+local gaveup = es.b.levelState("escortgaveup")[tostring(npc.uid)]
+local out = ("limit=%d holds=%s gaveup=%s state=%s reason=%s"):format(
+  e.HOLD_LIMIT, tostring(anchor.holds), tostring(gaveup),
   es.b.inspect():match("state=(%S+)"), tostring(es.b.last_reason))
 if es.b.active then es.b.stop("measured") end
 return out
 '@ 120
     Write-Host "  $($bound.Result)"
     if ($bound.Result -match '^SETUP') { Inconclusive $bound.Result }
-    $null = Assert-Result $bound 'past the limit it stops waiting and hands back' -Match 'has not moved for \d+ turns'
+    $null = Assert-Result $bound 'past the limit it stops waiting and hands back' -Match 'has not got anywhere in \d+ turns'
     $null = Assert-Result $bound 'and names the escortee' -Match 'reason=.*: \S'
-    # holds=nil, not holds=0: stop() clears the activation, so the counter goes
-    # with it and a resume starts from a fresh budget either way. Asserting the
-    # activation is gone is the invariant that actually holds.
-    $null = Assert-Result $bound 'the activation is cleared, so a resume starts fresh' -Match 'holds=nil'
+    # #140 is explicit that the anchor is NOT reset when the limit is hit -- the
+    # only thing that should start escorting again is the escortee actually
+    # getting somewhere. So the invariant is not a cleared counter; it is that
+    # this escortee is marked given-up for the level.
+    $null = Assert-Result $bound 'the escort is dropped for this level' -Match 'gaveup=true'
 
     # ----- F: IGNORE --------------------------------------------------------
     Write-Host ''
