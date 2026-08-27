@@ -1161,6 +1161,7 @@ local function progressExit()
     end
     return bx, by
 end
+bot.progressExit = progressExit
 
 --- Has auto-explore run out of anything but the exit? Read from the engine
 --- rather than by running it: explore targets an exit only once no unseen

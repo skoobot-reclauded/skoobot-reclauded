@@ -63,6 +63,16 @@ function Check($ok, $what) {
     if ($ok) { Write-Host "  PASS  $what" } else { Write-Host "  FAIL  $what"; $script:Fail += $what }
 }
 
+# A bridge call that raised comes back as the Lua error TEXT, and error text
+# equals none of the things these assertions compare against -- so every
+# `-ne` check on it passes and the scenario reports green while measuring
+# nothing. Assert the probe worked before believing what it said.
+function Ok($result, $what) {
+    $bad = ("$result" -match 'attempt to |bridge:cmd|^ERR |stack traceback')
+    if ($bad) { Write-Host "  FAIL  $what -- the probe errored: $result"; $script:Fail += "$what (probe errored)" }
+    return (-not $bad)
+}
+
 Write-Host ''
 Write-Host '[exit] heading for a level change that was not refused (#165)'
 
@@ -201,7 +211,7 @@ return ("unfinished_seek=%s"):format(seek)
     # ---- B: it can find an exit --------------------------------------------
     $b = (Invoke-Bridge -TimeoutSec 60 -Lua 'return ex.progress()').Result
     Write-Host "  nearest  $b"
-    Check ($b -ne 'none') 'B: a level change is found'
+    Check ((Ok $b 'B: progressExit answers') -and $b -ne 'none') 'B: a level change is found'
 
     # ---- C: refusing the one underfoot takes it out of the answer ----------
     $here = (Invoke-Bridge -TimeoutSec 60 -Lua @'
@@ -211,9 +221,11 @@ return ("%d,%d|%s|%d"):format(p.x, p.y, ex.progress(), ex.refusedCount())
 '@).Result
     $parts = $here -split '\|'
     Write-Host "  refused  at $($parts[0]); nearest now $($parts[1]); count $($parts[2])"
-    Check ($parts[2] -eq '1')            'C: the refusal is remembered'
-    Check ($parts[1] -ne $parts[0])      'C: the refused grid is no longer the answer'
-    Check ($parts[1] -ne 'none')         'C: another level change is named instead'
+    if (Ok $here 'C: the refusal probe runs') {
+        Check ($parts[2] -eq '1')            'C: the refusal is remembered'
+        Check ($parts[1] -ne $parts[0])      'C: the refused grid is no longer the answer'
+        Check ($parts[1] -ne 'none')         'C: another level change is named instead'
+    }
 
     # ---- D: it takes a real step, towards that exit -------------------------
     $d = (Invoke-Bridge -TimeoutSec 120 -Lua @'
@@ -228,6 +240,7 @@ return ("took=%s moved=%s before=%d after=%d"):format(
   tostring(took), tostring(p.x ~= x0 or p.y ~= y0), before, after)
 '@).Result
     Write-Host "  step     $d"
+    $null = Ok $d 'D: the step probe runs'
     Check ($d -match 'took=true')  'D: the search takes a step'
     Check ($d -match 'moved=true') 'D: the character actually moved'
     if ($d -match 'before=(\d+) after=(\d+)') {
@@ -241,6 +254,7 @@ return ("took=%s moved=%s before=%d after=%d"):format(
     $e2 = (Invoke-Bridge -TimeoutSec 60 -Lua 'return tostring(skoobot_reclauded.seekProgressExit())').Result
     $e3 = (Invoke-Bridge -TimeoutSec 60 -Lua 'return ex.progress()').Result
     Write-Host "  exhaust  $e1; seek=$e2; nearest=$e3"
+    $null = Ok $e3 'E: the exhaustion probe runs'
     Check ($e3 -eq 'none')  'E: with every exit refused, none is offered'
     Check ($e2 -eq 'false') 'E: the search declines, so it cannot become the new loop'
 
