@@ -686,6 +686,8 @@ end
 local STEPOFF_TRIES = 3
 -- #165: a backstop on stepping towards a level change, per level.
 local SEEKEXIT_STEPS = 400
+-- #156: attempts at one level change before it counts as refused.
+local STAIRS_TRIES = 3
 
 --- Counters that survive the bot being restarted (#140).
 ---
@@ -2011,6 +2013,13 @@ end
 --- describes the old one, and #114 is what calling a re-entrant engine routine
 --- from inside act() costs. Resuming on the new level is the player's toggle
 --- for now; see #86 before changing that.
+--- Which level we are on, for telling a change that happened from one that
+--- did not. See #156.
+local function levelKey()
+    return tostring(game.zone and game.zone.short_name)
+        .. ":" .. tostring(game.level and game.level.level)
+end
+
 local function takeLevelChange(what)
     if bot.do_nothing then
         game.log("[SkooBot] AI would take " .. what)
@@ -2018,7 +2027,23 @@ local function takeLevelChange(what)
     end
     chan.info("[Action] Taking %s", what)
     bot.actions = bot.actions + 1
+    local before = levelKey()
     game.key:triggerVirtual("CHANGE_LEVEL")
+    -- #156: Game.lua's CHANGE_LEVEL has five paths that do nothing but write to
+    -- the log -- no energy, no change_level on the grid, never_move, a
+    -- detrimental effect barring the world map, and a change_level_check that
+    -- says no. The bot reported "took the stairs" down all of them, fifteen
+    -- times in one run. changeLevel is synchronous, so the level itself says.
+    if levelKey() == before then
+        local p = game.player
+        local tries = levelBump(("stairs:%d,%d"):format(p.x, p.y))
+        if tries > STAIRS_TRIES then
+            markRefusedExit()
+            return stop(notice.HANDED_BACK,
+                ("%s did not take, %d times -- looking for another way on"):format(what, tries))
+        end
+        return stop(notice.HANDED_BACK, what .. " did not take")
+    end
     return stop(notice.HANDED_BACK, "took " .. what)
 end
 
