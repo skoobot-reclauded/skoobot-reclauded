@@ -314,11 +314,17 @@ Write-Host "[soak] descend=$(if ($NoDescend) { 'off' } else { "after $DescendAft
 if (-not $NoRunLease) {
     $null = Wait-HarnessLease -TimeoutSec ($LeaseWaitMin * 60) -Label 'soak'
     Assert-JunctionsOwned -GameDir $script:GameDir
-    # #175: what is about to be measured, resolved from the junction.
-    $script:BuildStamp = Get-BuildStamp -GameDir $script:GameDir
-    Write-Host "[soak] $(Format-BuildStamp $script:BuildStamp)"
     Write-Host "[soak] holding the game lease for this run (host pid $PID)"
 }
+
+# #175: what is about to be measured, resolved from the junction. OUTSIDE the
+# lease block: sweep-classes passes -NoRunLease because the sweep holds the
+# lease itself, so a stamp taken in there is absent from every sweep -- the one
+# place it is actually needed. It was, until this line moved: the first version
+# was verified against a standalone soak and recorded `build: null` for all 29
+# classes of sweep-15.
+$script:BuildStamp = Get-BuildStamp -GameDir $script:GameDir
+Write-Host "[soak] $(Format-BuildStamp $script:BuildStamp)"
 
 # ---------------------------------------------------------------------------
 # The record. Everything below is what the JSON summary is made of.
