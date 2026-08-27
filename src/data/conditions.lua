@@ -210,6 +210,14 @@ M.LIST = {
     { code = "DIALOG_LORE", label = "A lore dialog opened", default = "IGNORE",
       category = "dialog", site = M.SITE_DIALOG, blocks = {} },
 
+    -- A quest notice is the same kind of thing as a lore popup: news, not a
+    -- decision, and the quest is already in the log by the time it shows. It
+    -- was the third most common hand-back of the sweep-9 roster, 36 times
+    -- across 23 classes. Its own code, so a player can still hand back on
+    -- quests while ignoring lore. See #166.
+    { code = "DIALOG_QUEST", label = "A quest dialog opened", default = "IGNORE",
+      category = "dialog", site = M.SITE_DIALOG, blocks = {} },
+
     -- Hands back (not a stop) while exploring, once per chest: the player
     -- decides whether to open it, since they can be guarded (T-013). Walking
     -- TO the chest is #11's, deliberately not here.

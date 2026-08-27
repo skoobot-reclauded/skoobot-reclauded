@@ -63,6 +63,7 @@ local V1 = {
   { "LIFE_BIGLOSS",          "Big life loss in one turn",                  "WARN"   },
   { "LIFE_LOWLIFE",          "Low life with enemies in view",              "STOP"   },
   { "DIALOG_LORE",           "A lore dialog opened",                       "IGNORE" },
+  { "DIALOG_QUEST",          "A quest dialog opened",                      "IGNORE" },
   { "TERRAIN_GLOWING_CHEST", "Glowing chest in view",                      "WARN"   },
   { "ESCORT_ACTIVE",         "Escorting someone",                          "WARN"   },
   { "SCOUTER_ENEMYCOUNT",    "Too many enemies in view",                   "STOP"   },
@@ -136,6 +137,16 @@ describe("data/conditions.lua", function()
       local d = C.find("DIALOG_LORE")
       assert.is_nil(d.detect)
       assert.equals(C.SITE_DIALOG, d.site)
+    end)
+
+    -- #166: same shape as the lore entry, and separately settable, so ignoring
+    -- quest notices does not also silence lore finds.
+    it("DIALOG_QUEST is a dialog-site entry with its own policy", function()
+      local d = C.find("DIALOG_QUEST")
+      assert.is_nil(d.detect)
+      assert.equals(C.SITE_DIALOG, d.site)
+      assert.equals("IGNORE", d.default)
+      assert.are_not.equal(C.find("DIALOG_LORE").code, d.code)
     end)
 
     -- HANDED_BACK is for the entries that are news rather than danger: the

@@ -2351,13 +2351,18 @@ function skoobot_act(noAction)
         -- #142: named, never raw `title`. Untitled dialogs are common and a
         -- nil one would raise here rather than simply not matching.
         local label = bot.dialogLabel(top)
-        if string.match(label, "Lore found:") and top.key.virtuals.EXIT then
-            -- a lore dialog: the player may have configured it to be ignored
-            if tryStop(game.player, "DIALOG_LORE", "a dialog is open: " .. label, notice.HANDED_BACK) then
+        -- #166: a popup that only announces something is not a decision, and
+        -- each kind carries its own policy so one can be ignored and the other
+        -- not. Anything else is still the player's.
+        local code = (string.match(label, "Lore found:") and "DIALOG_LORE")
+            or (label == "QuestPopup" and "DIALOG_QUEST")
+            or nil
+        if code and top.key and top.key.virtuals and top.key.virtuals.EXIT then
+            if tryStop(game.player, code, "a dialog is open: " .. label, notice.HANDED_BACK) then
                 chan.debug("[Dialog] stopped for the dialog: %s", label)
                 return
             else
-                chan.info("[Dialog] closing an ignored lore dialog: %s", label)
+                chan.info("[Dialog] closing an ignored dialog: %s", label)
                 top.key.virtuals.EXIT()
             end
         else
