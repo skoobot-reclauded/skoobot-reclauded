@@ -1,4 +1,4 @@
-<#
+﻿<#
     Read a finished class sweep and say what went wrong (#61, #123).
 
     A sweep leaves 30 soak summaries, up to 90 screenshots and a table of
@@ -161,6 +161,63 @@ if ($suspects.Count -eq 0) {
     }
 }
 Say ''
+
+# ----------------------------------------------------------------- escorts ---
+# #132 built the instrument and closed without anything reading it. An escortee
+# that dies is the clearest thing the sweep measures about protecting someone,
+# and the killers say which way it failed: beaten, or never looked at all
+# (#143's third lead). See #168.
+$escGranted = 0; $escDone = 0; $escFailed = 0; $escSelf = 0
+$byKind  = @{}
+$killers = @{}
+foreach ($r in $withSoak) {
+    $e = $r.Soak.escorts
+    if (-not $e) { continue }
+    $escGranted += [int]$e.granted; $escDone += [int]$e.done
+    $escFailed  += [int]$e.failed;  $escSelf += [int]$e.selfkills
+    foreach ($row in @($e.rows)) {
+        $k = "$($row.kind)"
+        if (-not $byKind.ContainsKey($k)) { $byKind[$k] = @{ n = 0; done = 0 } }
+        $byKind[$k].n++
+        if ($row.status -eq 'DONE') { $byKind[$k].done++ }
+        if ($row.status -eq 'FAILED') {
+            # The field is `killer`. The quest's own name for it is
+            # `killing_npc`, which sk.escorts does not write -- reading that one
+            # returns null on every row and reads exactly like an instrument
+            # that is not recording.
+            $who = if ("$($row.killer)" -ne '') { "$($row.killer)" } else { '(unrecorded)' }
+            if ("$($row.selfkill)" -eq 'True' -or "$($row.selfkill)" -eq 'true') { $who = "$who -- self-inflicted" }
+            if (-not $killers.ContainsKey($who)) { $killers[$who] = 0 }
+            $killers[$who]++
+        }
+    }
+}
+if ($escGranted -gt 0) {
+    Say '## Escorts'
+    Say ''
+    $rate = [math]::Round(100.0 * $escDone / $escGranted)
+    $selfShare = if ($escFailed -gt 0) { [math]::Round(100.0 * $escSelf / $escFailed) } else { 0 }
+    Say "**$escDone of $escGranted survived ($rate%).** $escFailed failed, $escSelf of those self-inflicted ($selfShare%)."
+    Say ''
+    if ($byKind.Count -gt 0) {
+        Say '| Escortee kind | Survived |'
+        Say '|---|---|'
+        foreach ($k in ($byKind.Keys | Sort-Object { $byKind[$_].n } -Descending)) {
+            Say "| $k | $($byKind[$k].done)/$($byKind[$k].n) |"
+        }
+        Say ''
+    }
+    if ($killers.Count -gt 0) {
+        Say 'What killed the ones that died -- small trash here means the guard never saw it, not that it lost the fight:'
+        Say ''
+        Say '| Killer | Escorts |'
+        Say '|---|---|'
+        foreach ($k in ($killers.Keys | Sort-Object { $killers[$_] } -Descending)) {
+            Say "| $k | $($killers[$k]) |"
+        }
+        Say ''
+    }
+}
 
 # ------------------------------------------------------------------ deaths ---
 # #135's payoff: a death with a warning raised is the product judging the fight
