@@ -1257,6 +1257,13 @@ local function seekExploreStall()
 end
 bot.seekExploreStall = seekExploreStall
 
+--- Read-only: has running-explore stopped being a way to make progress here?
+--- Exposed so a probe can read the decision without knowing where the counter
+--- lives or what the limit is, the way bot.stateName is (#153, #164).
+function bot.exploreStalled()
+    return explorestall.stalled(levelState("explorestall"))
+end
+
 --- A name for a dialog that is worth reading in a stop reason.
 ---
 --- Not every dialog has a title -- QuestPopup and Chat do not -- and the
