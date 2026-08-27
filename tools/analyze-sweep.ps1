@@ -269,6 +269,52 @@ if ($deathRows.Count -gt 0) {
     Say ''
 }
 
+# ------------------------------------------------------- run-stop disagreement
+# #153/#164. The engine aborts a run for a hostile; the bot then picks a branch
+# from its own view. Every run-abort where the engine could see something and
+# the bot stayed in EXPLORE is one turn of the live-lock that cost Shadowblade
+# a whole run -- 21,368 turns against a jelly that could never reach it.
+$rsRows = @()
+foreach ($r in $rows) {
+    $dp = Join-Path $Dir ($r.File + '.soak.dossier.json')
+    if (-not (Test-Path $dp)) { $dp = Join-Path $Dir ($r.File + '.dossier.json') }
+    if (-not (Test-Path $dp)) { continue }
+    try { $d = Get-Content $dp -Raw | ConvertFrom-Json } catch { continue }
+    $tot = 0; $dis = 0; $who = @{}
+    foreach ($rec in @($d.records)) {
+        if ($rec.moment -ne 'run_stop') { continue }
+        $tot++
+        if ([int]$rec.engine_saw -gt 0 -and "$($rec.bot_state)" -eq 'SAI_STATE_EXPLORE') {
+            $dis++
+            foreach ($n in @($rec.names)) {
+                if (-not $who.ContainsKey("$n")) { $who["$n"] = 0 }
+                $who["$n"]++
+            }
+        }
+    }
+    if ($tot -gt 0) {
+        $top = ($who.Keys | Sort-Object { $who[$_] } -Descending | Select-Object -First 3 |
+                ForEach-Object { "$_ x$($who[$_])" }) -join ', '
+        $rsRows += [pscustomobject]@{ Class = $r.Row.Class; Aborts = $tot; Disagreed = $dis; Blamed = $top }
+    }
+}
+if ($rsRows.Count -gt 0) {
+    Say '## Run-aborts where the bot did not act on what the engine saw'
+    Say ''
+    Say 'The engine refuses to keep running while `spotHostiles` returns anything. If the bot then stays in EXPLORE, it calls auto-explore again and the pair cycles -- no hand-back, no damage, and the clock races. **Disagreed** counts those.'
+    Say ''
+    Say '| Class | Run-aborts for a hostile | Bot stayed in EXPLORE | Most often |'
+    Say '|---|---|---|---|'
+    foreach ($x in ($rsRows | Sort-Object Disagreed -Descending)) {
+        Say "| $($x.Class) | $($x.Aborts) | $($x.Disagreed) | $($x.Blamed) |"
+    }
+    Say ''
+    $totDis = ($rsRows | Measure-Object Disagreed -Sum).Sum
+    $totAll = ($rsRows | Measure-Object Aborts -Sum).Sum
+    Say "**$totDis of $totAll run-aborts left the bot exploring.** Anything above a handful on one class is #164's live-lock; a flat zero says the two views agree and #153 is not what strands it."
+    Say ''
+}
+
 # ------------------------------------------------------------------ evidence --
 $shots = @(Get-ChildItem (Join-Path $Dir '*.timeout-*.png') -ErrorAction SilentlyContinue)
 $doss  = @(Get-ChildItem (Join-Path $Dir '*.dossier.json') -ErrorAction SilentlyContinue)

@@ -535,6 +535,9 @@ local function aiStateString()
     end
     return "Unknown State"
 end
+-- Read-only, for anything outside that needs to say which branch the bot is in
+-- without knowing the numbers. #153's diagnostic reads it.
+bot.stateName = aiStateString
 
 -------------------------------------------------------------------------------
 -- Actions (v1 SAI_*). In query mode they say what they would do instead.

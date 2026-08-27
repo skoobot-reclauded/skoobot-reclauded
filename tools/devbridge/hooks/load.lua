@@ -513,6 +513,39 @@ local function dossierSightings(p)
 	end
 end
 
+--- #153/#164: the engine aborts a run for a hostile, the bot then picks its
+--- own branch. When those two disagree the bot explores again, the engine
+--- aborts again, and the pair live-locks with no hand-back and no damage --
+--- Shadowblade burned 21,368 turns that way against a black jelly that could
+--- never move or reach it.
+---
+--- runStop is the one moment both views exist at once, so record them there:
+--- the engine's own exported spotHostiles (the same one runCheck consults) and
+--- the branch the bot is sitting in. A run of these records showing hostiles
+--- in view while the state stays EXPLORE is the disagreement, caught rather
+--- than argued.
+local function dossierRunStop(p, msg)
+	local reason = tostring(msg or "")
+	if not reason:find("hostile spotted") then return end
+	local seen = (p.spotHostiles and p:spotHostiles(true)) or {}
+	local names = {}
+	for i, h in ipairs(seen) do
+		if i > 4 then break end
+		names[#names + 1] = tostring(h.name or "?")
+	end
+	local b = rawget(_G, "skoobot_reclauded")
+	bridge.dossier.records[#bridge.dossier.records + 1] = {
+		moment     = "run_stop",
+		turn       = game and game.turn,
+		reason     = reason,
+		engine_saw = #seen,
+		names      = names,
+		bot_state  = (b and b.stateName and b.stateName()) or nil,
+		bot_active = (b and b.active) and true or false,
+		x = p.x, y = p.y,
+	}
+end
+
 function bridge.dossierOn()
 	local d = bridge.dossier
 	if d.on then return "already on" end
@@ -592,6 +625,20 @@ function bridge.dossierOn()
 				if not ok then emit("ERR dossier sighting " .. tostring(err)) end
 			end
 			return r
+		end
+	end
+
+	-- #153: the run-abort, which is where the engine's view and the bot's
+	-- disagree. Harness-only and dossier-gated, like everything else here.
+	if not Player.__skoobot_dossier_runstop then
+		Player.__skoobot_dossier_runstop = true
+		local oldrunstop = Player.runStop
+		function Player:runStop(msg)
+			if bridge.dossier.on and self == (game and game.player) then
+				local ok, err = pcall(dossierRunStop, self, msg)
+				if not ok then emit("ERR dossier runstop " .. tostring(err)) end
+			end
+			return oldrunstop(self, msg)
 		end
 	end
 
