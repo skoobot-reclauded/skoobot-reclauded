@@ -2019,6 +2019,13 @@ local function shouldEscort(ctx, hostiles)
     return true
 end
 
+--- Which level we are on, for telling a change that happened from one that
+--- did not. See #156.
+local function levelKey()
+    return tostring(game.zone and game.zone.short_name)
+        .. ":" .. tostring(game.level and game.level.level)
+end
+
 --- Take the level change underfoot (#86).
 ---
 --- The game's own CHANGE_LEVEL handler (mod/class/Game.lua), so every guard it
@@ -2031,13 +2038,6 @@ end
 --- describes the old one, and #114 is what calling a re-entrant engine routine
 --- from inside act() costs. Resuming on the new level is the player's toggle
 --- for now; see #86 before changing that.
---- Which level we are on, for telling a change that happened from one that
---- did not. See #156.
-local function levelKey()
-    return tostring(game.zone and game.zone.short_name)
-        .. ":" .. tostring(game.level and game.level.level)
-end
-
 local function takeLevelChange(what)
     if bot.do_nothing then
         game.log("[SkooBot] AI would take " .. what)
