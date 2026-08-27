@@ -71,14 +71,25 @@ describe("the superload surface (#14)", function()
     assert.is_truthy(src:match("\nreturn _M%s*$"), "the file does not end with `return _M`")
   end)
 
-  -- ONE wrapper since #76. postUseTalent existed only to see a talent that
-  -- refused -- the one case the engine's Actor:postUseTalent hook cannot see,
-  -- because it fires after `if not ret then return end` -- and the same fact
-  -- is in useTalent's `false` return, which SAI_useTalent already had. `act`
-  -- has no hook equivalent in 1.7.6 and stays.
+  -- ONE wrapper from #76 until #153; TWO now. postUseTalent existed only to
+  -- see a talent that refused -- the one case the engine's Actor:postUseTalent
+  -- hook cannot see, because it fires after `if not ret then return end` --
+  -- and the same fact is in useTalent's `false` return, which SAI_useTalent
+  -- already had. `act` has no hook equivalent in 1.7.6 and stays.
   --
   -- Growing this list back is a decision, and this is where it is made.
-  it("wraps exactly act, on one line", function()
+  --
+  -- `runStopped` was added for #153, against api-surface-1.7.6.md's rule: is
+  -- there a hook? No -- the only triggerHook in mod/class/Player.lua is
+  -- Player:onEnterLevel:generateEscort -- so keep the wrapper, say why in the
+  -- file, and make its body one delegating line. What it measures cannot be
+  -- taken anywhere else: the engine's runCheck reads a seens map that
+  -- accumulates over the run path, and runStopped's own body is what cleans
+  -- it, so the disagreement only exists as the difference between the same
+  -- function called either side of that call. The alternative was a counter
+  -- over "explore made no progress", which cannot tell #153's disagreement
+  -- from any other explore failure and would mask the next one.
+  it("wraps exactly act and runStopped, each on one line", function()
     local names, bodies = {}, {}
     for _, line in ipairs(lines) do
       local name = line:match("^function _M[:%.]([%w_]+)")
@@ -87,12 +98,20 @@ describe("the superload surface (#14)", function()
         bodies[name] = line
       end
     end
-    assert.are.same({ "act" }, names)
+    assert.are.same({ "act", "runStopped" }, names)
     for name, line in pairs(bodies) do
       assert.is_truthy(line:match("%send$"),
         "the " .. name .. " wrapper is no longer one line: " .. line)
-      assert.is_truthy(line:match("old_" .. name .. "%(self, "),
-        "the " .. name .. " wrapper no longer calls the original: " .. line)
+      -- The original must still be reached. Asserted as a reference rather
+      -- than as `old_x(self, ` because that shape was `act`'s: it calls the
+      -- original inline. `runStopped` cannot -- #153's measurement brackets
+      -- that call, reading spotHostiles before it and after it -- so it hands
+      -- the original to its helper instead. Both still delegate; only one can
+      -- do it inline.
+      assert.is_truthy(line:match("%f[%w_]old_" .. name .. "%f[^%w_]"),
+        "the " .. name .. " wrapper no longer reaches the original: " .. line)
+      assert.is_truthy(src:match("local%s+old_" .. name .. "%s*=%s*_M%." .. name),
+        "old_" .. name .. " is not taken from the class table")
     end
   end)
 

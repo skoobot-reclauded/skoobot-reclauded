@@ -44,6 +44,7 @@ local cfgfmt = dofile("/data-skoobot_reclauded/cfg.lua")
 local lifem = dofile("/data-skoobot_reclauded/life.lua")
 local resources = dofile("/data-skoobot_reclauded/resources.lua")
 local escortm = dofile("/data-skoobot_reclauded/escort.lua")
+local explorestall = dofile("/data-skoobot_reclauded/explorestall.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -1198,6 +1199,63 @@ local function seekProgressExit()
     return SAI_movePlayer(path[1].x, path[1].y) and true or false
 end
 bot.seekProgressExit = seekProgressExit
+
+--- Count one run-abort against the level, for #153's disagreement.
+---
+--- The two reads are the SAME function either side of runStopped's own
+--- recompute, and that is the only reason the difference is visible: the
+--- engine's runCheck consults a seens map that ACCUMULATES over the run path
+--- -- Map:cleanFOV is gated on map.clean_fov (engine/Map.lua:460), which only
+--- a drawn frame arms (:620), and act()'s run loop draws none -- while
+--- runStopped arms it and recomputes (T/mod/class/Player.lua:1313). So `wide`
+--- is the set that aborted the run and `narrow` is the set the bot's next
+--- decision will see. Neither is stale; the engine's is a superset.
+---
+--- Measured rather than read off the reason string, which works today and
+--- breaks on a translated game -- the reason is built with tformat and its
+--- " - offscreen" suffix is itself translatable.
+local function noteRunStop(self, old, ...)
+    local spot = self.spotHostiles
+    if self ~= game.player or not spot then return old(self, ...) end
+    local wide = #spot(self, true)
+    local ret = old(self, ...)
+    explorestall.note(levelState("explorestall"), wide, #spot(self, true))
+    return ret
+end
+
+--- Head for the way off the level once running-explore has stopped working.
+---
+--- #153/#164: the engine aborts the run for a hostile only its accumulated
+--- view can see, so re-issuing explore aborts identically and the pair
+--- live-locks -- Shadowblade burned 21,368 turns that way with no hand-back,
+--- no damage, and #13's liveness invariant satisfied throughout. The bot's own
+--- view is the correct one, so the answer is not to adopt the engine's but to
+--- stop asking a question whose answer cannot change.
+---
+--- Walks on rather than handing back: the character is unhurt and the level is
+--- genuinely unfinished, so a way off it is progress. Same route the vault
+--- case takes (#137). With no exit found there is nothing left to try, and a
+--- hand-back is the honest end -- today that case is a silent live-lock that
+--- only #145's IDLE detector ever caught.
+local function seekExploreStall()
+    if not explorestall.stalled(levelState("explorestall")) then return false end
+    local p = game.player
+    local x, y = progressExit()
+    if not x then
+        stop(notice.HANDED_BACK, "exploring keeps stopping for a hostile that is not in view, "
+             .. "and no way off this level has been found")
+        return true
+    end
+    if x == p.x and y == p.y then return false end
+    if levelBump("stallexit") > SEEKEXIT_STEPS then return false end
+    local path = Astar.new(game.level.map, p):calc(p.x, p.y, x, y, nil, nil,
+        function(ax, ay) return not needsConsent(ax, ay) end)
+    if not path or #path == 0 then return false end
+    chan.info("[Action] Exploring keeps stopping for a hostile that is not in view; "
+              .. "heading for the level change at %d,%d.", x, y)
+    return SAI_movePlayer(path[1].x, path[1].y) and true or false
+end
+bot.seekExploreStall = seekExploreStall
 
 --- A name for a dialog that is worth reading in a stop reason.
 ---
@@ -2786,7 +2844,7 @@ function skoobot_act(noAction)
         local caps = ctx.caps
         if caps.move then
             stop(notice.STOPPED, "cannot move (" .. conditions.blockedText(caps.move) .. ")")
-        elseif not bot.seekProgressExit() then
+        elseif not bot.seekProgressExit() and not bot.seekExploreStall() then
             SAI_beginExplore()
         end
         return
@@ -3581,11 +3639,23 @@ end
 -- addon's superload of a class gets the previous one's table, so this wraps
 -- whatever the original SkooBot wrapped when both are installed, either order.
 --
--- ONE wrapper (#76). `postUseTalent` was the second, and only to see a talent
--- that REFUSED -- which is exactly the case its hook does not fire for. But
--- useTalent returns false for it, so SAI_useTalent reads that instead. `act`
--- stays because it has no hook equivalent (docs/api-surface-1.7.6.md).
+-- TWO wrappers, and api-surface-1.7.6.md's rule is why each one is here: is
+-- there a hook? No -> keep the wrapper, say why, and make its body one
+-- delegating line.
+--
+-- `act` (#76) has no hook equivalent. `postUseTalent` was briefly a third, and
+-- only to see a talent that REFUSED -- exactly the case its hook does not fire
+-- for -- but useTalent returns false for it, so SAI_useTalent reads that
+-- instead.
+--
+-- `runStopped` (#153) has no hook either: the only triggerHook in
+-- mod/class/Player.lua is Player:onEnterLevel:generateEscort. And the
+-- measurement it makes cannot be taken anywhere else, because it is the
+-- difference between the same function called either side of that call.
 local old_act = _M.act
 function _M:act(...) return afterAct(self, old_act(self, ...)) end
+
+local old_runStopped = _M.runStopped
+function _M:runStopped(...) return noteRunStop(self, old_runStopped, ...) end
 
 return _M
