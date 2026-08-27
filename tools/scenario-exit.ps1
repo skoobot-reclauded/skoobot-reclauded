@@ -1,4 +1,4 @@
-<#
+﻿<#
     Heading for a level change that was not refused (#165).
 
     Doomed spent the last 2,000 turns of sweep 9 walking between the world-map
@@ -8,8 +8,15 @@
     until the clock runs out. It was the only run of 29 to reach `explored=true`
     and it never left norgos-lair:1.
 
-    The fix remembers a refused level change per level and, while any is
-    remembered, heads for the nearest one that is not.
+    The fix remembers a refused level change per level and, once the level is
+    FINISHED, heads for the nearest one that is not.
+
+    "Finished" is the gate and it is not decoration. The bot turns down a way
+    back up 28 times in a 29-class sweep; without the gate the first of those
+    would end exploring for the rest of the level and walk the character
+    straight down the nearest stairs. It is read from the engine the way the
+    harness reads it -- running_prev.explore == "exit", which auto-explore sets
+    only when nothing unseen is reachable (PlayerExplore.lua:2299).
 
     WHY IT TERMINATES, which is the part worth testing rather than asserting:
     the refused set only ever grows, so once every known exit has been turned
@@ -25,6 +32,8 @@
     What is driven, on the fixture:
       A. with nothing refused, seekProgressExit() declines -- an ordinary run
          is untouched by this code path;
+      A2. THE GATE: with something refused but the level unfinished, it still
+         declines, so a turned-down staircase never cuts exploring short;
       B. progressExit() finds a level change at all;
       C. THE FIX: after the grid underfoot is refused, progressExit() stops
          returning it and names the other one;
@@ -107,6 +116,16 @@ function ex.stage()
   return ("staged=%d,%d dist=%d player=%d,%d"):format(best.x, best.y, bd, p.x, p.y)
 end
 
+--- The engine's "nothing left but the exit" state, which is what gates the
+--- search. Set exactly as PlayerExplore does, so the gate is exercised rather
+--- than bypassed.
+function ex.finish(on)
+  local p = game.player
+  if on then p.running_prev = { explore = "exit", levelstring = tostring(game.level) }
+  else p.running_prev = nil end
+  return tostring(on)
+end
+
 function ex.restore()
   local b, map = _G.__ex, game.level.map
   if not b then return "nothing staged" end
@@ -161,8 +180,23 @@ return "installed"
     }
 
     # ---- A: nothing refused, so the path is inert ---------------------------
+    $null = Invoke-Bridge -TimeoutSec 60 -Lua 'return ex.finish(true)'
     $a = (Invoke-Bridge -TimeoutSec 60 -Lua 'return tostring(skoobot_reclauded.seekProgressExit())').Result
     Check ($a -eq 'false') 'A: with nothing refused, the search declines and explore is untouched'
+
+    # ---- A2: the gate. Refusing something on a level that is NOT finished
+    # must not end exploring -- the bot turns down a way back up 28 times in a
+    # 29-class sweep, and each of those would otherwise beeline for the stairs.
+    $a2 = (Invoke-Bridge -TimeoutSec 60 -Lua @'
+skoobot_reclauded.markRefusedExit()
+local off = ex.finish(false)
+local seek = tostring(skoobot_reclauded.seekProgressExit())
+skoobot_reclauded.levelState("refusedexit")[("%d,%d"):format(game.player.x, game.player.y)] = nil
+ex.finish(true)
+return ("unfinished_seek=%s"):format(seek)
+'@).Result
+    Write-Host "  gate     $a2"
+    Check ($a2 -match 'unfinished_seek=false') 'A2: on an unfinished level a refusal does not stop exploring'
 
     # ---- B: it can find an exit --------------------------------------------
     $b = (Invoke-Bridge -TimeoutSec 60 -Lua 'return ex.progress()').Result

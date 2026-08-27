@@ -1159,14 +1159,29 @@ local function progressExit()
     return bx, by
 end
 
+--- Has auto-explore run out of anything but the exit? Read from the engine
+--- rather than by running it: explore targets an exit only once no unseen
+--- tile, item or door is reachable (PlayerExplore.lua:2299), and running_prev
+--- holds that target until the level changes. Same predicate the harness uses.
+local function levelIsExplored()
+    local r = game.player and game.player.running_prev
+    return (r and r.explore == "exit" and r.levelstring == tostring(game.level)) and true or false
+end
+
 --- Step towards a level change that has not been refused; true when a step was
 --- taken, so the explore branch knows not to explore. See #165.
+---
+--- Gated on the level being FINISHED, not merely on something having been
+--- refused. The bot turns down a way back up 28 times in a 29-class sweep, and
+--- without this gate the first of those would end exploring for the rest of the
+--- level and send the character straight down the nearest stairs.
 ---
 --- It terminates without needing a counter: the refused set only grows, so once
 --- every known exit is in it this returns false and explore hands back as it
 --- did before. SEEKEXIT_STEPS is the backstop for a path that never arrives.
 local function seekProgressExit()
     if not next(levelState("refusedexit")) then return false end
+    if not levelIsExplored() then return false end
     local p = game.player
     local x, y = progressExit()
     if not x or (x == p.x and y == p.y) then return false end
