@@ -2027,14 +2027,16 @@ local function takeLevelChange(what)
     end
     chan.info("[Action] Taking %s", what)
     bot.actions = bot.actions + 1
-    local before = levelKey()
+    -- Both, because a temporary-zone shift back can land on the same
+    -- zone:level while genuinely being a different level object.
+    local beforeLevel, beforeKey = game.level, levelKey()
     game.key:triggerVirtual("CHANGE_LEVEL")
     -- #156: Game.lua's CHANGE_LEVEL has five paths that do nothing but write to
     -- the log -- no energy, no change_level on the grid, never_move, a
     -- detrimental effect barring the world map, and a change_level_check that
     -- says no. The bot reported "took the stairs" down all of them, fifteen
     -- times in one run. changeLevel is synchronous, so the level itself says.
-    if levelKey() == before then
+    if game.level == beforeLevel and levelKey() == beforeKey then
         local p = game.player
         local tries = levelBump(("stairs:%d,%d"):format(p.x, p.y))
         if tries > STAIRS_TRIES then
