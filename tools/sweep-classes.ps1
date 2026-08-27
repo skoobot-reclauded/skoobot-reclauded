@@ -1,4 +1,4 @@
-<#
+﻿<#
     The class baseline sweep (#123): birth one character of every measurable
     class, run each for a bounded time, and report whether it cleared its
     first floor.
@@ -497,6 +497,12 @@ $pct     = $(if ($ran -gt 0) { [math]::Round(100 * $cleared / $ran) } else { 0 }
 
 $md = New-Object System.Collections.Generic.List[string]
 $md.Add("# Class baseline sweep -- $Race, $Minutes min per class")
+$md.Add('')
+# #175: which code this measured. Resolved from the junction the game loads,
+# not from this script's directory, and carrying the uncommitted count because
+# a hash on its own lies whenever someone is mid-edit.
+$sweepBuild = Get-BuildStamp -GameDir $script:GameDir
+$md.Add("Measured on **``$($sweepBuild.short)``**$(if ($sweepBuild.dirty -gt 0) { " plus **$($sweepBuild.dirty) uncommitted file(s)**" }) in ``$(Split-Path -Leaf $sweepBuild.repo)`` -- $($sweepBuild.subject)")
 $md.Add('')
 $md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in ``$expectedStart``. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
 $md.Add('')

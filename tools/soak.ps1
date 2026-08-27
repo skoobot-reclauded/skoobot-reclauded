@@ -314,6 +314,9 @@ Write-Host "[soak] descend=$(if ($NoDescend) { 'off' } else { "after $DescendAft
 if (-not $NoRunLease) {
     $null = Wait-HarnessLease -TimeoutSec ($LeaseWaitMin * 60) -Label 'soak'
     Assert-JunctionsOwned -GameDir $script:GameDir
+    # #175: what is about to be measured, resolved from the junction.
+    $script:BuildStamp = Get-BuildStamp -GameDir $script:GameDir
+    Write-Host "[soak] $(Format-BuildStamp $script:BuildStamp)"
     Write-Host "[soak] holding the game lease for this run (host pid $PID)"
 }
 
@@ -1630,6 +1633,9 @@ finally {
         placed_in    = $placedIn
         auto_spend   = $(if ($NoAutoSpend) { 'off' } else { 'on' })
         build_at_start = $buildApplied
+        # #175: the CODE, as opposed to build_at_start, which is the character's
+        # stats and talents. Resolved from the junction the game loads.
+        build          = $script:BuildStamp
         scratch_save = $ScratchSave
     }
     $dir = Split-Path -Parent $OutFile

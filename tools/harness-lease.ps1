@@ -1,4 +1,4 @@
-<#
+﻿<#
     Harness lease: one live host owns the game at a time.
 
     The game install is a single resource -- one t-engine process, one
@@ -217,6 +217,49 @@ function Get-LinkTarget($path) {
     product, and the state of a machine that has not run setup-dev yet.
     Throws, with the command that fixes it.
 #>
+# Which commit will the game actually load? (#175)
+#
+# Resolved from the JUNCTION, not from wherever this script lives. Pointing the
+# junctions at another checkout is routine -- every scenario run does it, and
+# #173's A/B did it deliberately to run main's product against a worktree's
+# harness -- so a sweep launched from main can easily be measuring something
+# else. `dirty` matters as much as the hash: a commit alone lies whenever
+# someone is mid-edit, which is the case this exists for.
+function Get-BuildStamp {
+    param([string]$GameDir)
+    if (-not $GameDir) { $GameDir = $script:GameDir }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'      # git writes progress to stderr
+    try {
+        $stamp = [ordered]@{ repo = ''; commit = 'unknown'; short = 'unknown'; dirty = -1; subject = '' }
+        $link = Get-LinkTarget (Join-Path (Join-Path $GameDir 'gameddons') 'tome-skoobot_reclauded')
+        $repo = $null
+        if ($link -and $link -notmatch '^<') {
+            $repo = Split-Path -Parent ([IO.Path]::GetFullPath($link))   # <checkout>\src -> <checkout>
+        }
+        if (-not $repo) { $repo = $script:LeaseRoot }
+        $stamp.repo = "$repo"
+        if ($repo -and (Test-Path (Join-Path $repo '.git'))) {
+            try {
+                $h = (& git -C $repo rev-parse HEAD)
+                if ($h) { $stamp.commit = "$h".Trim(); $stamp.short = $stamp.commit.Substring(0, 7) }
+                $subj = (& git -C $repo log -1 --format=%s)
+                if ($subj) { $stamp.subject = "$subj".Trim() }
+                $porc = @(& git -C $repo status --porcelain)
+                $stamp.dirty = @($porc | Where-Object { "$_".Trim() }).Count
+            } catch { }
+        }
+        return $stamp
+    } finally { $ErrorActionPreference = $prev }
+}
+
+function Format-BuildStamp {
+    param($Stamp)
+    if (-not $Stamp) { return 'build=unknown' }
+    $d = if ($Stamp.dirty -gt 0) { " +$($Stamp.dirty) uncommitted" } elseif ($Stamp.dirty -eq 0) { '' } else { ' (dirty unknown)' }
+    return ("build={0}{1} [{2}] {3}" -f $Stamp.short, $d, (Split-Path -Leaf $Stamp.repo), $Stamp.subject)
+}
+
 function Assert-JunctionsOwned {
     param([Parameter(Mandatory)][string]$GameDir)
     $addons = Join-Path $GameDir 'game\addons'
