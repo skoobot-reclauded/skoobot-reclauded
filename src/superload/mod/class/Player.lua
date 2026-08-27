@@ -2404,19 +2404,11 @@ local function projectileThreats(p)
            and e.x and e.y and not e.dead
            and not (e.src and e.src == p)
            and map.seens(e.x, e.y) then
-            local tx, ty
+            local tx, ty, radius
             if type(e.project) == "table" and type(e.project.def) == "table" then
-                -- Bolts only, and now actually enforced. A ball carries a
-                -- radius and is not escaped by leaving the line -- the first
-                -- version stepped out of the Spellblaze Crystal's Ice Shards
-                -- as though it were a bolt, which is the confident-and-wrong
-                -- case this was supposed to refuse.
+                tx, ty = e.project.def.x, e.project.def.y
                 local typ = e.project.def.typ
-                if type(typ) == "table" and tonumber(typ.radius) and tonumber(typ.radius) > 0 then
-                    tx, ty = nil, nil
-                else
-                    tx, ty = e.project.def.x, e.project.def.y
-                end
+                radius = (type(typ) == "table" and tonumber(typ.radius)) or 0
             elseif type(e.homing) == "table" and type(e.homing.target) == "table" then
                 tx, ty = e.homing.target.x, e.homing.target.y
             end
@@ -2424,6 +2416,7 @@ local function projectileThreats(p)
                 local sp = type(e.energy) == "table" and tonumber(e.energy.mod) or nil
                 if not sp or sp <= 0 then sp = PROJ_SPEED_DEFAULT end
                 out[#out + 1] = { x = e.x, y = e.y, tx = tx, ty = ty, speed = sp,
+                    radius = radius or 0,
                     name = (e.getName and e:getName()) or e.name or "a projectile" }
             end
         end
@@ -2445,7 +2438,23 @@ end
 --- harmless and shrinks as it travels, which is what the dot product tests --
 --- the same arithmetic v1 carried in spotHostiles and never ran, generalised
 --- off the player's own grid so movement can ask about any other.
+---
+--- A BALL counts its blast as well as its flight. Read literally, 1.7.6 has no
+--- `ball` entry in the target-type table at all (engine/Target.lua:629): it
+--- sets neither `stop_block`, which is what makes actors block a path, nor
+--- `line`, which is what makes projectDoMove damage en route
+--- (ActorProject:479) -- so a ball should fly over everything and detonate at
+--- its target. The owner reports otherwise and plays the game, and two real
+--- mechanisms fit that reading: a ball DOES stop on blocking terrain, and its
+--- radius covers grids short of the impact. Counting both costs only a
+--- movement preference if the source reading is right, and protects the
+--- character if it is not. Balls never TRIGGER a dodge -- see soonestImpact.
+local function gridInBlast(t, gx, gy)
+    return t.radius > 0 and core.fov.distance(gx, gy, t.tx, t.ty) <= t.radius
+end
+
 local function gridInFlight(t, gx, gy)
+    if gridInBlast(t, gx, gy) then return true end
     local len = core.fov.distance(t.x, t.y, t.tx, t.ty)
     if len <= 0 then return false end
     if core.fov.distance(t.x, t.y, gx, gy) > len then return false end
@@ -2465,10 +2474,16 @@ bot.inFlightPath = function(x, y) return inFlightPath(x, y, nil) end
 
 --- Turns until the soonest bolt reaches a grid, and which one, or nil if none
 --- will. Speed is grids per turn.
+---
+--- BOLTS ONLY, deliberately. A ball is a reason to prefer a different grid, not
+--- a reason to spend a turn moving: Ice Shards has radius 1, so one aimed at
+--- the character's own grid still catches it after a single step, and calling
+--- that a dodge would burn the turn for nothing. The owner's rule -- worth
+--- avoiding while moving anyway, not worth moving for.
 local function soonestImpact(threats, gx, gy)
     local best, who
     for _, t in ipairs(threats) do
-        if gridInFlight(t, gx, gy) then
+        if t.radius <= 0 and gridInFlight(t, gx, gy) then
             local n = core.fov.distance(t.x, t.y, gx, gy) / t.speed
             if not best or n < best then best, who = n, t end
         end
