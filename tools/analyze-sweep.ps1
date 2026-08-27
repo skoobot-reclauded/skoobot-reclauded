@@ -306,7 +306,7 @@ foreach ($r in $rows) {
 if ($rsRows.Count -gt 0) {
     Say '## Run-aborts where the bot did not act on what the engine saw'
     Say ''
-    Say 'The engine refuses to keep running while `spotHostiles` returns anything. If the bot then stays in EXPLORE, it calls auto-explore again and the pair cycles -- no hand-back, no damage, and the clock races. **Disagreed** counts those.'
+    Say 'The engine refuses to keep running while `spotHostiles` returns anything, using a `seens` map that ACCUMULATES over the run path; the bot then reads a clean one and sees less. Neither view is stale -- the engine''s is a superset. `docs/design-explore-stall.md` has the mechanism.'
     Say ''
     Say '| Class | Run-aborts for a hostile | Bot stayed in EXPLORE | Most often |'
     Say '|---|---|---|---|'
@@ -316,7 +316,19 @@ if ($rsRows.Count -gt 0) {
     Say ''
     $totDis = ($rsRows | Measure-Object Disagreed -Sum).Sum
     $totAll = ($rsRows | Measure-Object Aborts -Sum).Sum
-    Say "**$totDis of $totAll run-aborts left the bot exploring.** Anything above a handful on one class is #164's live-lock; a flat zero says the two views agree and #153 is not what strands it."
+    $pct = if ($totAll -gt 0) { [math]::Round(100 * $totDis / $totAll) } else { 0 }
+    Say "**$totDis of $totAll run-aborts left the bot exploring ($pct%).**"
+    Say ''
+    # The line this replaces read: "Anything above a handful on one class is
+    # #164's live-lock; a flat zero says the two views agree." Sweep 16
+    # measured 2100 of 2105 -- every class hundreds of times -- with 29 of 29
+    # classes CLEARED and not one IDLE ending. So a high number is NOT the
+    # live-lock, and a reader following the old line would have concluded 29 of
+    # them. The disagreement is the normal state of affairs; the live-lock is a
+    # rare shape it can take. Corrected against the measurement (#153, #164).
+    Say 'A high count is **normal and not by itself a fault**: sweep 16 measured 2100 of 2105 with 29 of 29 classes clearing their floor and no IDLE ending at all. The bot explores past it, at a cost of about two turns each time.'
+    Say ''
+    Say 'What marks the live-lock (#164) is not the count but the **shape**: a run with a large turn total, a near-zero stop count, and no progress -- 21,368 turns over two grids with zero hand-backs. Read this table beside `end_reason` and `Stops`, never on its own.'
     Say ''
 }
 
