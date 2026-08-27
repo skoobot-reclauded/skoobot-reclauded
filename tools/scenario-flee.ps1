@@ -621,7 +621,13 @@ return "installed"
     $g1 = Probe 'return fl.immobile(3)' 60
     Write-Host "  at range   $($g1.Result)"
     if ($g1.Result -match '^SETUP') { Inconclusive $g1.Result }
-    $null = Assert-Result $g1 'the target really is immobile and at range' -Match ' d=3 nm=true '
+    # A precondition, not a product claim (#124). The probe asks for an
+    # immobile actor at distance 3 and does not always get one -- it came back
+    # at 4 on 2026-08-27 -- and every assertion below is about a target at a
+    # known range, so a miss here describes a different situation rather than a
+    # broken flee.
+    $null = Require-Staged -Tag 'flee' -Ok ($g1.Result -match ' d=3 nm=true ') -Detail $g1.Result `
+        -What 'the immobile target was placed at the distance the probe asked for'
     $null = Assert-Result $g1 'query advances no game turn' -Match ' dturn=0 '
     $null = Assert-Result $g1 'the pacified hostiles got their factions back' -Match ' restored=true '
     $null = Assert-Result $g1 'the flee is skipped, and says why' -Match 'nothing to flee from: .*cannot follow, and is not next to you'

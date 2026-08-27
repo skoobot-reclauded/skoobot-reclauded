@@ -666,6 +666,40 @@ function Assert-Result {
     return $ok
 }
 
+<#
+    A PRECONDITION, not a claim about the product.
+
+    Most scenarios build the situation they test -- spawn an actor at a
+    distance, walk the character into a door, darken a grid -- and then assert
+    what the bot does about it. When the BUILDING fails, the assertions after
+    it are meaningless: they measure a character that never met the thing.
+    Reported as FAIL, that reads as a product defect and sends whoever is on
+    the suite hunting one.
+
+    Four scenarios have done exactly that (#122, #124, #127, #176), two of them
+    in a single run on 2026-08-27, and the cost is worse than the wasted hunt:
+    a red suite nobody trusts is not a gate. Anything that fails HERE exits 3,
+    INCONCLUSIVE -- so a red suite always means the product.
+
+    Use it for the situation being built. Never for what the bot then does
+    about it: an INCONCLUSIVE that should have been a FAIL is a defect the
+    suite will never report again.
+#>
+function Require-Staged {
+    param(
+        [Parameter(Mandatory)][string]$Tag,
+        [Parameter(Mandatory)][string]$What,
+        [Parameter(Mandatory)]$Ok,
+        [string]$Detail
+    )
+    if ($Ok) { Write-Host "  STAGED $What"; return $true }
+    Write-Host "  SETUP  $What -- NOT BUILT"
+    if ($Detail) { Write-Host "         $Detail" }
+    Write-Host "[$Tag] INCONCLUSIVE - the situation under test was not built: $What"
+    Stop-Game | Out-Null
+    exit 3
+}
+
 # game.turn as an integer, or -1 if the game did not answer.
 function Get-GameTurn {
     $r = Invoke-Bridge -Lua 'return tostring(game.turn)' -TimeoutSec 30

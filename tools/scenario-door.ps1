@@ -159,7 +159,13 @@ return "installed"
         if ($d -match 'sealed door') { $sawDialog = $true; break }
         $null = Invoke-Bridge -TimeoutSec 30 -Lua 'if not skoobot_reclauded.active then skoobot_reclauded.start() end return "kick"'
     }
-    Check $sawDialog 'the door check dialog does open (the loop this fixes is real)'
+    # A precondition, not a product claim (#176). Six kicks and the bot has not
+    # reached the door means the character never met the staged grid -- on
+    # 2026-08-27 the same suite passed this at 11:39 and missed it at 11:55,
+    # with every product assertion after it passing both times, because they
+    # were describing a dialog that never opened.
+    $null = Require-Staged -Tag 'door' -Ok $sawDialog -Detail 'six decisions and the bot never reached it' `
+        -What 'the bot walks into the staged door and its check dialog opens'
     $flag = (Invoke-Bridge -TimeoutSec 30 -Lua 'return tostring(game.level.map.attrs(_G.__dr.x, _G.__dr.y, "autoexplore_ignore"))').Result
     Check ($flag -eq 'true') 'and the bot marks it itself, since the engine does not'
 
