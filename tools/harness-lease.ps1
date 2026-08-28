@@ -246,10 +246,20 @@ function Get-BuildStamp {
     $ErrorActionPreference = 'Continue'      # git writes progress to stderr
     try {
         $stamp = [ordered]@{
+            # #180: which MACHINE, now that runs can come from more than one.
+            # The trees say what code ran; without this nothing says where, and
+            # two runs with identical trees and different wall times are
+            # indistinguishable from two runs on different hardware. `cores`
+            # because turn RATE depends on the machine while the turn BUDGET
+            # (#179) does not.
+            host = $env:COMPUTERNAME; cores = 0
             repo = ''; commit = 'unknown'; short = 'unknown'
             trees = ''; dirty = -1; dirty_elsewhere = -1; subject = ''
         }
-        $link = Get-LinkTarget (Join-Path (Join-Path $GameDir 'gameddons') 'tome-skoobot_reclauded')
+        try {
+            $stamp.cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+        } catch { }
+        $link = Get-LinkTarget (Join-Path (Join-Path $GameDir 'game\addons') 'tome-skoobot_reclauded')
         $repo = $null
         if ($link -and $link -notmatch '^<') {
             $repo = Split-Path -Parent ([IO.Path]::GetFullPath($link))   # <checkout>\src -> <checkout>
@@ -287,8 +297,8 @@ function Format-BuildStamp {
     $d = if ($Stamp.dirty -gt 0) { " +$($Stamp.dirty) UNCOMMITTED in loaded paths" }
          elseif ($Stamp.dirty -eq 0) { '' } else { ' (dirty unknown)' }
     $e = if ($Stamp.dirty_elsewhere -gt 0) { " ($($Stamp.dirty_elsewhere) elsewhere, not loaded)" } else { '' }
-    return ("build={0} trees={1}{2}{3} [{4}] {5}" -f
-        $Stamp.short, $Stamp.trees, $d, $e, (Split-Path -Leaf $Stamp.repo), $Stamp.subject)
+    return ("{0} build={1} trees={2}{3}{4} [{5}] {6}" -f
+        $Stamp.host, $Stamp.short, $Stamp.trees, $d, $e, (Split-Path -Leaf $Stamp.repo), $Stamp.subject)
 }
 
 function Assert-JunctionsOwned {

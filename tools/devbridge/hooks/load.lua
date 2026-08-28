@@ -752,7 +752,7 @@ function bridge.dossierWrite(name)
 	local encoded = table.concat(buf)
 	-- NOT the bridge dir: that is mounted readable but is not under PhysFS's
 	-- write path, so fs.open there returns nil without raising. The write path
-	-- is the module dir (measured: C:\...\T-Engine.0	ome), and /dossiers/
+	-- is the module dir (measured: C:\...\T-Engine\4.0\tome), and /dossiers/
 	-- lands inside it.
 	if not fs.exists(DOSSIER_DIR) then fs.mkdir(DOSSIER_DIR) end
 	local path = DOSSIER_DIR .. tostring(name)
