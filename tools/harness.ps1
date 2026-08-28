@@ -156,19 +156,32 @@ function Show-LoadDiagnostics {
     $archive = Join-Path (Split-Path -Parent $PSScriptRoot) 'build\logs'
     if (-not (Test-Path $archive)) { New-Item -ItemType Directory -Path $archive -Force | Out-Null }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $dest  = Join-Path $archive "te4_log-$stamp.txt"
-    if (Test-Path $script:LogPath) {
-        # The game still holds it open for writing; copy through a shared read.
+    if (Save-GameLog -Dest (Join-Path $archive "te4_log-$stamp.txt")) {
+        Write-Host "[harness] full log archived to $archive\te4_log-$stamp.txt"
+    }
+}
+
+function Save-GameLog {
+    <#
+        Copy te4_log.txt somewhere it will survive. The engine opens that file
+        in 'w' mode, so the NEXT launch truncates it -- in a sweep that means
+        the following class destroys the only record of the one that failed.
+        Callers that have just lost a run should take a copy immediately.
+    #>
+    param([Parameter(Mandatory)][string]$Dest)
+    if (-not (Test-Path $script:LogPath)) { return $false }
+    try {
+        # A live game still holds it open for writing, so read it shared. A
+        # dead one does not, and the same call works either way.
+        $fs = [System.IO.File]::Open($script:LogPath, 'Open', 'Read', 'ReadWrite')
         try {
-            $fs = [System.IO.File]::Open($script:LogPath, 'Open', 'Read', 'ReadWrite')
-            try {
-                $out = [System.IO.File]::Create($dest)
-                try { $fs.CopyTo($out) } finally { $out.Dispose() }
-            } finally { $fs.Dispose() }
-            Write-Host "[harness] full log archived to $dest"
-        } catch {
-            Write-Host "[harness] could not archive the log: $($_.Exception.Message)"
-        }
+            $out = [System.IO.File]::Create($Dest)
+            try { $fs.CopyTo($out) } finally { $out.Dispose() }
+        } finally { $fs.Dispose() }
+        return $true
+    } catch {
+        Write-Host "[harness] could not archive the log: $($_.Exception.Message)"
+        return $false
     }
 }
 

@@ -1,4 +1,4 @@
-﻿<#
+<#
     Soak (#61): an unattended long run of the bot on the fixture, measured.
 
     The question this answers is not "does it pass" but "how far does it get,
@@ -1605,6 +1605,19 @@ finally {
         }
         ($notes -join "`n") | Set-Content -Path (Join-Path $outDirC "$base.timeout.txt") -Encoding utf8
         Write-Host "  capture  -> $($captureFiles.Count) png + $base.timeout.txt"
+    }
+
+    # A dead game cannot be screenshotted, so its log is the only evidence a
+    # crash leaves -- and the engine truncates that log at the next launch, so
+    # the next class in a sweep destroys it. The first CRASHED run this project
+    # has seen (#185) survived only because it happened to be the last class of
+    # a half; one place further up the roster and there would be nothing.
+    if ($endReason -in @('CRASHED', 'BRIDGE_LOST')) {
+        $baseC   = [IO.Path]::GetFileNameWithoutExtension($OutFile)
+        $outDirX = Split-Path -Parent $OutFile
+        if (Save-GameLog -Dest (Join-Path $outDirX "$baseC.crash-te4_log.txt")) {
+            Write-Host "  capture  ${endReason}: game log kept at $baseC.crash-te4_log.txt"
+        }
     }
 
     $null = Invoke-Bridge -Lua 'if skoobot_reclauded and skoobot_reclauded.active then skoobot_reclauded.stop("soak ended") end return "stopped"' -TimeoutSec 15 -ErrorAction SilentlyContinue
