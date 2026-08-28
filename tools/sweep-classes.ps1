@@ -683,6 +683,24 @@ if ($SummarizeOnly -and (Test-Path $stampFile)) {
     $md.Add("Merged from $($stampLines.Count) machine(s); each ran:")
     $md.Add('')
     foreach ($sl in $stampLines) { $md.Add("- ``$sl``") }
+    # Identical trees are NOT enough to call two halves one measurement: the run
+    # protocol -- the rungs, auto-spend, placement, stop conditions, the verdict
+    # -- lives in files the game never loads, so it moves without moving a tree
+    # (#214). Warned, not refused: each half's rows are individually true and
+    # internally comparable, and refusing would throw away good rows to make a
+    # point (#212's lesson).
+    $protos = @($stampLines | ForEach-Object { if ("$_" -match 'proto=([0-9a-f]+)') { $Matches[1] } } |
+                Select-Object -Unique)
+    if ($protos.Count -gt 1) {
+        $md.Add('')
+        $md.Add("**The halves did not run the same protocol** (``proto`` differs: $($protos -join ', ')). " +
+                "The trees name the code the GAME loaded; ``proto`` names the code that DROVE the run. " +
+                "Each half is internally comparable; the merged headline is not attributable to either (#214).")
+    }
+    if ($protos.Count -eq 0 -and $stampLines.Count -gt 1) {
+        $md.Add('')
+        $md.Add('**Stamps predate ``proto``**, so it cannot be checked that the halves ran the same protocol (#214).')
+    }
 } else {
     $md.Add("Measured on **``$($sweepBuild.short)``**$(if ($sweepBuild.dirty -gt 0) { " plus **$($sweepBuild.dirty) uncommitted file(s)**" }) in ``$(Split-Path -Leaf $sweepBuild.repo)`` -- $($sweepBuild.subject)")
 }

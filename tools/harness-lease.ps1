@@ -245,6 +245,20 @@ function Get-LinkTarget($path) {
 # code.
 $script:LoadedPaths = @('src', 'tools/devbridge', 'tools/devbridge-boot')
 
+# The RUN PROTOCOL: files that are not loaded by the game but decide what a
+# comparable row CONTAINS. soak.ps1 injects the rungs, auto-spends, places the
+# character and applies the stop conditions; sweep-classes.ps1 sets the run
+# parameters and computes the verdict that #210's rule freezes into the row.
+# Both move measurements without moving a tree, which read as one measurement
+# for four sweeps (#214).
+#
+# The boundary, for the next file that wants adding here: stamp what changes
+# the CONTENT of a comparable row; leave out what changes whether a row EXISTS.
+# new-character.ps1, harness.ps1, slots.ps1 and sweep-parallel.ps1 stay out --
+# their changes surface as MISSING / TIMEOUT / UNBIRTHABLE / NO RESULT, which
+# #187's machinery already names beside the headline.
+$script:ProtocolPaths = @('tools/soak.ps1', 'tools/sweep-classes.ps1')
+
 function Get-BuildStamp {
     # -Repo stamps a checkout directly, skipping the "which checkout is this
     # game loading?" lookup. That is what a caller wants when the thing being
@@ -264,7 +278,7 @@ function Get-BuildStamp {
             # (#179) does not.
             host = $env:COMPUTERNAME; cores = 0
             repo = ''; commit = 'unknown'; short = 'unknown'
-            trees = ''; dirty = -1; dirty_elsewhere = -1; subject = ''
+            trees = ''; proto = ''; dirty = -1; dirty_elsewhere = -1; subject = ''
         }
         # NUMBER_OF_PROCESSORS, not Get-CimInstance: WMI is Access-denied for a
         # non-admin over SSH, which is exactly how the second runner is driven.
@@ -292,6 +306,20 @@ function Get-BuildStamp {
                 }
                 $stamp.trees = ($ids -join '/')
 
+                # hash-object over the WORKING TREE, not the committed blob: an
+                # uncommitted edit to the run protocol changes the measurement now, and
+                # should change the stamp now (#214, pairing with #210's dirty honesty).
+                $phashes = @()
+                foreach ($pp in $script:ProtocolPaths) {
+                    $full = Join-Path $repo $pp
+                    if (Test-Path $full) { $phashes += "$(& git -C $repo hash-object -- $full)".Trim() }
+                }
+                if ($phashes.Count -gt 0) {
+                    $sha = [Security.Cryptography.SHA1]::Create()
+                    $bytes = $sha.ComputeHash([Text.Encoding]::ASCII.GetBytes(($phashes -join '')))
+                    $stamp.proto = (-join ($bytes[0..3] | ForEach-Object { $_.ToString('x2') }))
+                }
+
                 $inLoaded = @(& git -C $repo status --porcelain -- $script:LoadedPaths)
                 $stamp.dirty = @($inLoaded | Where-Object { "$_".Trim() }).Count
                 $all = @(& git -C $repo status --porcelain)
@@ -309,8 +337,8 @@ function Format-BuildStamp {
     $d = if ($Stamp.dirty -gt 0) { " +$($Stamp.dirty) UNCOMMITTED in loaded paths" }
          elseif ($Stamp.dirty -eq 0) { '' } else { ' (dirty unknown)' }
     $e = if ($Stamp.dirty_elsewhere -gt 0) { " ($($Stamp.dirty_elsewhere) elsewhere, not loaded)" } else { '' }
-    return ("{0} build={1} trees={2}{3}{4} [{5}] {6}" -f
-        $Stamp.host, $Stamp.short, $Stamp.trees, $d, $e, (Split-Path -Leaf $Stamp.repo), $Stamp.subject)
+    return ("{0} build={1} trees={2} proto={7}{3}{4} [{5}] {6}" -f
+        $Stamp.host, $Stamp.short, $Stamp.trees, $d, $e, (Split-Path -Leaf $Stamp.repo), $Stamp.subject, $Stamp.proto)
 }
 
 function Assert-JunctionsOwned {

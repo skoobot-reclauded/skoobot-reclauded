@@ -133,7 +133,11 @@ Move-Item .\build\results\sweep .\build\results\sweep-NN
 ```
 
 The merged header lists one stamp line per machine. Different commits are fine **when the
-trees match** — the trees name the executed code; the commit is decoration (#175, #186).
+trees _and_ `proto` match** — the trees name the code the game loaded, `proto` names the code
+that drove the run (`soak.ps1`, `sweep-classes.ps1`), and the commit is decoration
+(#175, #186, #214). If the halves disagree on `proto` the summary says so and still renders
+the table; each half is internally comparable, but the merged headline is not attributable to
+either.
 
 ## Reading the result honestly
 

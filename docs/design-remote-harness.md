@@ -172,9 +172,18 @@ persist unconditionally, because silence reads as success.
 
 The rules that keep a merged table honest, each learned from a specific lie:
 
-- **The build stamp is keyed on the loaded trees, not the commit** (#175): a commit touching
-  docs or tools changes nothing the game executes. Two machines at different commits with
-  identical trees are one measurement; the merged header prints both lines.
+- **The build stamp is keyed on the loaded trees and the run protocol, not the commit**
+  (#175, #214): a commit touching docs changes nothing the game executes, so two machines at
+  different commits are one measurement **when the trees and `proto` both match**; the merged
+  header prints both lines. `proto` exists because "tools" is not all passive — `soak.ps1`
+  injects the rungs, auto-spends, places the character and applies the stop conditions, and
+  `sweep-classes.ps1` sets the run parameters and computes the verdict #210's rule freezes
+  into the row. Four sweeps with identical trees ran three different protocols before this was
+  noticed. The boundary for adding a file to `proto`: stamp what changes the **content** of a
+  comparable row, leave out what changes whether a row **exists** — the latter surfaces as
+  MISSING / TIMEOUT / UNBIRTHABLE / NO RESULT, which #187 already names beside the headline.
+  A merge whose halves disagree on `proto` says so and still renders: the rows are
+  individually true, and refusing would throw away good rows to make a point (#212).
 - **The stamp is taken before the first class runs, from a slot's game dir** — taken at
   summary time it named a commit created an hour into the run (#186), and taken from the
   install it would name whatever checkout a dev session had mounted (#198).
