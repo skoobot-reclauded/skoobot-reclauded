@@ -561,6 +561,10 @@ try {
             # descents on a run that was entirely injected.
             Descents = ((@($s.resumes.by_action) | Where-Object { $_.action -eq 'stairs-down' } | ForEach-Object { $_.count }) + 0)[0] + $s.rungs.descend.taken
             NextZone = $s.rungs.next_zone.taken
+            # Which of the three floor-1 exits this was: empty means the run
+            # never saw a staircase, non-empty means it saw one it could not
+            # reach and gave up on it (#209).
+            DescendExhausted = ((@($s.rungs.descend.exhausted | Where-Object { $_ })) -join ',')
             # The SOURCE half of the first injected zone move, e.g.
             # "norgos-lair:1". The floor is the diagnostic payload: ":1" means
             # the level was explored and no way down was ever seen, while ":3"

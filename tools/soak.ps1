@@ -261,6 +261,10 @@ param(
     # (f): a walk longer than this is abandoned (the map is 65x40 at most in
     # the zones listed; a path cannot honestly be longer).
     [int]$MaxWalkMoves = 400,
+    # Failed descend attempts on ONE level before next-zone stops being gated
+    # on "no staircase seen". Per level: a class that could not reach the
+    # stairs on floor 1 has proven nothing about floor 2 (#209).
+    [int]$DescendExhaustAt = 3,
     # (g): "a,b,c" of zone ids, replacing the list at the top of this file.
     [string]$Zones,
     # How long to wait for another host to give the game up before starting
@@ -364,9 +368,12 @@ $resumes['next-zone'] = 0
 $resumes['auto-spend'] = 0
 $resumes['dialog-wait'] = 0
 $descendWalks = 0; $descendMoves = 0; $descendAbandoned = 0; $waits = 0
+
 $levelHandbacks = @{}     # "zone:level" -> hand-backs on stairs up / the wilderness exit
 $levelLoops     = @{}     # "zone:level|reason" -> recurrences of one hand-back reason on one level
 $descendRetryAt = @{}     # "zone:level" -> hand-back count at which (f) may be tried again after "no path"
+$descendFailed  = @{}     # "zone:level" -> descend attempts that gave EVIDENCE of unreachability (#209)
+$descendExhausted = @{}   # "zone:level" -> true once that level has given up on descending
 $zoneList = @()           # [{id; min; max}] as verified against the installed module
 $zoneTransitions = New-Object System.Collections.Generic.List[string]
 # Machine-checkable companion to the transcript: the transcript answers "what
@@ -1164,8 +1171,27 @@ return "installed save_name=" .. tostring(game.save_name)
         if ($st.Tainted) { $script:tainted = $true }
         Count-Resume 'restart' $s $reason
     }
-    function Abandon-Walk($s, $why) {
-        if ($walk.action -eq 'descend') { $script:descendAbandoned++ }
+    # $evidence separates "this staircase cannot be reached" from "the bot was
+    # handed the game mid-walk". Only the first counts toward exhaustion:
+    # counting hostile/blocked/active/dialog would escalate every fighty floor,
+    # where the walk stopped because the situation worked as designed (#209).
+    # Descending from this level has failed enough times to stop preferring it.
+    # Announced ONCE per level, and counted as its own resume reason, so a
+    # transcript says which rung gave up and why (#209, #205).
+    function Test-DescendExhausted($key) {
+        if ($script:descendExhausted[$key]) { return $true }
+        $f = $(if ($script:descendFailed.ContainsKey($key)) { $script:descendFailed[$key] } else { 0 })
+        if ($f -lt $DescendExhaustAt) { return $false }
+        $script:descendExhausted[$key] = $true
+        Write-Host "  walk     descend-exhausted on $key after $f failed attempt(s); next-zone is now allowed"
+        return $true
+    }
+
+    function Abandon-Walk($s, $why, [bool]$evidence = $false) {
+        if ($walk.action -eq 'descend') {
+            $script:descendAbandoned++
+            if ($evidence) { $null = Bump-Count $script:descendFailed $walk.key }
+        }
         Write-Host "  walk     abandoned $($walk.action) after $($walk.moves) move(s): $why"
         $script:walk = $null
     }
@@ -1322,7 +1348,7 @@ return "installed save_name=" .. tostring(game.save_name)
                 $w = "$($s.walk)"
                 if ($w -match '^(moved|opened door)') {
                     $walk.moves++; $descendMoves++
-                    if ($walk.moves -gt $MaxWalkMoves) { Abandon-Walk $s "longer than $MaxWalkMoves moves"; Start-Bot $s 'walk abandoned' }
+                    if ($walk.moves -gt $MaxWalkMoves) { Abandon-Walk $s "longer than $MaxWalkMoves moves" $true; Start-Bot $s 'walk abandoned' }
                     continue
                 }
                 if ($w -eq 'arrived') {
@@ -1341,7 +1367,7 @@ return "installed save_name=" .. tostring(game.save_name)
                     # (f) is not tried on this level until -DescendAfter more
                     # hand-backs have accrued.
                     $descendRetryAt[$walk.key] = $(if ($levelHandbacks.ContainsKey($walk.key)) { $levelHandbacks[$walk.key] } else { 0 }) + $DescendAfter
-                    Abandon-Walk $s $w
+                    Abandon-Walk $s $w $true
                     Start-Bot $s "walk found nothing: $w"
                     continue
                 }
@@ -1374,7 +1400,7 @@ return "installed save_name=" .. tostring(game.save_name)
                 # through the game's own MOVE_STAY bind, counted.
                 $walk.waits++
                 if ($walk.waits -gt 5 -or $t.Status -ne 'OK' -or $t.Result -match '^(error|already|noplayer)') {
-                    Abandon-Walk $s "the engine kept refusing: $($t.Status) $($t.Result)"
+                    Abandon-Walk $s "the engine kept refusing: $($t.Status) $($t.Result)" $true
                     Start-Bot $s 'change refused'
                     continue
                 }
@@ -1395,6 +1421,13 @@ return "installed save_name=" .. tostring(game.save_name)
         }
         if ($reason -eq $lastReason -and $s.turn -eq $lastStopTurn) { $sameCount++ } else { $sameCount = 1; $stuckStage = 0 }
         $lastReason = $reason; $lastStopTurn = $s.turn
+
+        # #156's phantom take: the harness pressed '>' and the level did not
+        # change. Evidence that this level's staircase is not usable, and it
+        # arrives as a stop reason rather than as an abandoned walk (#209).
+        if ($s.reason -match 'did not take') {
+            $null = Bump-Count $descendFailed "$($s.zone):$($s.zlevel)"
+        }
 
         # ----- (c) the same stop, no turn taken, again and again -----
         # Two rungs before giving up, each counted. REST first. Then one real
@@ -1438,7 +1471,7 @@ return "installed save_name=" .. tostring(game.save_name)
             $loops = Bump-Count $levelLoops "$key|$reason"
             if ($loops -ge $LoopAfter -and ($loops % $LoopAfter) -eq 0) {
                 $why = "loop: '$reason' x$loops on $key"
-                if (-not $NoDescend -and $s.downs -gt 0) {
+                if (-not $NoDescend -and $s.downs -gt 0 -and -not (Test-DescendExhausted $key)) {
                     $walk = @{ action = 'descend'; phase = 'walking'; key = $key; moves = 0; waits = 0; from = "$($s.x),$($s.y)"; how = ''; target = $null; loop = $true }
                     $descendWalks++
                     Write-Host "  walk     descend from $key at $($s.x),$($s.y): $($s.downs) seen down staircase(s), $why"
@@ -1494,7 +1527,7 @@ return "installed save_name=" .. tostring(game.save_name)
         # sweep 6 while the harness held the lever that answers it.
         if ($s.reason -match 'this level is explored|leads to the world map') {
             $key = "$($s.zone):$($s.zlevel)"
-            if (-not $NoDescend -and $s.downs -gt 0) {
+            if (-not $NoDescend -and $s.downs -gt 0 -and -not (Test-DescendExhausted $key)) {
                 $walk = @{ action = 'descend'; phase = 'walking'; key = $key; moves = 0; waits = 0
                            from = "$($s.x),$($s.y)"; how = ''; target = $null; loop = $false }
                 $descendWalks++
@@ -1542,14 +1575,18 @@ return "installed save_name=" .. tostring(game.save_name)
             $explored = ($s.explored -eq 'true')
             $ripe = $explored -or ($n -ge $DescendAfter)
             $retryAt = $(if ($descendRetryAt.ContainsKey($key)) { $descendRetryAt[$key] } else { 0 })
-            if ($ripe -and -not $NoDescend -and $s.downs -gt 0 -and $n -ge $retryAt) {
+            # Exhaustion is checked here too, not only in the fallback below.
+            # Without it the escalation would depend on landing inside the
+            # retry-backoff window rather than on the evidence (#209).
+            $exhausted = (Test-DescendExhausted $key)
+            if ($ripe -and -not $NoDescend -and $s.downs -gt 0 -and $n -ge $retryAt -and -not $exhausted) {
                 $walk = @{ action = 'descend'; phase = 'walking'; key = $key; moves = 0; waits = 0; from = "$($s.x),$($s.y)"; how = ''; target = $null }
                 $descendWalks++
                 Write-Host "  walk     descend from $key at $($s.x),$($s.y): $($s.downs) seen down staircase(s), hand-back $n$(if ($explored) { ', explored' })"
                 continue
             }
             $lastLevel = ($s.zmax -gt 0 -and $s.zlevel -ge $s.zmax)
-            if ($ripe -and $zoneList.Count -gt 0 -and ($lastLevel -or ($s.stairs -eq 'wild' -and $explored -and $s.downs -eq 0))) {
+            if ($ripe -and $zoneList.Count -gt 0 -and ($lastLevel -or ($s.stairs -eq 'wild' -and $explored -and ($s.downs -eq 0 -or $exhausted)))) {
                 $visited = @(((Invoke-Bridge -Lua 'return sk.visitedZones()' -TimeoutSec 30).Result -split ',') | Where-Object { $_ })
                 $next = $zoneList | Where-Object { $_.id -ne $s.zone -and $_.id -notin $visited -and $_.min -le ($s.level + 2) } | Select-Object -First 1
                 if ($next) {
@@ -1741,7 +1778,12 @@ finally {
         resumes      = [ordered]@{ total = ($resumeRows | ForEach-Object { $_.count } | Measure-Object -Sum).Sum; by_action = @($resumeRows); log = @($resumeLog | Select-Object -Last 200) }
         # (f)/(g): the two rungs' own counters, present even at zero.
         rungs        = [ordered]@{
-            descend   = [ordered]@{ enabled = (-not $NoDescend); after = $DescendAfter; loop_after = $LoopAfter; taken = $resumes['descend']; walks = $descendWalks; moves = $descendMoves; abandoned = $descendAbandoned }
+            descend   = [ordered]@{ enabled = (-not $NoDescend); after = $DescendAfter; loop_after = $LoopAfter; taken = $resumes['descend']; walks = $descendWalks; moves = $descendMoves; abandoned = $descendAbandoned
+                                    # Levels that gave up on descending, and what it cost
+                                    # to establish that. Distinguishes "never saw stairs"
+                                    # from "saw them and could not reach them" (#209).
+                                    exhausted = @($descendExhausted.Keys | Sort-Object)
+                                    failed    = $descendFailed }
             next_zone = [ordered]@{ taken = $resumes['next-zone']; transitions = @($zoneTransitions); zones = @($zoneList | ForEach-Object { "$($_.id) ($($_.min)-$($_.max))" }) }
             waits     = $waits
         }
@@ -1798,6 +1840,9 @@ finally {
     $md.Add("| stops | $($summary.stop_total) across $($stopRows.Count) reason(s) |")
     $md.Add("| resumes | $($summary.resumes.total) |")
     $md.Add("| descend | $($resumes['descend']) taken ($descendWalks walk(s), $descendMoves move(s), $descendAbandoned abandoned; $(if ($NoDescend) { 'off' } else { "after $DescendAfter hand-backs, explored, or a loop of $LoopAfter" })) |")
+    if ($descendExhausted.Count -gt 0) {
+        $md.Add("| descend exhausted | **$(($descendExhausted.Keys | Sort-Object) -join ', ')** -- descending failed there, so next-zone was allowed (#209) |")
+    }
     $md.Add("| next-zone | $($resumes['next-zone']) taken$(if ($zoneTransitions.Count -gt 0) { ' (' + ($zoneTransitions -join '; ') + ')' }); list: $(($zoneList | ForEach-Object { $_.id }) -join ' > ') |")
     $md.Add("| waits | $waits (a change refused for two turns after a kill) |")
     $md.Add("| warnings | $(if ($warnings.Count -gt 0) { "**$($warnings.Count)** -- " + ($warnings -join '; ') } else { 'none' }) |")
