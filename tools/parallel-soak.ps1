@@ -32,6 +32,11 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+# For Get-SaveDirName. The save NAME uses hyphens; the save DIRECTORY uses
+# underscores and is truncated to 25 characters, so a second copy of that rule
+# looks for a directory the engine never creates. That mistake reported Cultist
+# of Entropy UNBIRTHABLE for eight sweeps with a valid save on disk (#121).
+. (Join-Path $PSScriptRoot 'harness.ps1')
 
 function Say($m) { Write-Host "[parallel] $m" }
 
@@ -68,9 +73,10 @@ function New-Slot([int]$n) {
             Copy-Item $src (Join-Path $eng $d) -Recurse -Force
         }
     }
-    $saveSrc = Join-Path $SeedHome "tome\save\$Save"
-    if (-not (Test-Path $saveSrc)) { throw "no save at $saveSrc" }
-    $saveDst = Join-Path $eng "tome\save\$Save"
+    $saveDir = Get-SaveDirName -Name $Save
+    $saveSrc = Join-Path $SeedHome "tome\save\$saveDir"
+    if (-not (Test-Path $saveSrc)) { throw "no save directory at $saveSrc (from save name '$Save')" }
+    $saveDst = Join-Path $eng "tome\save\$saveDir"
     if (-not (Test-Path $saveDst)) {
         $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $saveDst)
         Copy-Item $saveSrc $saveDst -Recurse -Force
