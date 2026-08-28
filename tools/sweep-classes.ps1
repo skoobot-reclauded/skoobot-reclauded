@@ -229,6 +229,32 @@ $RACE_EXCEPTIONS = @{ 'Stone Warden' = 'Dwarf' }
 function Fail($why) { Write-Host "[sweep] FAILED - $why"; exit 1 }
 
 # One rule, in harness.ps1, because the scheduler has to name the same files.
+function Read-ResultRow([string]$path, [string]$tag, [string]$outDir, $p) {
+    <#
+        A row that is PRESENT but unparseable is the same fact as one that is
+        absent -- no usable result for this class -- and used to be strictly
+        worse: an unguarded ConvertFrom-Json threw, so one bad file cost the
+        whole table and every good row in it (#212).
+
+        Falls through to the same named-never-dropped treatment as MISSING,
+        under its own label so the two causes stay separable. UNREADABLE
+        carries no StartZone, so it lands in #187's "attempted and produced no
+        comparable run" line beside the percentage with no summary change.
+    #>
+    try { return (Get-Content $path -Raw | ConvertFrom-Json) }
+    catch {
+        Write-Host "$tag  UNREADABLE ($($_.Exception.Message.Trim()))"
+        # The class's OTHER artefacts usually survive -- job.log, the soak
+        # record, the dossier -- and are what a person recovers the run from.
+        $slug = Get-ResultSlug $p.Class
+        $kept = @(Get-ChildItem (Join-Path $outDir "$slug.*") -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -ne "$slug.json" } | ForEach-Object { $_.Name })
+        if ($kept.Count -gt 0) { Write-Host "$tag    surviving evidence: $($kept -join ', ')" }
+        return [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race
+                                  Outcome = 'UNREADABLE'; Comparable = $false }
+    }
+}
+
 function Slug([string]$s) { return (Get-ResultSlug $s) }
 
 if (-not $Roster) { $Roster = Join-Path $RepoRoot ("build\results\classes-{0}.txt" -f (Slug $Race)) }
@@ -353,7 +379,7 @@ try {
         }
         if ($SummarizeOnly) {
             if (Test-Path $json) {
-                $results += (Get-Content $json -Raw | ConvertFrom-Json)
+                $results += (Read-ResultRow $json $tag $OutDir $p)
             } else {
                 # Named, never dropped: a half that failed to arrive would
                 # otherwise shrink the denominator and read as a clean sweep.
@@ -364,7 +390,7 @@ try {
         }
         if ((Test-Path $json) -and -not $Force) {
             Write-Host "$tag  (already done; -Force to re-run)"
-            $results += (Get-Content $json -Raw | ConvertFrom-Json)
+            $results += (Read-ResultRow $json $tag $OutDir $p)
             continue
         }
 

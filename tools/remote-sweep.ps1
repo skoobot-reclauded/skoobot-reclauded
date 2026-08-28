@@ -238,11 +238,21 @@ $staged = @(Get-ChildItem -File -Recurse | ForEach-Object {
 })
 Pop-Location
 
-$refused = @(); $collisions = @(); $copied = 0
+$refused = @(); $collisions = @(); $unparseable = @(); $copied = 0
 foreach ($f in $staged) {
     if ($wantedSlugs.Count -gt 0 -and $f.Name -notin $AGGREGATES) {
         $slug = ($f.Name -split '[.]')[0]
         if ($slug -notin $wantedSlugs) { $refused += $f.Rel; continue }
+    }
+    # A row that does not parse never lands. Two of the ways a corrupt result
+    # reaches the controller cross this zip round-trip, and the staging pass is
+    # the natural checkpoint: failing here costs minutes and names the cause,
+    # instead of killing the summary twenty minutes later (#212). The local
+    # writers -- a game killed mid-write, a full disk -- are still covered by
+    # sweep-classes' own UNREADABLE guard; the two are complementary.
+    if ($f.Name -like '*.json' -and $f.Name -notin $AGGREGATES) {
+        try { $null = Get-Content $f.Full -Raw | ConvertFrom-Json }
+        catch { $unparseable += ("{0} ({1})" -f $f.Rel, $_.Exception.Message.Trim()); continue }
     }
     $dst = Join-Path $OutDir $f.Rel
     if (Test-Path $dst) {
@@ -264,13 +274,18 @@ foreach ($f in $staged) {
 if ($refused.Count -gt 0) {
     Say "REFUSED $($refused.Count) staged file(s) for classes this run did not dispatch: $($refused -join ', ')"
 }
+if ($unparseable.Count -gt 0) {
+    Write-Host ''
+    foreach ($u in $unparseable) { Say "UNPARSEABLE $u" }
+    Say "$($unparseable.Count) staged result row(s) did not parse and were NOT copied; staging kept at $stage"
+}
 if ($collisions.Count -gt 0) {
     Write-Host ''
     foreach ($c in $collisions) { Say "COLLISION $c" }
     Fail ("$($collisions.Count) staged file(s) would have replaced a result written after this run " +
           "started. Nothing was copied for them; staging kept at $stage")
 }
-Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+if ($unparseable.Count -eq 0) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
 Say "results expanded into $OutDir ($copied file(s) copied)"
 
 # The runner's stamp, kept so the merged table can name which machine ran what
