@@ -3270,17 +3270,24 @@ function skoobot_act(noAction)
                         game.player:setTarget(enemy.actor)
                         -- #148: an area talent goes where it catches most,
                         -- which is the chosen enemy's grid only by
-                        -- coincidence. force_target of {x, y, __no_self} gives
-                        -- the talent coordinates and NO target actor
-                        -- (engine/interface/ActorTalents.lua:158), which is
-                        -- how the engine itself supports aiming at a grid.
+                        -- coincidence. Every candidate is an enemy's own grid,
+                        -- so this re-aims by naming a DIFFERENT ACTOR --
+                        -- ordinary targeting, which every talent handles.
+                        --
+                        -- Deliberately not force_target = {x, y, __no_self}:
+                        -- that gives coordinates and no target actor
+                        -- (engine/interface/ActorTalents.lua:158), and a
+                        -- talent that reads its target refuses under it. It is
+                        -- what option 2's arbitrary grids will need; option 1
+                        -- never does, and paying that risk for nothing would
+                        -- be the wrong trade.
                         local aimAt = bot.aimPointFor(tid, targets)
-                        if aimAt and (aimAt.x ~= enemy.x or aimAt.y ~= enemy.y) then
-                            chan.info("[Combat] Aiming %s at %d,%d rather than at %s: catches %d",
-                                      tostring(tid), aimAt.x, aimAt.y,
+                        if aimAt and aimAt.actor and aimAt.actor ~= enemy.actor then
+                            chan.info("[Combat] Aiming %s at %s rather than %s: catches %d",
+                                      tostring(tid), tostring(aimAt.name),
                                       tostring(enemy.name), aimAt.foes or 0)
-                            SAI_useTalent(tid, nil, nil, nil,
-                                          { x = aimAt.x, y = aimAt.y, __no_self = true })
+                            game.player:setTarget(aimAt.actor)
+                            SAI_useTalent(tid, nil, nil, nil, aimAt.actor)
                         else
                             SAI_useTalent(tid, nil, nil, nil, enemy.actor)
                         end

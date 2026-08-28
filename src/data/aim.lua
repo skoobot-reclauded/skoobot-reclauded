@@ -45,6 +45,15 @@ local function num(v) return tonumber(v) or 0 end
 --- Deduped: two actors cannot share a grid today, but a candidate list that
 --- silently scored the same grid twice would make a tie-break look like a
 --- preference.
+---
+--- Each candidate CARRIES ITS ACTOR, and that is what keeps the first cut
+--- safe. Every candidate here is an enemy's own grid, so the caller can aim at
+--- that ACTOR rather than at bare coordinates -- ordinary targeting, which
+--- every talent already handles. Coordinate-only targeting exists
+--- (`force_target = {x, y, __no_self = true}`, engine/interface/
+--- ActorTalents.lua:158) and a talent that reads its target actor REFUSES
+--- under it, so option 2's arbitrary grids will have to deal with that. Option
+--- 1 never needs to.
 function M.candidates(enemies)
     local out, seen = {}, {}
     -- `or {}` is not enough: a truthy non-table reaches ipairs and raises.
@@ -53,7 +62,7 @@ function M.candidates(enemies)
             local k = e.x .. "," .. e.y
             if not seen[k] then
                 seen[k] = true
-                out[#out + 1] = { x = e.x, y = e.y }
+                out[#out + 1] = { x = e.x, y = e.y, actor = e.actor, name = e.name }
             end
         end
     end

@@ -30,8 +30,19 @@ describe("data/aim.lua", function()
     it("offers each enemy's own grid", function()
       local c = M.candidates({ {x=1,y=1}, {x=5,y=9} })
       assert.equal(2, #c)
-      assert.same({x=1,y=1}, c[1])
-      assert.same({x=5,y=9}, c[2])
+      assert.equal(1, c[1].x) ; assert.equal(1, c[1].y)
+      assert.equal(5, c[2].x) ; assert.equal(9, c[2].y)
+    end)
+
+    it("carries the actor, so the caller can aim at it rather than at bare coordinates", function()
+      -- The whole reason option 1 is safe: every candidate is an enemy's own
+      -- grid, so the talent can be fired at an ACTOR the way every other
+      -- talent is. Coordinate-only targeting makes getTarget return no actor,
+      -- and a talent that reads one refuses.
+      local wolf = { name = "wolf" }
+      local c = M.candidates({ { x = 4, y = 4, actor = wolf, name = "wolf" } })
+      assert.equal(wolf, c[1].actor)
+      assert.equal("wolf", c[1].name)
     end)
 
     it("dedupes, so a repeated grid cannot look like a preference", function()
