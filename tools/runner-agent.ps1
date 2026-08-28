@@ -39,10 +39,18 @@ if ($Install) {
     # /it is the whole point: it hands the task an interactive token. /st is in
     # the past on purpose -- the trigger never fires, the controller always
     # starts this by name with `schtasks /run`.
-    $out = & schtasks /create /tn $TaskName /f /sc once /st 00:00 /ru $env:USERNAME /it /tr $tr 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ($out | Out-String)
-        Write-Host "[agent] FAILED to register $TaskName"
+    # Do NOT redirect schtasks' stderr. Under ErrorActionPreference 'Stop' a
+    # native exe's stderr comes back wrapped in ErrorRecords and throws even on
+    # exit 0 -- and schtasks always warns here, because /st is deliberately in
+    # the past. The task registers fine; the redirect is what fails. Check the
+    # exit code instead (OPERATIONS.md 2.1.1).
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & schtasks /create /tn $TaskName /f /sc once /st 00:00 /ru $env:USERNAME /it /tr $tr | Out-Null
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($code -ne 0) {
+        Write-Host "[agent] FAILED to register $TaskName (schtasks exit $code)"
         exit 1
     }
     Write-Host "[agent] $TaskName registered on $env:COMPUTERNAME, base $Base"
