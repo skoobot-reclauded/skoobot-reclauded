@@ -28,34 +28,31 @@ protects the *sweep* from the dev session's junction switches and ff-merges (#19
 Ping is useless — both VMs ship with every inbound ICMP rule disabled. Check TCP and the
 agent in one probe:
 
-```bash
-ssh -i ~/.ssh/skoobot_runner -o BatchMode=yes -o ConnectTimeout=10 localuser@192.168.50.88 \
-  "powershell -NoProfile -Command \"hostname; schtasks /query /tn skoobot-agent | Select-String skoobot; qwinsta | Select-String localuser\""
+**Run it with `-EncodedCommand`.** The inline form this runbook used until 2026-08-28 was
+tested only in bash; in PowerShell — which every other recipe on this page uses — the `|`
+ends the remote command early and the rest goes to the runner's own cmd.exe, so the check
+returns **nothing at all** (`design-remote-harness.md` §2).
+
+```powershell
+$q = @'
+$s = schtasks /query /tn skoobot-agent /fo list
+$s | Where-Object { $_ -match 'Status' }
+'games: ' + (Get-Process t-engine -EA SilentlyContinue).Count
+'@
+$enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($q))
+ssh -i ~/.ssh/skoobot_runner -o BatchMode=yes -o ConnectTimeout=10 localuser@192.168.50.88 "powershell -NoProfile -EncodedCommand $enc"
 ```
 
-Expect three lines: `TestVM08`, the task row, and a `localuser ... Active` session. Fix what
-is missing:
+**Proceed only if you can see BOTH `Status: Ready` and `games: 0`.** Anything else — `Running`,
+a non-zero count, an error, an empty answer, output you did not expect — means **do not poke
+it**. Ask whoever is running, or work locally.
 
-| Missing | Fix |
-|---|---|
-| No answer at all | Start the VM in Hyper-V Manager on the host |
-| No `localuser` session | Log `localuser` on at the VM console and leave it logged on — the agent launches work into that session; ssh lands in session 0, which can never own a window (#182) |
-| No task row | `.\tools\remote-sweep.ps1 -Runner 192.168.50.88 -InstallAgent` |
-
-## Preflight: is the runner FREE?
-
-**Treat TestVM08 as single-occupancy, and check before every poke.** The agent has no
-occupancy control (#213): any controller may overwrite `cmd.ps1` and `schtasks /run` at any
-moment, and nothing tells the run already in flight that it has been replaced. On 2026-08-28
-that destroyed a 30-class sweep and handed its owner a foreign 1-class result to archive in
-its place.
-
-```bash
-ssh -i ~/.ssh/skoobot_runner -o BatchMode=yes -o ConnectTimeout=10 localuser@192.168.50.88   "powershell -NoProfile -Command \"(schtasks /query /tn skoobot-agent /fo list | Select-String 'Status'); 'games: ' + (Get-Process t-engine -EA SilentlyContinue).Count\""
-```
-
-`Status: Ready` and `games: 0` means it is yours. **`Status: Running`, or any non-zero game
-count, means someone is mid-sweep — do not poke it.** Ask them, or work locally.
+That is deliberately a positive requirement rather than the prohibition it used to be
+("`Status: Running` … do not poke it"). A rule phrased as the prohibition fails **open**: a
+probe that returns nothing contains no `Running`, so a literal reading proceeds and pokes a
+busy machine — which is this issue's own incident, reached through a broken check instead of a
+skipped one. Phrased as a requirement, every failure mode including ones nobody anticipated
+lands on "do not poke".
 
 Two reading rules from the same incident, for when the check was skipped:
 

@@ -59,9 +59,13 @@ Two rules follow from the runner having no credentials:
   `git reset --hard origin/main`. What a sweep measured has to be nameable, and a pile of
   rsync'd edits is not (#175). Uncommitted work is not remotely testable, by design.
 - Remote commands travel as files or `-EncodedCommand`, never inline: quoting through
-  ssh → cmd.exe → powershell mangles quotes and `$`, and results come home **zipped**,
+  ssh → cmd.exe → powershell mangles quotes, `$` **and pipes**, and results come home **zipped**,
   because the scp server side is cmd.exe, which does not expand a glob in a remote path and
   reports success while copying nothing.
+  A `|` is the one that keeps escaping notice, because it does not corrupt the result -- it
+  ends the remote command early and hands the rest to the runner's own cmd.exe, so the check
+  comes back **empty and exit 0-ish** rather than wrong. Three separate incidents in one
+  night, including the #213 preflight this document's own runbook prescribed.
 
 ## 3. Slots: several games on one machine
 
