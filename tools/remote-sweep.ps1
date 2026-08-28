@@ -59,14 +59,33 @@ $target  = "$User@$Runner"
 function Invoke-Runner([string]$ps) {
     $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ps))
     $out = & ssh @sshArgs $target "powershell -NoProfile -EncodedCommand $b64" 2>&1
-    return ($out | Where-Object { $_ -notmatch 'post-quantum|store now, decrypt later|openssh\.com/pq|^\*\*' })
+    # CLIXML too, not just the banner. A remote powershell writes progress
+    # records ("Preparing modules for first use") to stderr serialised as
+    # CLIXML; they survived this filter, so every caller using the result as a
+    # VALUE rather than a line stream got a blob -- the runner's name, the pack
+    # count, the stamp recorded into stamps.txt, and worst of all the run.done
+    # check, which is merely tested for truthiness (#211).
+    return ($out | Where-Object {
+        $_ -notmatch 'post-quantum|store now, decrypt later|openssh\.com/pq|^\*\*' -and
+        $_ -notmatch '^#< CLIXML' -and $_ -notmatch '^<Objs |</Objs>'
+    })
 }
+# scp treats a BACKSLASH in the remote path as an escape character, so a
+# 'C:\Users\...' path reaches the far side with the separators eaten and
+# the transfer fails with "No such file or directory". Windows accepts forward
+# slashes everywhere, so normalise once, here, rather than hoping each call
+# site remembers (#211).
+function To-RemotePath([string]$p) { return ($p -replace '\\', '/') }
+
 function Copy-ToRunner([string]$local, [string]$remote) {
-    $null = & scp @sshArgs $local "${target}:$remote" 2>&1
+    $null = & scp @sshArgs $local "${target}:$(To-RemotePath $remote)" 2>&1
     return ($LASTEXITCODE -eq 0)
 }
 function Copy-FromRunner([string]$remote, [string]$local) {
-    $null = & scp @sshArgs "${target}:$remote" $local 2>&1
+    $out = & scp @sshArgs "${target}:$(To-RemotePath $remote)" $local 2>&1
+    # scp's own reason, not just its exit code: 'could not fetch results.zip'
+    # with no cause is the discarded-evidence shape #205 is about.
+    if ($LASTEXITCODE -ne 0) { Say "scp failed: $($out -join ' ')" }
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -149,8 +168,16 @@ while ((Get-Date) -lt $deadline) {
         $lines | Select-Object -Skip $seen | ForEach-Object { Write-Host "  | $_" }
         $seen = $lines.Count
     }
-    $m = Invoke-Runner "if (Test-Path '$RemoteBase\run.done') { Get-Content '$RemoteBase\run.done' }"
-    if ($m) { $done = $true; Say "runner finished ($($m -join ''))"; break }
+    # An explicit sentinel, matched -- never "did the runner print anything?".
+    # Any stray line the remote powershell emitted used to read as a finished
+    # run, and the controller fetched about twenty seconds in, mid-class (#211).
+    $m = Invoke-Runner "if (Test-Path '$RemoteBase\run.done') { 'RUNDONE:' + (Get-Content '$RemoteBase\run.done' -Raw).Trim() } else { 'RUNNING' }"
+    $marker = @($m | Where-Object { "$_" -match '^RUNDONE:' })
+    if ($marker.Count -gt 0) {
+        $done = $true
+        Say "runner finished ($(("$($marker[0])" -replace '^RUNDONE:', '').Trim()))"
+        break
+    }
 }
 if (-not $done) { Fail "runner did not finish within $TimeoutMin min" }
 
