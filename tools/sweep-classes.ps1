@@ -680,11 +680,19 @@ $md.Add('')
 $md.Add('`Descents` counts stairs the HARNESS pressed and `NextZone` counts zone moves it injected; a `CLEARED`''s clearing is the bot''s, but any row with `NextZone` above 0 left at least one zone on the harness''s initiative -- read the trail against both counts. A `STUCK` row is not necessarily a class problem -- read the stop column *and* `NextZone` first, because a known bug eating the whole budget (a sealed door, #64; a talent that opens a dialog every turn), and a level explored with no staircase ever seen (#202), both look exactly like a class that cannot cope.')
 $md.Add('')
 if ($StartZone) { $md.Add("Every class was PLACED in ``$StartZone`` before its run (#160) -- it did not walk there. Town-start and island-start exclusions do not apply."); $md.Add('') }
-$md.Add('Skipped: town-start classes (#123) -- ' + ($TOWN_STARTS -join ', ') + '. Steamtech classes are campaign-gated and never appear in a Maj''Eyal roster.')
-$md.Add('')
-$md.Add('')
-$md.Add('Also skipped on arrival, because the bot cannot cross them: ' + (($UNNAVIGABLE_ZONES.Keys | Sort-Object) -join ', ') + ' (#149).')
-$md.Add('Also skipped as build-dependent, which measures the build rather than the class until #88: ' + (($BUILD_DEPENDENT.Keys | Sort-Object) -join ', ') + '. Run one anyway with ``-Only <class>``.')
+# Derived from the rows, never from the static lists. The old paragraph named
+# the town-start classes on EVERY sweep, including placed ones where they are
+# not skipped at all and four of the five cleared -- so a class that failed for
+# a real reason was offered a deliberate skip as its explanation, three lines
+# below #187's correct account of it (#208). Every skip reaches disk with a
+# Detail naming its own cause (#194), so a new skip reason appears here by
+# itself with no sentence to keep in step.
+$skipped = @($results | Where-Object { $_.Outcome -eq 'SKIPPED' })
+if ($skipped.Count -gt 0) {
+    $md.Add('Skipped this run: ' + (($skipped | Sort-Object Class | ForEach-Object { "$($_.Class) ($($_.Detail))" }) -join ', ') + '. Run one anyway with ``-Only <class>``.')
+} else {
+    $md.Add('Skipped this run: none.')
+}
 
 $mdPath = Join-Path $OutDir 'summary.md'
 Set-Content -Path $mdPath -Value $md -Encoding utf8
