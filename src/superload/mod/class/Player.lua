@@ -3364,15 +3364,15 @@ function skoobot_act(noAction)
             local text, extra, nothingConfigured
             if rows == 0 then
                 text = "no Combat talent is configured"
-                -- #218: name the acting identity. Three rows were configured
-                -- at startup and this branch is only reachable at zero, so the
-                -- question is which actor is being asked -- game.player is what
-                -- the act gate drives, and ToME moves it when party control
-                -- moves (#200). One occurrence closes the fork: the golem's
-                -- name means the missing party model, the character's own means
-                -- data(p) lost its table, which is a stranger bug. Remove this
-                -- once it has answered.
-                text = text .. (" [actor=%s uid=%s]"):format(
+                -- #218: name the acting identity, in the LOG and not in the
+                -- player's stop message -- game.player is what the act gate
+                -- drives and ToME moves it when party control moves (#200), so
+                -- the golem's name here means the missing party model and the
+                -- character's own means data(p) lost its table. Warn, not
+                -- debug: LOG_LEVEL ships at info, so a debug line would be
+                -- dropped on every player and the instrumentation would be
+                -- inert exactly where it has to fire.
+                chan.warn("[Combat] Empty Combat rotation for actor %s (uid %s)",
                     tostring(game.player.name), tostring(game.player.uid))
                 extra = { hint = "set talent usage in the SkooBot: Reclauded menu, "
                     .. bot.keyFor("MENU_SKOOBOT_RECLAUDED")
