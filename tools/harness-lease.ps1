@@ -246,7 +246,11 @@ function Get-LinkTarget($path) {
 $script:LoadedPaths = @('src', 'tools/devbridge', 'tools/devbridge-boot')
 
 function Get-BuildStamp {
-    param([string]$GameDir)
+    # -Repo stamps a checkout directly, skipping the "which checkout is this
+    # game loading?" lookup. That is what a caller wants when the thing being
+    # stamped is the script itself rather than a running game (#210) -- and it
+    # keeps the git reading in one place rather than growing a second copy.
+    param([string]$GameDir, [string]$Repo)
     if (-not $GameDir) { $GameDir = $script:GameDir }
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'      # git writes progress to stderr
@@ -266,11 +270,12 @@ function Get-BuildStamp {
         # non-admin over SSH, which is exactly how the second runner is driven.
         # The CIM version threw on every call there and reported 0. (#180)
         $stamp.cores = [int]$env:NUMBER_OF_PROCESSORS
-        $link = Get-LinkTarget (Join-Path (Join-Path $GameDir 'game\addons') 'tome-skoobot_reclauded')
+        $link = $(if ($Repo) { $null } else { Get-LinkTarget (Join-Path (Join-Path $GameDir 'game\addons') 'tome-skoobot_reclauded') })
         $repo = $null
         if ($link -and $link -notmatch '^<') {
             $repo = Split-Path -Parent ([IO.Path]::GetFullPath($link))   # <checkout>\src -> <checkout>
         }
+        if ($Repo) { $repo = $Repo }
         if (-not $repo) { $repo = $script:LeaseRoot }
         $stamp.repo = "$repo"
         if ($repo -and (Test-Path (Join-Path $repo '.git'))) {

@@ -633,6 +633,24 @@ if ($startBuild -and $startBuild.trees -ne $endBuild.trees) {
 # controller and nothing else. Each machine records its own stamp as it
 # finishes; print those instead, or #175's guarantee is worse than absent --
 # it would name a build with authority and be wrong. See #182.
+# #210: who RENDERED this table, which is routinely not who produced the data.
+# -SummarizeOnly exists partly to re-table an archived sweep after the summary
+# text changes, so a re-tabled sweep is a document assembled from two commits
+# and the header used to name only one. Through Get-BuildStamp, not a bare
+# rev-parse, because a re-table from a dirty tree would otherwise print a
+# commit that does not contain the code that rendered the table.
+$tabler = Get-BuildStamp -Repo $RepoRoot
+$tabledLine = "{0}  {1} tabled by {2}{3} [{4}] {5}" -f `
+    (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $tabler.host, $tabler.short,
+    $(if ($tabler.dirty -lt 0 -or $tabler.dirty_elsewhere -lt 0) { ' (dirty unknown)' }
+      elseif (($tabler.dirty + $tabler.dirty_elsewhere) -gt 0) { " +$($tabler.dirty + $tabler.dirty_elsewhere) UNCOMMITTED" }
+      else { ' (clean)' }),
+    (Split-Path -Leaf $tabler.repo), $tabler.subject
+# Appended, never rewritten: an archive has many summarizers over its life, and
+# "which one wrote the current table" is only half of what a reader needs.
+# Same rule as stamps.txt.
+Add-Content -Path (Join-Path $OutDir 'tabled.txt') -Value $tabledLine -Encoding utf8
+
 $stampFile = Join-Path $OutDir 'stamps.txt'
 if ($SummarizeOnly -and (Test-Path $stampFile)) {
     $stampLines = @(Get-Content $stampFile | Where-Object { $_.Trim() })
@@ -642,6 +660,8 @@ if ($SummarizeOnly -and (Test-Path $stampFile)) {
 } else {
     $md.Add("Measured on **``$($sweepBuild.short)``**$(if ($sweepBuild.dirty -gt 0) { " plus **$($sweepBuild.dirty) uncommitted file(s)**" }) in ``$(Split-Path -Leaf $sweepBuild.repo)`` -- $($sweepBuild.subject)")
 }
+$md.Add('')
+$md.Add("Tabled by ``$($tabler.short)``$(if (($tabler.dirty + $tabler.dirty_elsewhere) -gt 0) { " plus **$($tabler.dirty + $tabler.dirty_elsewhere) uncommitted file(s)**" }), from data measured on the build(s) above. Full history in ``tabled.txt`` (#210).")
 $md.Add('')
 $md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in ``$expectedStart``. The clearing is the bot's; ``Descents`` counts the stairs the harness pressed and ``NextZone`` the zone moves it injected.")
 if ($attempted.Count -gt 0) {

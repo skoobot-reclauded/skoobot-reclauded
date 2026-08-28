@@ -146,6 +146,16 @@ trees match** — the trees name the executed code; the commit is decoration (#1
   the launch path itself broke — worse, file it first (#196). A skipped class launches
   nothing and says so — `ledger: skipped, no launch` — so a clean sweep produces **no**
   `0 launch(es)` lines at all, and one that does is always worth reading (#203).
+- A sweep directory is self-describing about all three of its provenance layers: **what ran**
+  (`stamps.txt`, the machine build stamps), **what judged** (each row's own verdict, frozen at
+  measurement time), and **what rendered** (`tabled.txt`, appended on every summary, and named
+  in the summary header).
+- **The summarizer owns presentation and aggregation only; every judgement is recorded in the
+  row at measurement time.** A summarizer change may alter what a table *says* about a row,
+  never what the row *concluded* — `Outcome` and `Comparable` are computed in the run loop and
+  `-SummarizeOnly` only reads them. A changed judge rule gets new verdicts only from new runs;
+  re-judging an archive is a deliberate re-scoring pass into a new directory, never a quiet
+  property of re-tabling (#210).
 - Slot addon pins **repair themselves**: `New-SlotSet` re-points any of the three that names
   the wrong checkout, or one that no longer exists, and says so (`re-pinned slotN ...`). So
   deleting a freeze worktree is safe — the next batch fixes the pool. It was not always: a
