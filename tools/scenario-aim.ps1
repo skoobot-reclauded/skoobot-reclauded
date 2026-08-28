@@ -120,7 +120,11 @@ for _, tid in ipairs(names) do
   local okt, tg = pcall(p.getTalentTarget, p, t)
   if okt and type(tg) == "table" and not tg.multiple then
     local okty, typ = pcall(function() return engine.Target:getType(tg) end)
-    if okty and type(typ) == "table" and (typ.ball or 0) >= 2 and (typ.range or 0) >= 6 then
+    -- Range has to clear the geometry below, not a fixed 6: the far pair sits
+    -- at ball+2 and its second actor one step beyond it, so a shorter-ranged
+    -- talent would be staged a target it can never project at (#148).
+    if okty and type(typ) == "table" and (typ.ball or 0) >= 2
+       and (typ.range or 0) >= (typ.ball or 0) + 3 then
       ballTid, radius, trange = tid, typ.ball, typ.range
     end
   end
@@ -138,8 +142,12 @@ say("talent", ballTid)
 say("radius", radius)
 say("range", trange)
 
--- The geometry. NEAR at 4, the FAR pair at 8 and adjacent -- so the pair is
--- more than `radius` from NEAR and a ball on NEAR cannot reach them.
+-- The geometry, derived from the talent rather than fixed at 4 and 8. NEAR at
+-- 1 and the FAR pair at radius+2 is the SHORTEST line that still leaves the
+-- pair outside a ball centred on NEAR, and the shortest line is the one a real
+-- level is most likely to offer -- `standable` rejects walls AND the dozens of
+-- actors already standing on it. Fixed 4-and-8 wanted a nine-grid clear run
+-- and put the pair beyond a range-6 talent, which fails as a product bug (#148).
 local spawned = {}
 local function put(x, y, name)
   local m = game.zone:makeEntity(game.level, "actor",
@@ -154,32 +162,69 @@ local function put(x, y, name)
 end
 
 -- Walk outward along a direction that has room for both spots.
-local near, far1, far2
-for _, d in ipairs(util.adjacentDirs()) do
-  if near then break end
-  local nx, ny = p.x, p.y
-  local ok = true
-  for step = 1, 9 do
-    nx, ny = util.coordAddDir(nx, ny, d)
-    if not standable(nx, ny) then ok = false break end
-    if step == 4 then near = { x = nx, y = ny } end
-    if step == 8 then far1 = { x = nx, y = ny } end
-  end
-  if not ok or not far1 then near, far1 = nil, nil
-  else
-    for _, d2 in ipairs(util.adjacentDirs()) do
-      local ax, ay = util.coordAddDir(far1.x, far1.y, d2)
-      if not far2 and standable(ax, ay)
-         and core.fov.distance(near.x, near.y, ax, ay) > radius then
-        far2 = { x = ax, y = ay }
+local dNear, dFar = 1, radius + 2
+local bestRun = 0
+
+-- Does this origin have room? A clear run of dFar in some direction, plus a
+-- partner adjacent to far1 that a ball centred on near cannot also catch.
+local function lineFrom(ox, oy)
+  for _, d in ipairs(util.adjacentDirs()) do
+    local nx, ny = ox, oy
+    local near, far1
+    local ok = true
+    for step = 1, dFar do
+      nx, ny = util.coordAddDir(nx, ny, d)
+      if not standable(nx, ny) then ok = false break end
+      if step > bestRun then bestRun = step end
+      if step == dNear then near = { x = nx, y = ny } end
+      if step == dFar  then far1 = { x = nx, y = ny } end
+    end
+    -- Range is measured in DISTANCE, never in steps: a diagonal step is 1.41
+    -- of distance, so five diagonal steps is 7.07 and a range-6 talent cannot
+    -- project there at all. The bot then correctly declines the far grid and
+    -- the scenario reads a correct refusal as a product failure (#148).
+    if ok and near and far1 and core.fov.distance(ox, oy, far1.x, far1.y) <= trange then
+      for _, d2 in ipairs(util.adjacentDirs()) do
+        local ax, ay = util.coordAddDir(far1.x, far1.y, d2)
+        if standable(ax, ay)
+           and core.fov.distance(ox, oy, ax, ay) <= trange
+           and core.fov.distance(near.x, near.y, ax, ay) > radius then
+          return near, far1, { x = ax, y = ay }
+        end
       end
     end
-    if not far2 then near, far1 = nil, nil end
   end
 end
+
+-- The ORIGIN is a precondition too, and the fixture does not satisfy it:
+-- fixture-berserker parks the character at x=0, the west map edge, where the
+-- longest clear run in any direction is 2. So move to a grid that has room,
+-- the way scenario-flee's findQuiet walks until its situation exists. The
+-- teardown already restores the position and asserts it (#148).
+local near, far1, far2 = lineFrom(p.x, p.y)
+local movedTo
+if not near then
+  for y = 1, map.h - 2 do
+    if near then break end
+    for x = 1, map.w - 2 do
+      if standable(x, y) then
+        local a, b, c = lineFrom(x, y)
+        if a then
+          p:move(x, y, true)
+          near, far1, far2, movedTo = a, b, c, x .. "," .. y
+          break
+        end
+      end
+    end
+  end
+end
+say("moved_to", movedTo or "not moved")
 if not near or not far1 or not far2 then
   for _, q in ipairs(pacified) do q[1].faction = q[2] end
-  say("setup", "no straight line with room for a near spot at 4 and a pair at 8")
+  -- Say what the level offered, not only what was wanted: a setup message that
+  -- reports the shortfall is diagnosable in one read (#205).
+  say("setup", "no grid on this level has a clear straight run of " .. dFar
+               .. " with an adjacent partner; longest clear run found was " .. bestRun)
   return table.concat(r, "  ||  ")
 end
 say("near_at", near.x .. "," .. near.y)
