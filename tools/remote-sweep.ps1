@@ -41,7 +41,11 @@ param(
     # Install the session-1 agent and stop.
     [switch]$InstallAgent,
     [int]$PollSec = 20,
-    [int]$TimeoutMin = 240
+    [int]$TimeoutMin = 240,
+    # Collect a finished run without dispatching one: no cmd.ps1 is written and
+    # the agent is not started, so it cannot displace a run in flight (#213).
+    # -Only is then a CLAIM about what was dispatched, not a record of it.
+    [switch]$FetchOnly
 )
 $ErrorActionPreference = 'Continue'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -117,7 +121,7 @@ $short = (& git -C $RepoRoot rev-parse --short $Ref).Trim()
 # A ref the runner cannot fetch fails minutes later inside the agent, where the
 # error is a line in a log nobody is watching. Ask now.
 $onRemote = (& git -C $RepoRoot branch -r --contains $Ref 2>&1) -join ' '
-if (-not $onRemote.Trim()) {
+if (-not $FetchOnly -and -not $onRemote.Trim()) {
     Fail "$short is not on any remote branch -- push it first, or the runner cannot check it out"
 }
 
@@ -153,40 +157,47 @@ exit `$LASTEXITCODE
 
 $tmp = Join-Path $env:TEMP 'skoobot-remote-cmd.ps1'
 Set-Content -Path $tmp -Value $cmd -Encoding utf8
-if (-not (Copy-ToRunner $tmp "$RemoteBase/cmd.ps1")) { Fail 'could not copy the command file' }
+# Short-circuits before the copy: writing cmd.ps1 is the act that takes the
+# runner from whoever holds it, so -FetchOnly must never reach it.
+if (-not $FetchOnly -and -not (Copy-ToRunner $tmp "$RemoteBase/cmd.ps1")) { Fail 'could not copy the command file' }
 # Count what the far side will parse, not the array as passed: -File hands a
 # comma-joined list over as ONE string, so $Only.Count reports 1 for any
 # number of classes and the line claims a sweep far smaller than it dispatched.
 $onlyCount = 0
 if ($Only) { $onlyCount = @(($Only -join ',') -split ',' | Where-Object { $_.Trim() }).Count }
-Say "sync to $short, $Minutes min/class$(if ($Only) { ", $onlyCount class(es)" } else { ', full roster' })"
+if ($FetchOnly) { Say "fetch only: collecting whatever the runner already has$(if ($Only) { ", expecting $onlyCount class(es)" })" }
+else            { Say "sync to $short, $Minutes min/class$(if ($Only) { ", $onlyCount class(es)" } else { ', full roster' })" }
 
 # --- go ------------------------------------------------------------------
-$null = Invoke-Runner "Remove-Item '$RemoteBase\run.done' -ErrorAction SilentlyContinue; schtasks /run /tn skoobot-agent | Out-Null"
-Say 'started; streaming the runner log'
+if ($FetchOnly) {
+    Say 'fetch only: the agent was not started; nothing was dispatched'
+} else {
+    $null = Invoke-Runner "Remove-Item '$RemoteBase\run.done' -ErrorAction SilentlyContinue; schtasks /run /tn skoobot-agent | Out-Null"
+    Say 'started; streaming the runner log'
 
-$seen = 0
-$deadline = (Get-Date).AddMinutes($TimeoutMin)
-$done = $false
-while ((Get-Date) -lt $deadline) {
-    Start-Sleep -Seconds $PollSec
-    $lines = @(Invoke-Runner "if (Test-Path '$RemoteBase\run.log') { Get-Content '$RemoteBase\run.log' }")
-    if ($lines.Count -gt $seen) {
-        $lines | Select-Object -Skip $seen | ForEach-Object { Write-Host "  | $_" }
-        $seen = $lines.Count
+    $seen = 0
+    $deadline = (Get-Date).AddMinutes($TimeoutMin)
+    $done = $false
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds $PollSec
+        $lines = @(Invoke-Runner "if (Test-Path '$RemoteBase\run.log') { Get-Content '$RemoteBase\run.log' }")
+        if ($lines.Count -gt $seen) {
+            $lines | Select-Object -Skip $seen | ForEach-Object { Write-Host "  | $_" }
+            $seen = $lines.Count
+        }
+        # An explicit sentinel, matched -- never "did the runner print anything?".
+        # Any stray line the remote powershell emitted used to read as a finished
+        # run, and the controller fetched about twenty seconds in, mid-class (#211).
+        $m = Invoke-Runner "if (Test-Path '$RemoteBase\run.done') { 'RUNDONE:' + (Get-Content '$RemoteBase\run.done' -Raw).Trim() } else { 'RUNNING' }"
+        $marker = @($m | Where-Object { "$_" -match '^RUNDONE:' })
+        if ($marker.Count -gt 0) {
+            $done = $true
+            Say "runner finished ($(("$($marker[0])" -replace '^RUNDONE:', '').Trim()))"
+            break
+        }
     }
-    # An explicit sentinel, matched -- never "did the runner print anything?".
-    # Any stray line the remote powershell emitted used to read as a finished
-    # run, and the controller fetched about twenty seconds in, mid-class (#211).
-    $m = Invoke-Runner "if (Test-Path '$RemoteBase\run.done') { 'RUNDONE:' + (Get-Content '$RemoteBase\run.done' -Raw).Trim() } else { 'RUNNING' }"
-    $marker = @($m | Where-Object { "$_" -match '^RUNDONE:' })
-    if ($marker.Count -gt 0) {
-        $done = $true
-        Say "runner finished ($(("$($marker[0])" -replace '^RUNDONE:', '').Trim()))"
-        break
-    }
+    if (-not $done) { Fail "runner did not finish within $TimeoutMin min" }
 }
-if (-not $done) { Fail "runner did not finish within $TimeoutMin min" }
 
 # --- bring the results home ---------------------------------------------
 # Zipped, not scp'd per file: the server side is cmd.exe, which does not expand
