@@ -165,30 +165,42 @@ function Complete-Run($r, [string]$forced) {
     $slug = Get-ResultSlug $r.Item.Class
     $secs = [int]((Get-Date) - $r.Started).TotalSeconds
 
-    # Reap EVERY game this slot's transcript launched, not just the one the
-    # lease remembers. The lease records the latest launch only, so when a
-    # birth game outlives its harness the next launch overwrites the record
-    # and the orphan becomes unkillable by lookup -- the first 8-slot run
-    # leaked 7 first-wave games that way, and 22 accumulated (#196). The
-    # transcript names them all, and pids parsed from THIS slot's transcript
-    # cannot belong to a sibling.
-    $jlPath = Join-Path $r.WorkDir 'job.log'
-    if (Test-Path $jlPath) {
-        $launched = @(Select-String -Path $jlPath -Pattern 'launched pid=(\d+)' -AllMatches |
-            ForEach-Object { $_.Matches } | ForEach-Object { [int]$_.Groups[1].Value } | Select-Object -Unique)
-        foreach ($lp in $launched) {
-            $proc = Get-Process -Id $lp -ErrorAction Ignore
-            if ($proc -and $proc.ProcessName -eq 't-engine' -and $proc.StartTime -ge $r.Started) {
-                Stop-Process -Id $lp -Force -ErrorAction Ignore
-                # Loudly: every reap here is a Stop-Game path that failed.
-                Say "slot$($r.Slot.N) -- REAPED leaked game pid=$lp ($($r.Item.Class)); a Stop-Game path failed"
-            }
+    # Reap from the slot's launch LEDGER, which harness.ps1 appends at every
+    # launch. The first version of this grepped job.log for "launched pid="
+    # lines -- and was INERT, because sweep-classes captures its children's
+    # output into variables, so those lines never reach the job transcript.
+    # The happy-path test read "no REAPED lines" as no false positives when it
+    # was actually blindness: a test that could not fail (#196). The line below
+    # therefore always prints the ledger count -- 0 launches recorded would
+    # mean the ledger itself is broken, and silence is how the last one hid.
+    $ledger = Join-Path (Join-Path $r.Slot.Home 'T-Engine\4.0') 'skoobot-bridge\launched.log'
+    $entries = @()
+    if (Test-Path $ledger) { $entries = @(Get-Content $ledger -ErrorAction Ignore | Where-Object { $_.Trim() }) }
+    $reaped = 0
+    foreach ($e in $entries) {
+        $parts = "$e" -split ','
+        $lp = 0; try { $lp = [int]$parts[0] } catch { continue }
+        $proc = Get-Process -Id $lp -ErrorAction Ignore
+        if (-not $proc -or $proc.ProcessName -ne 't-engine') { continue }
+        if ($parts.Count -ge 2) {
+            # Identity, not just pid: a recycled pid belongs to someone else.
+            try {
+                $ls = [datetime]::Parse($parts[1], $null, [Globalization.DateTimeStyles]::RoundtripKind)
+                if ([math]::Abs(($proc.StartTime - $ls).TotalSeconds) -gt 5) { continue }
+            } catch { continue }
         }
+        Stop-Process -Id $lp -Force -ErrorAction Ignore
+        $reaped++
     }
+    if (Test-Path $ledger) { Remove-Item $ledger -Force -ErrorAction Ignore }
+    Say "slot$($r.Slot.N) -- ledger: $($entries.Count) launch(es), $reaped reaped$(if ($reaped -gt 0) { ' -- a Stop-Game path failed' })"
 
     # Reps of one class share a filename, so they need separate directories.
+    # (Eaten once by a careless region edit: with $dest undefined every copy
+    # below failed quietly and a CLEARED class merged as MISSING.)
     $dest = $(if ($Repeat -gt 1) { Join-Path $OutDir "rep$($r.Item.Rep)" } else { $OutDir })
     if (-not (Test-Path $dest)) { $null = New-Item -ItemType Directory -Force -Path $dest }
+    $jlPath = Join-Path $r.WorkDir 'job.log'
 
     if ($forced) {
         # Kill this slot's game by the pid in its own lease file, so the other

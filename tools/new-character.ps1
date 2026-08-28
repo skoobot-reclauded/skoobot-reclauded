@@ -65,7 +65,10 @@ function Step($label, $lua, $timeout = 30) {
 }
 
 $g = Start-Game -TimeoutSec 60
-if (-not $g.Ready) { Write-Host 'FAILED: no bridge at menu'; exit 1 }
+# Stop-Game, or the not-ready game outlives the report of its failure: five of
+# slot8's leaked games in the first 8-slot run came through this exact exit,
+# proven by their pids in the kept birth transcripts (#196).
+if (-not $g.Ready) { Write-Host 'FAILED: no bridge at menu'; Stop-Game; exit 1 }
 
 # Straight into a new tome game. Module:instanciate reboots the Lua state into
 # the module -- the engine's own path, the same call the New Game menu makes.

@@ -1534,6 +1534,13 @@ return "installed save_name=" .. tostring(game.save_name)
     if ($endReason -in @('MAX_MINUTES', 'MAX_LEVEL', 'MAX_TURNS')) { $exit = 0 }
 }
 finally {
+    # Everything in this block runs on the way to Stop-Game, and the script
+    # sets ErrorActionPreference 'Stop' -- so any evidence-gathering statement
+    # that errors ABORTS the finally, skips Stop-Game, and leaks the game on
+    # top of whatever went wrong. Evidence is best-effort; the kill is not.
+    # Downgrade to Continue for the cleanup path (#196).
+    $ErrorActionPreference = 'Continue'
+
     # The engine's own complaints, from the whole run's log, before it goes.
     $luaErrors = @()
     try {

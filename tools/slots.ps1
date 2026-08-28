@@ -81,6 +81,16 @@ function New-SlotSet {
             $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $fr)
             Set-Content -Path $fr -Value 'firstrun = 1' -Encoding ascii
         }
+        # And keep a fresh home deterministically offline: without these two,
+        # engine/init.lua:99 forces connectivity ON, and the main menu spends
+        # its time fetching news and a te4.org WebView (engine/init.lua:99-110).
+        $cfgDir = Join-Path $eng 'settings'
+        if (-not (Test-Path $cfgDir)) { $null = New-Item -ItemType Directory -Force -Path $cfgDir }
+        foreach ($cfg in @(@('disable_all_connectivity.cfg', 'disable_all_connectivity = true'),
+                           @('firstrun_gdpr.cfg', 'firstrun_gdpr = true'))) {
+            $cp = Join-Path $cfgDir $cfg[0]
+            if (-not (Test-Path $cp)) { Set-Content -Path $cp -Value $cfg[1] -Encoding ascii }
+        }
 
         if ($Save) {
             # Get-SaveDirName, never a second copy of the rule: the save NAME

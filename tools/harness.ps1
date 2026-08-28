@@ -406,6 +406,15 @@ function Start-Game {
     $script:GamePid = $p.Id
     $null = Enter-HarnessLease -GamePid $p.Id
     Write-Host "[harness] launched pid=$($p.Id)"
+    # #196: record every launch in a per-home ledger, so a supervisor can reap
+    # orphans by identity (pid AND start time -- a recycled pid will not match).
+    # The lease cannot serve this purpose: it records only the LATEST launch,
+    # and the zone reader never even reached a finally -- the caller's
+    # `Select-Object -First 1` pipeline killed it mid-flight.
+    try {
+        $lst = $(try { $p.StartTime.ToString('o') } catch { (Get-Date).ToString('o') })
+        Add-Content -Path (Join-Path $script:BridgeDir 'launched.log') -Encoding ascii -Value "$($p.Id),$lst"
+    } catch { }
 
     # Anchor to THIS process's output before believing anything in the log.
     # `[CPU] Detected N CPUs` is the engine's first line, so seeing it means we

@@ -409,8 +409,15 @@ try {
         # to explore, so it is skipped here rather than after burning the
         # budget. Read from the save's own zone, so a class no list knows about
         # is still caught (#134).
-        $zone = & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'read-save-zone.ps1') -SaveName $save 2>&1 |
-                Select-String '^ZONE ' | ForEach-Object { ($_ -split ' ')[1] } | Select-Object -First 1
+        # Run the reader TO COMPLETION and parse afterwards. Piped through
+        # `Select-Object -First 1`, PowerShell 5.1 kills the native child the
+        # instant the ZONE line passes -- before the child's finally can run
+        # Stop-Game -- so every SUCCESSFUL zone read leaked the loaded game it
+        # had launched. Measured: the pipeline returned in ~200ms against a
+        # cleanup that needed ~500ms, and 7 of 8 first-wave slots leaked
+        # exactly one game each (#196).
+        $zoneOut = & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'read-save-zone.ps1') -SaveName $save 2>&1
+        $zone = @($zoneOut | Select-String '^ZONE ' | ForEach-Object { ("$_" -split ' ')[1] }) | Select-Object -First 1
         $unnav = $(if ($StartZone) { $null } else { Test-UnnavigableZone $zone })
         if ((-not $StartZone) -and ((Test-TownZone $zone) -or $unnav)) {
             $why = $(if ($unnav) { "$unnav ($zone)" } else { "town start: $zone" })

@@ -18,7 +18,7 @@ public class Win {
 '@
 
 $g = Start-Game -TimeoutSec 60
-if (-not $g.Ready) { Write-Host 'FAILED: no bridge'; exit 1 }
+if (-not $g.Ready) { Write-Host 'FAILED: no bridge'; Stop-Game; exit 1 }  # #196: same leak shape as new-character had
 
 $r = Invoke-Bridge -Lua 'return "focused polls=" .. bridge.polls' -TimeoutSec 20
 "baseline    $($r.Status)  $($r.Result)"
