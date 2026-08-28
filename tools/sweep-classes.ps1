@@ -1,4 +1,4 @@
-﻿<#
+<#
     The class baseline sweep (#123): birth one character of every measurable
     class, run each for a bounded time, and report whether it cleared its
     first floor.
@@ -102,6 +102,11 @@ param(
     [switch]$NoRunLease,
     # Skip pointing the game's junctions at this checkout.
     [switch]$NoSetup,
+    # Rebuild summary.md from the result files already in -OutDir and run
+    # nothing. Two machines each sweep half the roster into one directory and
+    # this turns the halves into one table (#182); it also re-tables an
+    # archived sweep after the summary text changes.
+    [switch]$SummarizeOnly,
     # #160: put every class in this zone before its run, whatever birth chose.
     # Cheating on purpose. It retires the two exclusions that were never about
     # the class -- town starts (#123) and island starts (#149) -- because both
@@ -287,7 +292,7 @@ if ($measurable.Count -eq 0) { Fail 'nothing to measure' }
 #
 # setup-dev is idempotent and cheap, so doing it here costs a second and removes
 # the whole class of "measured the wrong build" and "failed eight minutes in".
-if (-not $NoSetup) {
+if (-not $NoSetup -and -not $SummarizeOnly) {
     $sd = & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev.ps1') 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host ($sd | Out-String)
@@ -296,7 +301,7 @@ if (-not $NoSetup) {
     Write-Host "[sweep] junctions point at $RepoRoot"
 }
 
-if (-not $NoRunLease) {
+if (-not $NoRunLease -and -not $SummarizeOnly) {
     $null = Wait-HarnessLease -TimeoutSec ($LeaseWaitMin * 60) -Label 'sweep'
     Write-Host "[sweep] holding the game lease for this run (host pid $PID)"
 }
@@ -314,6 +319,17 @@ try {
         if ($p.Skip) {
             Write-Host "$tag  SKIPPED ($($p.Skip))"
             $results += [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'SKIPPED'; Detail = $p.Skip }
+            continue
+        }
+        if ($SummarizeOnly) {
+            if (Test-Path $json) {
+                $results += (Get-Content $json -Raw | ConvertFrom-Json)
+            } else {
+                # Named, never dropped: a half that failed to arrive would
+                # otherwise shrink the denominator and read as a clean sweep.
+                Write-Host "$tag  MISSING (no result file in $OutDir)"
+                $results += [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'MISSING'; Comparable = $false }
+            }
             continue
         }
         if ((Test-Path $json) -and -not $Force) {
@@ -515,9 +531,30 @@ $md.Add('')
 # not from this script's directory, and carrying the uncommitted count because
 # a hash on its own lies whenever someone is mid-edit.
 $sweepBuild = Get-BuildStamp -GameDir $script:GameDir
-$md.Add("Measured on **``$($sweepBuild.short)``**$(if ($sweepBuild.dirty -gt 0) { " plus **$($sweepBuild.dirty) uncommitted file(s)**" }) in ``$(Split-Path -Leaf $sweepBuild.repo)`` -- $($sweepBuild.subject)")
+# A merged sweep did not run here, so this process's junctions describe the
+# controller and nothing else. Each machine records its own stamp as it
+# finishes; print those instead, or #175's guarantee is worse than absent --
+# it would name a build with authority and be wrong. See #182.
+$stampFile = Join-Path $OutDir 'stamps.txt'
+if ($SummarizeOnly -and (Test-Path $stampFile)) {
+    $stampLines = @(Get-Content $stampFile | Where-Object { $_.Trim() })
+    $md.Add("Merged from $($stampLines.Count) machine(s); each ran:")
+    $md.Add('')
+    foreach ($sl in $stampLines) { $md.Add("- ``$sl``") }
+} else {
+    $md.Add("Measured on **``$($sweepBuild.short)``**$(if ($sweepBuild.dirty -gt 0) { " plus **$($sweepBuild.dirty) uncommitted file(s)**" }) in ``$(Split-Path -Leaf $sweepBuild.repo)`` -- $($sweepBuild.subject)")
+}
 $md.Add('')
 $md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in ``$expectedStart``. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
+# The percentage counts what arrived. A merge that lost a half would read
+# "10 of 10 (100%)" with the absent classes listed quietly further down, which
+# is the most flattering possible way to report a broken run -- so it is said
+# here, next to the number it invalidates. See #182.
+$missing = @($results | Where-Object { $_.Outcome -eq 'MISSING' })
+if ($missing.Count -gt 0) {
+    $md.Add('')
+    $md.Add("**INCOMPLETE -- $($missing.Count) class(es) produced no result file** and are not in that percentage: " + (($missing | ForEach-Object { $_.Class }) -join ', ') + '.')
+}
 $md.Add('')
 # What the numbers mean depends entirely on this, so it is never left implied.
 if ($Conditions) {
