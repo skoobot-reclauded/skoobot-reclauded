@@ -126,8 +126,9 @@ $elapsed = ((Get-Date) - $started).TotalSeconds
 Write-Host ''
 Say ("all slots done in {0:N0}s wall" -f $elapsed)
 Write-Host ''
-Write-Host ('  {0,-7} {1,-10} {2,10} {3,10} {4}' -f 'slot', 'ended', 'turns', 'turns/s', 'floors')
+Write-Host ('  {0,-7} {1,-9} {2,9} {3,8} {4,8} {5}' -f 'slot', 'ended', 'turns', 'ran', 'turns/s', 'floors')
 $total = 0
+$rates = @()
 foreach ($s in $slots) {
     $out = Join-Path $s.Slot 'soak.json'
     if (-not (Test-Path $out)) {
@@ -140,12 +141,25 @@ foreach ($s in $slots) {
     $t = 0
     if ($j.turns -and $j.turns.delta) { $t = [int]$j.turns.delta }
     $total += $t
-    Write-Host ('  {0,-7} {1,-10} {2,10:N0} {3,10:N1} {4}' -f
-        "slot$($s.N)", $j.ended, $t, $(if ($elapsed -gt 0) { $t / $elapsed } else { 0 }), ($j.zones -join ' > '))
+    # Against the slot's OWN duration, not the batch wall clock. Dividing by
+    # the latter credits a slot that died at 60s with the whole window and
+    # makes contention look like an improvement. All slots start together, so
+    # ended-minus-started is the run.
+    $dur = 0
+    try { $dur = ([datetime]$j.ended - $started).TotalSeconds } catch { $dur = $elapsed }
+    if ($dur -le 0) { $dur = $elapsed }
+    $rates += $(if ($dur -gt 0) { $t / $dur } else { 0 })
+    Write-Host ('  {0,-7} {1,-9} {2,9:N0} {3,7:N0}s {4,8:N1} {5}' -f
+        "slot$($s.N)", $j.ended.Substring(11,8), $t, $dur, $(if ($dur -gt 0) { $t / $dur } else { 0 }), ($j.zones -join ' > '))
 }
 Write-Host ''
 Say ("total {0:N0} game turns across {1} slot(s) in {2:N0}s -- {3:N1} turns/s aggregate" -f
     $total, $Count, $elapsed, $(if ($elapsed -gt 0) { $total / $elapsed } else { 0 }))
+if ($rates.Count -gt 0) {
+    $mean = ($rates | Measure-Object -Average).Average
+    $min  = ($rates | Measure-Object -Minimum).Minimum
+    Say ("per-slot turns/s: mean {0:N1}, slowest {1:N1}, across {2} slot(s) that reported" -f $mean, $min, $rates.Count)
+}
 
 foreach ($j in $jobs) { Remove-Job $j -Force -ErrorAction SilentlyContinue }
 if (-not $KeepSlots) { Say "slots left in place at $Root (-KeepSlots is the default behaviour; delete by hand if wanted)" }
