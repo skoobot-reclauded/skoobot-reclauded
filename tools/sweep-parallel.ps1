@@ -360,9 +360,12 @@ ep1..rep$Repeat -- each is one sample, summarise a rep with -SummarizeOnly -OutD
 
 # ---- one table over the lot ---------------------------------------------
 Say 'merging'
+# -Conditions travels to the merge as well as to the workers. Without it the
+# summary printed sweep-classes' OWN default and asserted it of every row --
+# the same "report the intent, not the runs" defect one layer up (#206).
 $m = @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'sweep-classes.ps1'),
        '-SummarizeOnly', '-OutDir', $OutDir, '-Race', $Race, '-Roster', $Roster,
-       '-Minutes', $Minutes)
+       '-Minutes', $Minutes, '-Conditions', $Conditions)
 # Summarise exactly what was asked for. Without this a three-class run reports
 # the other twenty-six as MISSING, which is true of the roster and a lie about
 # the run (#187).

@@ -493,6 +493,17 @@ try {
         # choice was anything else.
         $comparable = ($startZone -eq $expectedStart)
 
+        # A run whose stop-condition overrides did not all apply measured
+        # something else: a power condition left at its shipped STOP ends the
+        # run wherever a qualifying enemy stays in view, which is the very
+        # thing the WARN override exists to prevent. Marked, never killed --
+        # the row keeps its data and leaves the headline (#206).
+        # Filtered, not just wrapped: @($null).Count is 1 in PowerShell, so a
+        # soak JSON written before this field existed would mark every run
+        # non-comparable.
+        $condMissing = @($s.conditions_missing | Where-Object { $_ })
+        if ($condMissing.Count -gt 0) { $comparable = $false }
+
         # CLEARED outranks DIED, because the question this sweep answers is
         # "did this class get off its FIRST floor" and the run keeps going for
         # the whole budget afterwards. A class that clears floor one and then
@@ -559,6 +570,8 @@ try {
                              } else { '' })
             StartZone= $startZone
             Comparable = $comparable
+            Conditions        = (@($s.conditions) -join ',')
+            ConditionsMissing = ($condMissing -join ',')
             Stops    = $s.stop_total
             TopStop  = $top
             EndReason= $s.end_reason
@@ -657,8 +670,18 @@ if ($missing.Count -gt 0) {
 }
 $md.Add('')
 # What the numbers mean depends entirely on this, so it is never left implied.
+# Said of the RUNS, not of the parameter: the old sentence asserted a
+# configuration for 29 runs on the strength of what was asked for, and three
+# runs across two sweeps had quietly applied four of five (#206). Same rule as
+# #175 and #186 -- trees, stamp time and conditions all describe what ran.
+$condShort = @($results | Where-Object { $_.ConditionsMissing })
 if ($Conditions) {
-    $md.Add("Stop conditions for every run: ``$Conditions``. The power conditions ship as STOP, which ends a run on the spot wherever a boss stays in view -- so a sweep left at the defaults measures where the product hands over, not what the class can do.")
+    $md.Add("Stop conditions requested for every run: ``$Conditions``. The power conditions ship as STOP, which ends a run on the spot wherever a boss stays in view -- so a sweep left at the defaults measures where the product hands over, not what the class can do.")
+    if ($condShort.Count -gt 0) {
+        $md.Add('')
+        $md.Add("**$($condShort.Count) run(s) applied FEWER stop conditions than requested** and are not in that percentage: " +
+            (($condShort | ForEach-Object { "$($_.Class) (missing $($_.ConditionsMissing))" }) -join ', ') + '.')
+    }
 } else {
     $md.Add('Stop conditions: **the shipped defaults**. The power conditions are STOP, so any class that met an enemy above MAX_DIFF_POWER stopped there and its outcome says nothing about the class.')
 }

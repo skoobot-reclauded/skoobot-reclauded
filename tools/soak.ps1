@@ -354,6 +354,9 @@ $deaths    = 0
 $killer    = $null
 $stuckLabel = $null
 $conditionsApplied = @()
+# Requested but not applied. A run with the wrong knobs is not a cheaper
+# measurement, it is a different one, so this travels to the sweep row (#206).
+$conditionsMissing = @()
 # (f) and (g). The two rung counters are rows of the resume table even at
 # zero, so a summary always says whether they fired.
 $resumes['descend'] = 0
@@ -1050,9 +1053,34 @@ return "installed save_name=" .. tostring(game.save_name)
         foreach ($pair in ($Conditions -split ',')) {
             if ($pair -match '^\s*([A-Z_]+)\s*=\s*(WARN|STOP|IGNORE)\s*$') {
                 $code = $Matches[1]; $policy = $Matches[2]
-                $cr = Invoke-Bridge -Lua "local c = skoobot_reclauded.conditions.get('$code') if not c then return 'ERR no condition $code' end skoobot_reclauded.conditions.set('$code', '$policy') return '$code=' .. skoobot_reclauded.conditions.get('$code').stoptype" -TimeoutSec 30
+                $lua = "local c = skoobot_reclauded.conditions.get('$code') if not c then return 'ERR no condition $code' end skoobot_reclauded.conditions.set('$code', '$policy') return '$code=' .. skoobot_reclauded.conditions.get('$code').stoptype"
+                # OK is not enough, and neither is "not an ERR". The registry
+                # answers `get` for a code it does not know, so `set` can
+                # no-op and the call still returns OK carrying the OLD policy
+                # -- measured: NO_SUCH_CONDITION=WARN came back
+                # `OK NO_SUCH_CONDITION=STOP` and was recorded as applied.
+                # Compare the value against the one asked for (#206).
+                $want = "$code=$policy"
+                $cr = Invoke-Bridge -Lua $lua -TimeoutSec 30
                 Write-Host "  condition $($cr.Status) $($cr.Result)"
-                if ($cr.Status -eq 'OK' -and $cr.Result -notmatch '^ERR') { $conditionsApplied += $cr.Result }
+                # One retry before giving up. This is a single bridge
+                # round-trip during setup, and the observed failures look like
+                # the claim-phase race #207 fixed rather than a real registry
+                # miss -- an `ERR no condition` will not be helped by a retry
+                # and costs one round-trip to rule out (#206).
+                if (-not ($cr.Status -eq 'OK' -and "$($cr.Result)".Trim() -eq $want)) {
+                    Start-Sleep -Milliseconds 500
+                    $cr = Invoke-Bridge -Lua $lua -TimeoutSec 30
+                    Write-Host "  condition $($cr.Status) $($cr.Result) (retry)"
+                }
+                if ($cr.Status -eq 'OK' -and "$($cr.Result)".Trim() -eq $want) { $conditionsApplied += $cr.Result }
+                else {
+                    # Warn, never abort: a failed run wastes a slot and its
+                    # whole budget and produces nothing. The row keeps its data
+                    # and loses the headline instead (#187's machinery).
+                    $conditionsMissing += $code
+                    Warn "$code was not applied: wanted $want, got $($cr.Status) $($cr.Result) -- this run is not comparable"
+                }
             } else {
                 Write-Host "  condition IGNORED '$pair' (want CODE=WARN|STOP|IGNORE)"
             }
@@ -1734,6 +1762,7 @@ finally {
             rows      = @($escortRows)
         }
         conditions   = @($conditionsApplied)
+        conditions_missing = @($conditionsMissing)
         take_stairs  = $stairsApplied
         placed_in    = $placedIn
         auto_spend   = $(if ($NoAutoSpend) { 'off' } else { 'on' })
@@ -1775,6 +1804,9 @@ finally {
     $md.Add("| Lua errors | $($luaErrors.Count) |")
     $md.Add("| tainted | $tainted |")
     $md.Add("| conditions | $(if ($conditionsApplied.Count -gt 0) { $conditionsApplied -join ', ' } else { 'defaults' }) |")
+    if ($conditionsMissing.Count -gt 0) {
+        $md.Add("| conditions NOT applied | **$($conditionsMissing -join ', ')** -- this run is not comparable (#206) |")
+    }
     $md.Add("| take_stairs | $stairsApplied |")
     if ($placedIn) { $md.Add("| placed_in | $placedIn -- the character was PUT here, it did not walk (#160) |") }
     $md.Add("| polls | $polls every $PollSec s |")
