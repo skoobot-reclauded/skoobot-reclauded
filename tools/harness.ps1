@@ -337,20 +337,114 @@ function Clear-BridgeQueue {
     -- killing it produced two phantom CRASHED launches on 2026-08-22 (#60).
     With no live holder it still reaps everything, orphans included.
 #>
-function Stop-Game {
-    $foreign = Get-ForeignLease
-    if ($foreign) {
-        Write-Host "[harness] not stopping the game: it belongs to $(Format-Lease $foreign)"
-        $script:GamePid = $null
-        return
+function Wait-ProcessGone {
+    <#
+        Stop-Process -Force is ASYNCHRONOUS: it returns before the process has
+        exited, so a caller that checks immediately sees the game still alive.
+        The old kill-by-name teardown hid this behind a wait loop; splitting the
+        intents (#217) left teardown without one, and test-occupancy's
+        "reaps the orphan" check caught it in the first run.
+
+        Waits on the NAMED pids, never on "no t-engine anywhere" -- in slot mode
+        the siblings are supposed to still be running.
+    #>
+    param([int[]]$Ids, [int]$TimeoutSec = 30)
+    if (-not $Ids -or $Ids.Count -eq 0) { return $true }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        $alive = @($Ids | Where-Object { Get-Process -Id $_ -ErrorAction Ignore })
+        if ($alive.Count -eq 0) { return $true }
+        Start-Sleep -Milliseconds 25
     }
-    if ($env:TOME_HOME) {
-        # Slot mode: by name would kill every other slot's game. Only ours.
-        if ($script:GamePid) { Stop-Process -Id $script:GamePid -Force -ErrorAction Ignore }
-        $script:GamePid = $null
-        return
+    Write-Host "[harness] WARNING: pid(s) $($Ids -join ',') still alive ${TimeoutSec}s after being killed"
+    return $false
+}
+
+function Invoke-LedgerReap {
+    <#
+        Kill every game a home's launch ledger still accounts for, and clear
+        the ledger. Reaps by IDENTITY -- pid AND launch time -- so a recycled
+        pid belonging to someone else is never a match, and only t-engine is
+        ever killed.
+
+        The one killing mechanism for teardown, shared by the serial path here
+        and by the slot scheduler's Invoke-SlotReap. A second hand-written copy
+        is the two-places drift that cost Cultist of Entropy eight sweeps
+        (#121, #217).
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$BridgeDir,
+        # Clear the ledger after reaping. Only a caller that ACCOUNTS for the
+        # launches should: the scheduler at a class end, or Clear-Stage, which
+        # owns the machine. A teardown must NOT -- every child process
+        # (new-character, read-save-zone, soak) tears down inside one class, and
+        # if each wiped the record the supervisor's count would read 0 and
+        # #196's "the ledger itself is broken" alarm, and #203's wording built
+        # on it, would both lose their evidence. Caught by a slot run reporting
+        # `0 launch(es)` where it had always reported 3 (#217).
+        [switch]$Clear
+    )
+
+    if (-not $BridgeDir) { $BridgeDir = $script:BridgeDir }
+    $ledger = Join-Path $BridgeDir 'launched.log'
+    $entries = @()
+    if (Test-Path $ledger) {
+        $entries = @(Get-Content $ledger -ErrorAction Ignore | Where-Object { $_.Trim() })
     }
-    Get-Process -Name 't-engine' -ErrorAction Ignore | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    $reaped = 0
+    $killed = @()
+    foreach ($e in $entries) {
+        $parts = "$e" -split ','
+        $lp = 0; try { $lp = [int]$parts[0] } catch { continue }
+        $proc = Get-Process -Id $lp -ErrorAction Ignore
+        if (-not $proc -or $proc.ProcessName -ne 't-engine') { continue }
+        if ($parts.Count -ge 2) {
+            try {
+                $ls = [datetime]::Parse($parts[1], $null, [Globalization.DateTimeStyles]::RoundtripKind)
+                if ([math]::Abs(($proc.StartTime - $ls).TotalSeconds) -gt 5) { continue }
+            } catch { continue }
+        }
+        Stop-Process -Id $lp -Force -ErrorAction Ignore
+        $killed += $lp
+        $reaped++
+    }
+    if ($Clear -and (Test-Path $ledger)) { Remove-Item $ledger -Force -ErrorAction Ignore }
+    $null = Wait-ProcessGone -Ids $killed
+    return [pscustomobject]@{ Launches = $entries.Count; Reaped = $reaped }
+}
+
+function Clear-Stage {
+    <#
+        Kill every t-engine on the machine, by name.
+
+        This is the janitor #196 established the harness had relied on for its
+        whole life: a game some failure path forgot to stop was cleaned up by
+        the next launch, invisibly. It is correct for a caller that OWNS the
+        machine -- which is Start-Game, before it launches, and nothing else by
+        default.
+
+        It is NOT correct as a teardown, and used to be: Stop-Game did this on
+        every exit path, so a read-only summarize wiped an eight-slot sweep
+        (#215). Stop-Game now stops what this host started; the dangerous verb
+        lives here, where its callers can be counted.
+
+        NOT SAFE beside slot sweeps. Slot leases live in each slot's own home
+        and are invisible from here, so this cannot refuse on their behalf --
+        #213's hazard-4 design is what would let it, and is not built. Until
+        then the count below is the only warning: a non-zero one in a machine
+        running slots means this has just killed somebody's work.
+    #>
+    [CmdletBinding()]
+    param()
+    # The stage is clear, so the record starts fresh too.
+    $ledger = Join-Path $script:BridgeDir 'launched.log'
+    if (Test-Path $ledger) { Remove-Item $ledger -Force -ErrorAction Ignore }
+    $victims = @(Get-Process -Name 't-engine' -ErrorAction Ignore)
+    if ($victims.Count -gt 0) {
+        $victims | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction Ignore }
+        Write-Host "[harness] cleared the stage: killed $($victims.Count) t-engine process(es) by name"
+    }
     $script:GamePid = $null
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -359,6 +453,31 @@ function Stop-Game {
         Start-Sleep -Milliseconds 25
     }
     Write-Host '[harness] WARNING: a t-engine process is still alive 30s after being killed'
+}
+
+function Stop-Game {
+    <#
+        Stop what THIS host started: its own game by pid, plus anything its own
+        home's launch ledger still accounts for. Never by name -- see
+        Clear-Stage (#215, #217).
+    #>
+    $foreign = Get-ForeignLease
+    if ($foreign) {
+        Write-Host "[harness] not stopping the game: it belongs to $(Format-Lease $foreign)"
+        $script:GamePid = $null
+        return
+    }
+    $mine = @()
+    if ($script:GamePid) {
+        Stop-Process -Id $script:GamePid -Force -ErrorAction Ignore
+        $mine += $script:GamePid
+    }
+    $script:GamePid = $null
+    # The ledger catches what the pid alone cannot: a launch whose Stop-Game
+    # never ran. In serial mode the lease guarantees one live host at a time,
+    # so this home's entries are ours to reap.
+    $null = Invoke-LedgerReap -BridgeDir $script:BridgeDir
+    $null = Wait-ProcessGone -Ids $mine
 }
 
 function Test-GameAlive {
@@ -393,7 +512,10 @@ function Start-Game {
     )
     $null = Enter-HarnessLease
     Assert-JunctionsOwned -GameDir $script:GameDir
-    Stop-Game
+    # The ONE janitor call site: this host is about to own the game, so a
+    # leftover from someone's forgotten failure path is exactly what should go
+    # (#196). Every other path wants Stop-Game, which stops only its own.
+    if ($env:TOME_HOME) { Stop-Game } else { Clear-Stage }
     if (-not (Test-Path $script:BridgeDir)) { New-Item -ItemType Directory -Path $script:BridgeDir | Out-Null }
     Get-ChildItem $script:BridgeDir -Filter 'cmd-*' -ErrorAction Ignore | Remove-Item -Force
     Clear-GameLog

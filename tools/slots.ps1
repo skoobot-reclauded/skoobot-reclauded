@@ -24,6 +24,11 @@
 if (-not (Get-Command Get-LinkTarget -ErrorAction Ignore)) {
     . (Join-Path $PSScriptRoot 'harness-lease.ps1')
 }
+# Invoke-LedgerReap is the shared killing mechanism (#217). Both callers dot-source
+# harness.ps1 before this file, but this one documents itself as standalone.
+if (-not (Get-Command Invoke-LedgerReap -ErrorAction Ignore)) {
+    . (Join-Path $PSScriptRoot 'harness.ps1')
+}
 
 function New-SlotSet {
     [CmdletBinding()]
@@ -235,37 +240,22 @@ function Invoke-SlotReap {
         [string]$Outcome = ''
     )
 
-    $ledger = Join-Path (Join-Path $Slot.Home 'T-Engine\4.0') 'skoobot-bridge\launched.log'
-    $entries = @()
-    if (Test-Path $ledger) {
-        $entries = @(Get-Content $ledger -ErrorAction Ignore | Where-Object { $_.Trim() })
-    }
-    $reaped = 0
-    foreach ($e in $entries) {
-        $parts = "$e" -split ','
-        $lp = 0; try { $lp = [int]$parts[0] } catch { continue }
-        $proc = Get-Process -Id $lp -ErrorAction Ignore
-        if (-not $proc -or $proc.ProcessName -ne 't-engine') { continue }
-        if ($parts.Count -ge 2) {
-            # Identity, not just pid: a recycled pid belongs to someone else.
-            try {
-                $ls = [datetime]::Parse($parts[1], $null, [Globalization.DateTimeStyles]::RoundtripKind)
-                if ([math]::Abs(($proc.StartTime - $ls).TotalSeconds) -gt 5) { continue }
-            } catch { continue }
-        }
-        Stop-Process -Id $lp -Force -ErrorAction Ignore
-        $reaped++
-    }
-    if (Test-Path $ledger) { Remove-Item $ledger -Force -ErrorAction Ignore }
+    # One killing mechanism, in harness.ps1, shared with the serial teardown
+    # path -- never a second copy of the identity rule (#121, #217).
+    # -Clear: this IS the accounting point for the class that just ended.
+    $r = Invoke-LedgerReap -Clear -BridgeDir (Join-Path (Join-Path $Slot.Home 'T-Engine\4.0') 'skoobot-bridge')
+    $launches = $r.Launches
+    $reaped   = $r.Reaped
+
     # A skip with a NON-zero count keeps the alarm form: a class that skipped
     # and still launched something is a real anomaly.
-    $note = if ($entries.Count -eq 0 -and $Outcome -eq 'SKIPPED') {
+    $note = if ($launches -eq 0 -and $Outcome -eq 'SKIPPED') {
         'skipped, no launch'
     } else {
-        "$($entries.Count) launch(es), $reaped reaped" + $(if ($reaped -gt 0) { ' -- a Stop-Game path failed' })
+        "$launches launch(es), $reaped reaped" + $(if ($reaped -gt 0) { ' -- a Stop-Game path failed' })
     }
     Write-Host "[slots] slot$($Slot.N) -- ledger: $note"
-    return [pscustomobject]@{ Launches = $entries.Count; Reaped = $reaped }
+    return [pscustomobject]@{ Launches = $launches; Reaped = $reaped }
 }
 
 function Get-SlotGamePid {
