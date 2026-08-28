@@ -438,7 +438,14 @@ try {
         if ($Dossier) { $sargs += '-Dossier' }
         if ($Conditions) { $sargs += @('-Conditions', $Conditions) }
         if ($StartZone) { $sargs += @('-StartZone', $StartZone) }
-        $null = & powershell @sargs 2>&1
+        # The soak is a CHILD process, so everything it prints -- Write-Host
+        # included -- arrives here as stdout, and assigning it to $null threw
+        # away both warnings it raises and the whole narration of the run
+        # (#205). Same stream semantics as before, piped instead of discarded.
+        # Named "$slug.*" so the parallel scheduler's per-class copy filter
+        # carries it up out of a slot with no change there (#196).
+        $soakLog = Join-Path $OutDir "$slug.soak.log"
+        & powershell @sargs 2>&1 | Out-File -FilePath $soakLog -Encoding utf8
 
         if (-not (Test-Path $soakOut)) {
             Write-Host "$tag  ERROR - the run wrote no result record"

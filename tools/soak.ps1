@@ -366,7 +366,19 @@ $levelLoops     = @{}     # "zone:level|reason" -> recurrences of one hand-back 
 $descendRetryAt = @{}     # "zone:level" -> hand-back count at which (f) may be tried again after "no path"
 $zoneList = @()           # [{id; min; max}] as verified against the installed module
 $zoneTransitions = New-Object System.Collections.Generic.List[string]
+# Machine-checkable companion to the transcript: the transcript answers "what
+# happened here?", this answers "did anything happen anywhere?" without opening
+# 29 files, so a sweep can count runs-with-warnings instead of trusting silence
+# (#205).
+$warnings = New-Object System.Collections.Generic.List[string]
 $walk = $null             # the (f)/(g) state: @{action; phase; key; moves; waits; from}
+
+function Warn($m) {
+    # Print exactly as before AND record it. One call site per warning, so a
+    # new warning cannot reach the transcript without reaching the array.
+    Write-Host "[soak] WARNING: $m"
+    $script:warnings.Add($m)
+}
 
 function Count-Resume($action, $s, $reason) {
     if ($resumes.ContainsKey($action)) { $resumes[$action]++ } else { $resumes[$action] = 1 }
@@ -1025,7 +1037,7 @@ return "installed save_name=" .. tostring(game.save_name)
     if ($Dossier) {
         $don = Invoke-Bridge -Lua 'return bridge.dossierOn()' -TimeoutSec 30
         Write-Host "  dossier  $($don.Status) $($don.Result)"
-        if ($don.Status -ne 'OK') { Write-Host '[soak] WARNING: dossiers requested but the hook did not install' }
+        if ($don.Status -ne 'OK') { Warn 'dossiers requested but the hook did not install' }
     }
 
     # The player's own stop-condition knobs, through the product's API. A
@@ -1056,7 +1068,7 @@ return "installed save_name=" .. tostring(game.save_name)
         $sr = Invoke-Bridge -TimeoutSec 30 -Lua ("local ok = skoobot_reclauded.setCharSetting('TAKE_STAIRS', {0}) return tostring(ok) .. ' ' .. tostring(skoobot_reclauded.cfg and skoobot_reclauded.cfg('TAKE_STAIRS'))" -f $vals[$TakeStairs])
         Write-Host "  stairs   $($sr.Status) TAKE_STAIRS=$TakeStairs ($($sr.Result))"
         if ($sr.Status -eq 'OK' -and $sr.Result -notmatch '^false') { $stairsApplied = $TakeStairs }
-        else { Write-Host '[soak] WARNING: TAKE_STAIRS was not applied; the run may decline its own descent' }
+        else { Warn 'TAKE_STAIRS was not applied; the run may decline its own descent' }
     }
 
     # #160: place the character, before anything reads the zone. Dialogs first
@@ -1070,7 +1082,7 @@ return "installed save_name=" .. tostring(game.save_name)
         $where = (Invoke-Bridge -Lua 'return sk.where()' -TimeoutSec 30).Result
         Write-Host "  placed   $($tp.Status) -> $where ($($tp.Result))"
         if ($where -like "$StartZone*") { $placedIn = $where }
-        else { Write-Host "[soak] WARNING: asked for $StartZone and landed in $where" }
+        else { Warn "asked for $StartZone and landed in $where" }
     }
 
     if ($PreLevel -gt 0) {
@@ -1705,6 +1717,7 @@ finally {
             next_zone = [ordered]@{ taken = $resumes['next-zone']; transitions = @($zoneTransitions); zones = @($zoneList | ForEach-Object { "$($_.id) ($($_.min)-$($_.max))" }) }
             waits     = $waits
         }
+        warnings     = @($warnings)
         lua_errors   = [ordered]@{ count = $luaErrors.Count; samples = @($luaErrors | Select-Object -First 10) }
         tainted      = $tainted
         polls        = $polls
@@ -1758,6 +1771,7 @@ finally {
     $md.Add("| descend | $($resumes['descend']) taken ($descendWalks walk(s), $descendMoves move(s), $descendAbandoned abandoned; $(if ($NoDescend) { 'off' } else { "after $DescendAfter hand-backs, explored, or a loop of $LoopAfter" })) |")
     $md.Add("| next-zone | $($resumes['next-zone']) taken$(if ($zoneTransitions.Count -gt 0) { ' (' + ($zoneTransitions -join '; ') + ')' }); list: $(($zoneList | ForEach-Object { $_.id }) -join ' > ') |")
     $md.Add("| waits | $waits (a change refused for two turns after a kill) |")
+    $md.Add("| warnings | $(if ($warnings.Count -gt 0) { "**$($warnings.Count)** -- " + ($warnings -join '; ') } else { 'none' }) |")
     $md.Add("| Lua errors | $($luaErrors.Count) |")
     $md.Add("| tainted | $tainted |")
     $md.Add("| conditions | $(if ($conditionsApplied.Count -gt 0) { $conditionsApplied -join ', ' } else { 'defaults' }) |")
