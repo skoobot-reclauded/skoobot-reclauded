@@ -45,6 +45,7 @@ local lifem = dofile("/data-skoobot_reclauded/life.lua")
 local resources = dofile("/data-skoobot_reclauded/resources.lua")
 local escortm = dofile("/data-skoobot_reclauded/escort.lua")
 local explorestall = dofile("/data-skoobot_reclauded/explorestall.lua")
+local aim = dofile("/data-skoobot_reclauded/aim.lua")
 
 local STATE_REST    = 10
 local STATE_EXPLORE = 11
@@ -2674,6 +2675,77 @@ end
 bot.handleIncoming = handleIncoming
 
 -------------------------------------------------------------------------------
+--- Where to put an area talent, or nil to aim at the chosen enemy as before.
+---
+--- #148: the bot picks a TARGET where it should pick an AIM POINT. Firing a
+--- ball at the enemy it happened to choose is only the best grid by
+--- coincidence -- the far enemy in a corridor lines the whole corridor up, and
+--- nothing ever asked.
+---
+--- Deliberately narrow, for cost. Only talents whose footprint covers more
+--- than one grid are searched: a bolt or a single-target hit gains nothing,
+--- because the enemy's own grid IS the best one for them. The field names come
+--- from engine/Target.lua's types_def (:614) -- `ball`, `cone`, `line` for a
+--- beam, `widebeam`, `triangle`, `wall`; `bolt` and `hit` set none of them.
+---
+--- Candidates are the enemies the rotation is already considering (#148's
+--- option 1). The grid between two enemies that catches both is option 2 and
+--- is not searched here.
+local function aimPointFor(tid, enemies)
+    local p = game.player
+    local t = p.getTalentFromId and p:getTalentFromId(tid)
+    if not t then return nil end
+
+    -- getTalentTarget runs the talent's own target function, which is arbitrary
+    -- code; pcall rather than trust it, the way requires_target already is.
+    local okTg, tg = pcall(p.getTalentTarget, p, t)
+    if not okTg or type(tg) ~= "table" then return nil end
+    -- A `multiple` target describes several footprints at once and getType
+    -- returns a list. Not reasoned about rather than guessed at.
+    if tg.multiple then return nil end
+    local okTyp, typ = pcall(function() return engine.Target:getType(tg) end)
+    if not okTyp or type(typ) ~= "table" then return nil end
+    if not (typ.ball or typ.cone or typ.line or typ.widebeam or typ.triangle or typ.wall) then
+        return nil
+    end
+
+    local cands = {}
+    for _, c in ipairs(aim.candidates(enemies)) do
+        if p:canProject(tg, c.x, c.y) then
+            -- The dummy projection ToME's own AI uses (mod/ai/tactical.lua:118):
+            -- a FUNCTION in the damtype slot walks the footprint instead of
+            -- applying damage. The callback fires for every grid whatever
+            -- selffire and friendlyfire say, so the filtering is here -- an
+            -- actor the talent cannot hit must not be counted against it.
+            local foes, allies, selfhit = 0, 0, 0
+            local ok = pcall(function()
+                p:project(typ, c.x, c.y, function(px, py)
+                    local act = game.level.map(px, py, engine.Map.ACTOR)
+                    if not act or act.dead then return end
+                    if act == p then
+                        if typ.selffire then selfhit = selfhit + 1 end
+                    elseif p:reactionToward(act) < 0 then
+                        foes = foes + 1
+                    elseif typ.friendlyfire then
+                        allies = allies + 1
+                    end
+                end)
+            end)
+            if ok then
+                -- selffire and friendlyfire may be NUMBERS meaning percent
+                -- (tactical.lua:167-168). Missing this reads a 20%-selffire
+                -- talent as certain to catch the character.
+                if type(typ.selffire) == "number" then selfhit = selfhit * typ.selffire / 100 end
+                if type(typ.friendlyfire) == "number" then allies = allies * typ.friendlyfire / 100 end
+                c.foes, c.allies, c.selfhit = foes, allies, selfhit
+                cands[#cands + 1] = c
+            end
+        end
+    end
+    return (aim.best(cands))
+end
+bot.aimPointFor = aimPointFor
+
 -- The decision (v1 skoobot_act)
 -------------------------------------------------------------------------------
 
@@ -3196,7 +3268,22 @@ function skoobot_act(noAction)
                     if tid ~= nil then
                         chan.debug("[Combat] Using talent: %s on target %s", tid, tostring(enemy.name))
                         game.player:setTarget(enemy.actor)
-                        SAI_useTalent(tid, nil, nil, nil, enemy.actor)
+                        -- #148: an area talent goes where it catches most,
+                        -- which is the chosen enemy's grid only by
+                        -- coincidence. force_target of {x, y, __no_self} gives
+                        -- the talent coordinates and NO target actor
+                        -- (engine/interface/ActorTalents.lua:158), which is
+                        -- how the engine itself supports aiming at a grid.
+                        local aimAt = bot.aimPointFor(tid, targets)
+                        if aimAt and (aimAt.x ~= enemy.x or aimAt.y ~= enemy.y) then
+                            chan.info("[Combat] Aiming %s at %d,%d rather than at %s: catches %d",
+                                      tostring(tid), aimAt.x, aimAt.y,
+                                      tostring(enemy.name), aimAt.foes or 0)
+                            SAI_useTalent(tid, nil, nil, nil,
+                                          { x = aimAt.x, y = aimAt.y, __no_self = true })
+                        else
+                            SAI_useTalent(tid, nil, nil, nil, enemy.actor)
+                        end
                         return true
                     end
                 end
