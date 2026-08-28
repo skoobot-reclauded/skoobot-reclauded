@@ -45,6 +45,13 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+# Get-ResultSlug, so the receiving end names classes by the SAME rule the
+# producing end does. A second copy of that rule cost Cultist of Entropy
+# eight sweeps (#121).
+. (Join-Path $PSScriptRoot 'harness.ps1')
+# When this run began: anything locally newer was produced after it started,
+# and is therefore not this run's to overwrite (#188).
+$RunStarted = Get-Date
 if (-not $OutDir) { $OutDir = Join-Path $RepoRoot 'build\results\sweep' }
 
 function Fail($m) { Write-Host "[remote] FAILED - $m"; exit 1 }
@@ -200,8 +207,71 @@ if (-not (Test-Path $OutDir)) { $null = New-Item -ItemType Directory -Force -Pat
 $localZip = Join-Path $env:TEMP 'skoobot-remote-results.zip'
 Remove-Item $localZip -ErrorAction SilentlyContinue
 if (-not (Copy-FromRunner $zip $localZip)) { Fail 'could not fetch results.zip' }
-Expand-Archive -Path $localZip -DestinationPath $OutDir -Force
-Say "results expanded into $OutDir"
+# Expand to STAGING, never straight onto the controller's results. The
+# move-aside on the runner closes the observed route -- a stale file riding
+# home in the zip -- but the fetch itself was still an unconditional
+# overwrite, so a roster-split mistake that dispatched one class to both
+# machines still resolved silently, last writer wins. Cost when clean: a
+# staging directory. Cost when wrong: a loud failure instead of a quietly
+# replaced measurement (#188).
+$stage = Join-Path $env:TEMP ('skoobot-remote-stage-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+Expand-Archive -Path $localZip -DestinationPath $stage -Force
+
+# Only what was dispatched may land, whatever else is on the runner. That
+# closes "the runner is clean" at the RECEIVING end, where it can be checked.
+$wantedSlugs = @()
+if ($Only) {
+    $wantedSlugs = @(($Only -join ',') -split ',' | ForEach-Object { $_.Trim() } |
+                     Where-Object { $_ } | ForEach-Object { Get-ResultSlug $_ })
+}
+# Aggregates belong to the sweep, not to a class, so they are never slug-checked.
+$AGGREGATES = @('stamps.txt', 'tabled.txt', 'summary.md', 'ANALYSIS.md')
+
+# Relative paths via Resolve-Path, never by subtracting string lengths:
+# $env:TEMP is the 8.3 SHORT name here ("LOCALU~1") while Get-ChildItem returns
+# the long one, so the prefixes differ in length and a Substring silently cuts
+# the name mid-way -- it made a directory called "5" the first time.
+Push-Location $stage
+$staged = @(Get-ChildItem -File -Recurse | ForEach-Object {
+    [pscustomobject]@{ Full = $_.FullName; Name = $_.Name
+                       Rel  = (Resolve-Path -Relative $_.FullName) -replace '^[.][\/]', '' }
+})
+Pop-Location
+
+$refused = @(); $collisions = @(); $copied = 0
+foreach ($f in $staged) {
+    if ($wantedSlugs.Count -gt 0 -and $f.Name -notin $AGGREGATES) {
+        $slug = ($f.Name -split '[.]')[0]
+        if ($slug -notin $wantedSlugs) { $refused += $f.Rel; continue }
+    }
+    $dst = Join-Path $OutDir $f.Rel
+    if (Test-Path $dst) {
+        $mt = (Get-Item $dst).LastWriteTime
+        if ($mt -gt $RunStarted) {
+            # Newer than this run's start, so it is a FRESH local result and not
+            # something this run is entitled to replace.
+            $collisions += ("{0}`n      local  {1}  (written {2})`n      staged {3}" -f
+                            $f.Rel, $dst, $mt.ToString('yyyy-MM-dd HH:mm:ss'), $f.Full)
+            continue
+        }
+    }
+    $ddir = Split-Path -Parent $dst
+    if ($ddir -and -not (Test-Path $ddir)) { $null = New-Item -ItemType Directory -Force -Path $ddir }
+    Copy-Item $f.Full $dst -Force
+    $copied++
+}
+
+if ($refused.Count -gt 0) {
+    Say "REFUSED $($refused.Count) staged file(s) for classes this run did not dispatch: $($refused -join ', ')"
+}
+if ($collisions.Count -gt 0) {
+    Write-Host ''
+    foreach ($c in $collisions) { Say "COLLISION $c" }
+    Fail ("$($collisions.Count) staged file(s) would have replaced a result written after this run " +
+          "started. Nothing was copied for them; staging kept at $stage")
+}
+Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+Say "results expanded into $OutDir ($copied file(s) copied)"
 
 # The runner's stamp, kept so the merged table can name which machine ran what
 # instead of reporting this machine's junctions for both halves (#175, #182).
