@@ -19,6 +19,7 @@ in this repo's GitHub Issues.**
 |---|---|
 | Touch GitHub, auth, issues, or publishing | **[docs/github-workflow.md](docs/github-workflow.md)** |
 | Touch the test harness or `tools/` | [docs/design-harness.md](docs/design-harness.md) |
+| Run a sweep, or deep-dive a class, on the slot harness | [docs/runbook-sweeps.md](docs/runbook-sweeps.md) -- the machine caps live there; architecture and why in [docs/design-remote-harness.md](docs/design-remote-harness.md) |
 | Change stop conditions or the act loop | [docs/design-stop-conditions.md](docs/design-stop-conditions.md) |
 | Touch anything that reads `spotHostiles`, FOV or `map.seens` | [docs/design-explore-stall.md](docs/design-explore-stall.md) — `seens` means *lit*, not *visible*, and it accumulates across a run |
 | Copy anything from the original, mishander's fork, or a PR to the original | [NOTICE](NOTICE), [docs/salvage-mishander.md](docs/salvage-mishander.md), [docs/salvage-yura9111.md](docs/salvage-yura9111.md) |
