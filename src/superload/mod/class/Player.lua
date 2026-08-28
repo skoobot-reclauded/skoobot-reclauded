@@ -3364,6 +3364,16 @@ function skoobot_act(noAction)
             local text, extra, nothingConfigured
             if rows == 0 then
                 text = "no Combat talent is configured"
+                -- #218: name the acting identity. Three rows were configured
+                -- at startup and this branch is only reachable at zero, so the
+                -- question is which actor is being asked -- game.player is what
+                -- the act gate drives, and ToME moves it when party control
+                -- moves (#200). One occurrence closes the fork: the golem's
+                -- name means the missing party model, the character's own means
+                -- data(p) lost its table, which is a stranger bug. Remove this
+                -- once it has answered.
+                text = text .. (" [actor=%s uid=%s]"):format(
+                    tostring(game.player.name), tostring(game.player.uid))
                 extra = { hint = "set talent usage in the SkooBot: Reclauded menu, "
                     .. bot.keyFor("MENU_SKOOBOT_RECLAUDED")
                     .. ", or let the bot suggest a loadout from the talent screen" }
@@ -3377,11 +3387,41 @@ function skoobot_act(noAction)
                 text = ("no Combat talent is ready -- %d held while impaired, "
                     .. "the rest on cooldown or unusable"):format(heldCount)
             end
+            -- #218: this stop spends NO GAME TIME, so the harness restarts
+            -- into an identical state and the run livelocks -- Alchemist did
+            -- 15 firings at a single game turn, and the harness's own escapes
+            -- (rest, then step-away) both fired and neither broke it. The third
+            -- site with #150's shape, after the posture branch and #163's
+            -- movement check.
+            --
+            -- Its own budget, not #150's: that one is "nothing can cure this
+            -- effect", this one is "the rotation went empty", and sharing would
+            -- let one spend the other's allowance. Keyed on game.turn so a stop
+            -- that legitimately re-fires after time has passed starts fresh.
+            if nothingConfigured and not bot.do_nothing then
+                local nr = bot.levelState("norotation")
+                if nr.turn ~= game.turn then nr.turn, nr.tries = game.turn, 0 end
+                nr.tries = nr.tries + 1
+                if nr.tries <= bot.BLOCK_WAIT_TRIES then
+                    chan.info("[Combat] %s; waiting rather than re-stopping at the same turn (%d/%d)",
+                        text, nr.tries, bot.BLOCK_WAIT_TRIES)
+                    bot.actions = bot.actions + 1
+                    game.player:waitTurn()
+                    return
+                end
+            end
             stop(notice.CANNOT_ACT, text, extra)
             -- #96: offer the way out rather than describing it. After the
             -- stop, so the message log and the banner read the same as they
             -- would without it and nothing depends on the dialog existing.
-            if nothingConfigured then offerSetup() end
+            --
+            -- #218: once per run. Re-opening it every iteration is what turned
+            -- a livelock into a livelock with a dialog cycle in it, and the
+            -- offer has done its job after the first showing either way.
+            if nothingConfigured and not bot.setup_offered then
+                bot.setup_offered = true
+                offerSetup()
+            end
             return
         end
     end
