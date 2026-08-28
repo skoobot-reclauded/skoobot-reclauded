@@ -84,6 +84,43 @@ foreach ($g in ($rows | Group-Object { $_.Row.Outcome } | Sort-Object Count -Des
 }
 Say ''
 
+# ----------------------------------------------------------- comparability --
+# #219: every co-location fix of the last two days stopped at summary.md, so
+# ANALYSIS carried none of the facts that say whether these rows can be read
+# together. A table that cannot be compared is worse than one that says so.
+$notComparable = @($rows | Where-Object { $_.Row.PSObject.Properties['Comparable'] -and -not $_.Row.Comparable })
+$condShort  = @($rows | Where-Object { "$($_.Row.ConditionsMissing)" })
+$warned     = @($rows | Where-Object { $_.Soak -and @($_.Soak.warnings | Where-Object { $_ }).Count -gt 0 })
+$protos     = @($rows | Where-Object { "$($_.Row.Proto)" } | ForEach-Object { "$($_.Row.Proto)" } | Select-Object -Unique)
+
+if ($notComparable.Count -gt 0 -or $condShort.Count -gt 0 -or $warned.Count -gt 0 -or $protos.Count -ne 1) {
+    Say '## Comparability'
+    Say ''
+    if ($protos.Count -gt 1) {
+        Say "- **These rows were not all measured by the same protocol** (``proto``: $($protos -join ', ')). Each row is true of its own run; the set is not one measurement (#214, #219)."
+        foreach ($pr in $protos) {
+            Say "    - ``$pr`` -- $((@($rows | Where-Object { "$($_.Row.Proto)" -eq $pr }) | ForEach-Object { $_.Row.Class }) -join ', ')"
+        }
+    } elseif ($protos.Count -eq 1) {
+        Say "- Protocol: ``$($protos[0])`` for every row."
+    } else {
+        Say '- **No ``proto`` on any row**, so it cannot be checked that these runs share a protocol (#214). Rows written before that field existed.'
+    }
+    if ($condShort.Count -gt 0) {
+        Say "- **$($condShort.Count) run(s) applied fewer stop conditions than requested** and are not comparable with the rest (#206): $((($condShort | ForEach-Object { "$($_.Row.Class) (missing $($_.Row.ConditionsMissing))" }) -join ', '))."
+    }
+    if ($warned.Count -gt 0) {
+        Say "- **$($warned.Count) run(s) raised a warning** (#205): $((($warned | ForEach-Object { "$($_.Row.Class)" }) -join ', ')). Read ``<class>.soak.md`` before trusting those rows."
+        foreach ($w in $warned) {
+            foreach ($msg in @($w.Soak.warnings | Where-Object { $_ })) { Say "    - $($w.Row.Class): $msg" }
+        }
+    }
+    if ($notComparable.Count -gt 0) {
+        Say "- Outside the headline percentage (``Comparable = false``): $((($notComparable | ForEach-Object { $_.Row.Class }) -join ', '))."
+    }
+    Say ''
+}
+
 # ------------------------------------------------------------------ endings --
 $withSoak = @($rows | Where-Object { $_.Soak })
 if ($withSoak.Count -gt 0) {
@@ -145,6 +182,23 @@ foreach ($r in $rows) {
             $suspects += [pscustomobject]@{ Class = $c; Kind = $kind
                 Detail = "x$($s.count) at turn $($s.first_turn)$(if ($s.first_turn -ne $s.last_turn) { "-$($s.last_turn)" }): $($s.reason)" }
         }
+    }
+    # #202 / #209: progression the HARNESS injected. Skirmisher's DIED row left
+    # norgos-lair from floor ONE this way and nothing in ANALYSIS could see it
+    # -- the trail read like a class that ranged widely. The source floor is the
+    # payload: ":1" means the level was explored and no way down was ever seen.
+    # Deeper floors are the designed bottom-of-zone hand-off, so they stay quiet.
+    if ([int]("0" + "$($r.Row.NextZone)") -gt 0) {
+        $from = "$($r.Row.NextZoneFrom)"
+        $designed = $from -and ($from -match ':(\d+)$') -and [int]$Matches[1] -ge 2
+        if (-not $designed) {
+            $suspects += [pscustomobject]@{ Class = $c; Kind = 'injected-exit'
+                Detail = "left its zone on the harness's initiative x$($r.Row.NextZone)$(if ($from) { ", first from $from" }) -- not its own progress" }
+        }
+    }
+    if ("$($r.Row.DescendExhausted)") {
+        $suspects += [pscustomobject]@{ Class = $c; Kind = 'descend-exhausted'
+            Detail = "gave up descending on $($r.Row.DescendExhausted) -- saw a staircase it could not use (#209)" }
     }
     if ($r.Soak.lua_errors -and [int]$r.Soak.lua_errors.count -gt 0) {
         $suspects += [pscustomobject]@{ Class = $c; Kind = 'lua-error'
