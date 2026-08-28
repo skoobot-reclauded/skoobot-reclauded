@@ -515,6 +515,9 @@ function Start-Game {
     # The ONE janitor call site: this host is about to own the game, so a
     # leftover from someone's forgotten failure path is exactly what should go
     # (#196). Every other path wants Stop-Game, which stops only its own.
+    # Each game seeds its own baseline from its launch resize; carrying the
+    # previous game's size over would compare across processes (#221).
+    $script:LastResolution = $null
     if ($env:TOME_HOME) { Stop-Game } else { Clear-Stage }
     if (-not (Test-Path $script:BridgeDir)) { New-Item -ItemType Directory -Path $script:BridgeDir | Out-Null }
     Get-ChildItem $script:BridgeDir -Filter 'cmd-*' -ErrorAction Ignore | Remove-Item -Force
@@ -543,6 +546,7 @@ function Start-Game {
     # are reading the new run. Belt and braces with Clear-GameLog: the old log
     # carried this banner too, so neither check alone is sufficient.
     $b = Wait-LogLine -Pattern '^\[CPU\] Detected' -TimeoutSec 60
+    $null = Update-InterferenceScan -Seen $b.Seen -Setup
     if (-not $b.Matched) {
         Write-Host '[harness] the engine never printed its launch banner'
         Show-LoadDiagnostics -Seen $b.Seen
@@ -550,6 +554,7 @@ function Start-Game {
     }
 
     $r = Wait-LogLine -Pattern '\[BRIDGE\] ready' -TimeoutSec $TimeoutSec
+    $null = Update-InterferenceScan -Seen $r.Seen -Setup
     if (-not $r.Matched) {
         Write-Host "[harness] NO BRIDGE after ${TimeoutSec}s"
         Show-LoadDiagnostics -Seen $r.Seen
@@ -652,6 +657,7 @@ return "loading"
     # file that triggered it would be claimed a second time by the new tier
     # and reboot again, forever. Clear the queue the moment the reboot starts.
     $boot = Wait-LogLine -Pattern '\[MODULE\] booting module version\s+tome' -TimeoutSec 60
+    $null = Update-InterferenceScan -Seen $boot.Seen -Setup
     if (-not $boot.Matched) {
         Write-Host '[harness] module never rebooted'
         Show-LoadDiagnostics -Seen $boot.Seen
@@ -662,6 +668,7 @@ return "loading"
     Clear-BridgeQueue
 
     $w = Wait-LogLine -Pattern '\[BRIDGE\] ready tier=tome' -TimeoutSec $TimeoutSec
+    $null = Update-InterferenceScan -Seen $w.Seen -Setup
     if (-not $w.Matched) {
         Write-Host "[harness] tome-tier bridge never came up after ${TimeoutSec}s"
         Show-LoadDiagnostics -Seen $w.Seen
@@ -743,6 +750,48 @@ return "loading"
     diagnosis; poll for the resulting state instead. NoWait also skips cleanup so
     the file survives to be picked up; Start-Game clears the directory.
 #>
+
+<#
+    The ONE interference scan. Every window that reads the game log goes
+    through this, so the resize baseline does not depend on which window
+    happened to see the first resize (#221).
+
+    Focus changes are logged but do NOT taint: they alter no game state and the
+    launch emits one. Keys and clicks (the devbridge emits those only for
+    non-injected input) always taint. A resize taints only when it CHANGES the
+    size from the last seen -- the engine re-asserts its own configured size at
+    launch and at every module reboot, and a whole run was once flagged by that.
+
+    -Setup marks the launch and load windows: they seed the baseline and are
+    recorded, but do not void a measurement that has not begun. Returns the
+    lines that taint -- always empty under -Setup.
+#>
+function Update-InterferenceScan {
+    param([string[]]$Seen, [switch]$Setup)
+
+    $found = @($Seen | Where-Object { $_ -match '\[BRIDGE\] INTERFERE (key|mouse)' })
+    foreach ($line in $Seen) {
+        if ($line -match '\[DO RESIZE\] Got: (\d+)x(\d+)') {
+            $size = "$($Matches[1])x$($Matches[2])"
+            if ($null -ne $script:LastResolution -and $size -ne $script:LastResolution) {
+                $found += $line
+            }
+            $script:LastResolution = $size
+        }
+    }
+
+    if ($found.Count -eq 0) { return @() }
+    # Recorded, never discarded: a voided measurement that cannot say what
+    # voided it is not attributable (#220).
+    if ($Setup) {
+        $script:HarnessInterference += @($found | ForEach-Object { "setup: $_" })
+        foreach ($f in $found) { Write-Host "[harness] interference during setup -- $f" }
+        return @()
+    }
+    $script:HarnessInterference += $found
+    return $found
+}
+
 function Invoke-Bridge {
     param(
         [Parameter(Mandatory)][string]$Lua,
@@ -773,28 +822,7 @@ function Invoke-Bridge {
     # inert, not a replay hazard.
     Remove-Item $dst -Force -ErrorAction Ignore
 
-    # Focus changes are logged but do NOT taint. Gaining or losing focus alters
-    # no game state, and the launch itself emits one, so counting it would flag
-    # every first command of every run. Keys and clicks (which the devbridge
-    # emits only for non-injected input) always taint.
-    #
-    # A resize is subtler. Design says a human resizing mid-run taints, and it
-    # should -- but the engine emits `[DO RESIZE]` ITSELF at launch and at every
-    # module reboot, re-asserting the resolution setup-dev.ps1 wrote (800x600).
-    # A whole run of correct commands was flagged tainted by exactly that: zero
-    # INTERFERE lines, only the engine re-applying its own configured size. So a
-    # resize taints only when it CHANGES the size from the last one seen; the
-    # engine re-asserting the same dimensions is not a human and does not.
-    $interference = @($r.Seen | Where-Object { $_ -match '\[BRIDGE\] INTERFERE (key|mouse)' })
-    foreach ($line in $r.Seen) {
-        if ($line -match '\[DO RESIZE\] Got: (\d+)x(\d+)') {
-            $size = "$($Matches[1])x$($Matches[2])"
-            if ($null -ne $script:LastResolution -and $size -ne $script:LastResolution) {
-                $interference += $line
-            }
-            $script:LastResolution = $size
-        }
-    }
+    $interference = Update-InterferenceScan -Seen $r.Seen
 
     $status = 'TIMEOUT'; $result = $null
     if ($r.Matched) {
@@ -802,10 +830,6 @@ function Invoke-Bridge {
             $status = $Matches[1]; $result = $Matches[2]
         }
     } elseif (-not (Test-GameAlive)) { $status = 'CRASHED'; $result = 'process died' }
-
-    # Kept here rather than at the 53 sites that read .Tainted: a voided
-    # measurement that cannot say what voided it is not attributable (#220).
-    if ($interference.Count -gt 0) { $script:HarnessInterference += $interference }
 
     [pscustomobject]@{
         Status       = $status
