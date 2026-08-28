@@ -199,6 +199,30 @@ either.
 - Per-class turn counts run slightly lower under 8-way load than solo; compare outcomes
   across sweeps, not raw turns.
 
+## Reading the corpus
+
+`analyze-sweep.ps1` reads one sweep; `analyze-trend.ps1` reads all of them (#61).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/analyze-trend.ps1 -Out build/TREND.md
+powershell -ExecutionPolicy Bypass -File tools/analyze-trend.ps1 -Class Skirmisher -NoMatrix
+```
+
+- Nothing is tracked. The archive directories are the ledger and the table is regenerated on
+  demand, so it cannot drift from its data (#175).
+- **Read `## Comparability boundaries` before comparing two columns.** A trend read across a
+  change of trees, protocol, start zone, stop conditions or cap is not one measurement, and
+  the boundary belongs beside any claim that spans it (#187, #214). The outcome matrix
+  deliberately does not draw them.
+- A sweep flagged **not internally one measurement** holds runs that disagree with *each
+  other*, which no per-sweep summary can see. Sweeps 17, 19 and 21 each contain runs that
+  silently dropped a `SCOUTER_*` condition (#206); they predate `conditions_missing`, so that
+  is visible only here.
+- The fingerprint is read from each run's own `soak.json`, never `stamps.txt` — sweeps 01-16
+  have no stamp file, and the run is what recorded the protocol it actually ran under.
+- Start zone is per **class**, not per sweep: the DLC class families start behind a town
+  intro, so `norgos-lair (+1 class-specific)` is normal and is not a policy split.
+
 ## When something wedges
 
 - **A slot is stuck**: nothing to do — the class cap kills that slot's game by pid and the
