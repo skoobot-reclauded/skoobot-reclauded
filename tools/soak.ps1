@@ -946,6 +946,45 @@ function sk.rotationTids()
   return out
 end
 
+--- A talent's cooldown, which may be a number or a function of the actor.
+-- One reader, because two places now sort on it.
+function sk.talentCooldown(t)
+  local p = game.player
+  local cd = t and t.cooldown
+  if type(cd) == "function" then local ok, v = pcall(cd, p, t) ; cd = ok and v or nil end
+  return tonumber(cd) or 9999
+end
+
+--- The talents worth INVESTING in, which is not the firing order.
+--
+-- The union of every SECTION of the proposal -- Combat, Prevention, Recovery,
+-- Sustain -- in section order, deduped. sk.rotationTids() is the FIRING list,
+-- and reading it as an investment list left three whole sections and every
+-- generic row unreachable, which no sweep to date has had (#190).
+--
+-- Read from the proposal itself rather than from the live rules, so the same
+-- assigned set is obtained whether the run seeded its firing rules from the
+-- proposal or from sk.rules()'s cruder superset. propose() never writes --
+-- "Discovery never writes on its own" (Player.lua:1717).
+--
+-- A talent the proposal assigned to nothing is simply absent here, so an
+-- unassigned sink stops being investable with no special case for it.
+function sk.investTids()
+  local p, out, seen = game.player, {}, {}
+  local function add(tid)
+    if type(tid) == "string" and p.talents and p.talents[tid] and not seen[tid] then
+      seen[tid] = true ; out[#out+1] = tid
+    end
+  end
+  local ok, prop = pcall(function() return b.loadout.propose(p) end)
+  if ok and type(prop) == "table" and type(prop.entries) == "table" then
+    for _, e in ipairs(prop.entries) do add(e.tid) end
+  end
+  -- A character whose discovery proposes nothing must still be able to spend.
+  if #out == 0 then for _, tid in ipairs(sk.rotationTids()) do add(tid) end end
+  return out
+end
+
 --- The stat the rotation leans on, by the owner's heuristic.
 function sk.primaryStat()
   local p = game.player
@@ -964,9 +1003,7 @@ function sk.primaryStat()
         for s in pairs(req.stat) do stat = stat or s end
       end
       if stat then
-        local cd = t.cooldown
-        if type(cd) == "function" then local ok, v = pcall(cd, p, t) ; cd = ok and v or nil end
-        cd = tonumber(cd) or 9999
+        local cd = sk.talentCooldown(t)
         if not bestcd or cd < bestcd then best, bestcd, bestname = stat, cd, tostring(t.name) end
       end
     end
@@ -1004,21 +1041,47 @@ function sk.autoSpend()
   -- rule and also the safe one -- learning something new changes the rotation
   -- under the run, and picking what to learn is #88's job.
   local tspent, gspent = 0, 0
+
+  -- Investment order, not firing order. A talent used ten times a fight gains
+  -- roughly ten times more from a rank than the once-a-fight opener, so the
+  -- investment order is close to the firing order INVERTED -- which is why
+  -- inheriting the rotation was never going to work. Tie-break on current rank
+  -- ascending: spread before stacking, which also cooperates with the level
+  -- gates on higher ranks (#190).
+  local cands = {}
+  for _, tid in ipairs(sk.investTids()) do
+    local t = p:getTalentFromId(tid)
+    local raw = t and p:getTalentLevelRaw(tid) or 0
+    if t and raw >= 1 then
+      local tt = p:getTalentTypeFrom(t.type[1])
+      cands[#cands+1] = { tid = tid, t = t, raw = raw, cd = sk.talentCooldown(t),
+                          generic = (tt and tt.generic) and true or false }
+    end
+  end
+  table.sort(cands, function(x, y)
+    if x.cd ~= y.cd then return x.cd < y.cd end
+    if x.raw ~= y.raw then return x.raw < y.raw end
+    return tostring(x.tid) < tostring(y.tid)
+  end)
+
+  -- Breadth first: one point per candidate per cycle. The old loop restarted
+  -- from the head and maxed entry 1 before it looked at entry 2, so fixing the
+  -- order alone would still have over-committed to whatever came first. This
+  -- makes the remainder honest -- what is left is what the character could not
+  -- legally spend, not what the walk could not see.
   local function pass(budget, wantGeneric)
     local moved = true
     while moved and (p[budget] or 0) > 0 do
       moved = false
-      for _, tid in ipairs(sk.rotationTids()) do
-        local t = p:getTalentFromId(tid)
-        local raw = t and p:getTalentLevelRaw(tid) or 0
-        if t and raw >= 1 and raw < (t.points or 0) and p:canLearnTalent(t) then
-          local tt = p:getTalentTypeFrom(t.type[1])
-          local isGeneric = tt and tt.generic and true or false
-          if isGeneric == wantGeneric then
-            p:learnTalent(t.id, true)
+      for _, c in ipairs(cands) do
+        if (p[budget] or 0) <= 0 then break end
+        if c.generic == wantGeneric then
+          local raw = p:getTalentLevelRaw(c.tid) or 0
+          if raw < (c.t.points or 0) and p:canLearnTalent(c.t) then
+            p:learnTalent(c.t.id, true)
             p[budget] = p[budget] - 1
             if wantGeneric then gspent = gspent + 1 else tspent = tspent + 1 end
-            moved = true ; break
+            moved = true
           end
         end
       end
@@ -1026,8 +1089,39 @@ function sk.autoSpend()
   end
   pass("unused_talents", false)
   pass("unused_generics", true)
-  out[#out+1] = ("talents class=%d generic=%d left=%s/%s"):format(
-    tspent, gspent, tostring(p.unused_talents or 0), tostring(p.unused_generics or 0))
+
+  -- Say what happened, so the next sweep's `left=` can be read without
+  -- re-deriving this issue. Three reasons a point had nowhere to go.
+  local skipped, inCands = {}, {}
+  for _, c in ipairs(cands) do
+    inCands[c.tid] = true
+    local raw = p:getTalentLevelRaw(c.tid) or 0
+    if raw >= (c.t.points or 0) then skipped[#skipped+1] = c.tid .. "(rank-capped)"
+    elseif not p:canLearnTalent(c.t) then skipped[#skipped+1] = c.tid .. "(level-gated)" end
+  end
+  for tid in pairs(p.talents or {}) do
+    if not inCands[tid] then
+      local t = p:getTalentFromId(tid)
+      local raw = t and (p:getTalentLevelRaw(tid) or 0) or 0
+      -- Any KNOWN talent with a rank still to give, activated or not. The
+      -- proposal is a list of things to FIRE, so a passive can never be in it
+      -- -- and passives are where generic points usually want to go. Listing
+      -- only activated ones made the remainder unexplainable (#190).
+      if t and raw >= 1 and raw < (t.points or 0) then
+        skipped[#skipped+1] = tid .. "(unassigned)"
+      end
+    end
+  end
+  table.sort(skipped)
+  local shown = skipped
+  if #skipped > 10 then
+    shown = {}
+    for i = 1, 10 do shown[i] = skipped[i] end
+    shown[11] = ("+%d more"):format(#skipped - 10)
+  end
+  out[#out+1] = ("talents class=%d generic=%d left=%s/%s%s"):format(
+    tspent, gspent, tostring(p.unused_talents or 0), tostring(p.unused_generics or 0),
+    (#skipped > 0) and (" skipped=" .. table.concat(shown, ",")) or "")
   return table.concat(out, " | ")
 end
 
