@@ -146,6 +146,15 @@ param(
     [int]$MaxMinutes = 30,
     [int]$MaxLevel = 15,
     # game.turn units, 10 per player turn at normal speed; 0 = no limit.
+    # Game turns to run for, counted from this run's first sample (#179).
+    # game.turn advances 10 per player turn. 0 disables it and -MaxMinutes is
+    # the only bound.
+    #
+    # Prefer this to -MaxMinutes whenever runs share a machine: a wall-clock
+    # budget buys fewer game turns under contention -- measured here at 124
+    # turns/sec against 7 busy cores versus 185 idle, a 33% loss -- so parallel
+    # runs would look worse than serial ones for no reason but the scheduler.
+    # A turn budget is the same measurement whatever else is running.
     [int]$MaxTurns = 0,
     [string]$OutFile,
     [int]$PollSec = 4,
@@ -298,7 +307,7 @@ if (-not $OutFile) {
 $MdFile = [IO.Path]::ChangeExtension($OutFile, '.md')
 
 Write-Host ''
-Write-Host "[soak] save=$SaveName max=${MaxMinutes}m level>=$MaxLevel turns>=$MaxTurns poll=${PollSec}s out=$OutFile"
+Write-Host "[soak] save=$SaveName max=${MaxMinutes}m level>=$MaxLevel turns+=$MaxTurns poll=${PollSec}s out=$OutFile"
 Write-Host "[soak] descend=$(if ($NoDescend) { 'off' } else { "after $DescendAfter or explored" }) zones=$($ZoneIds -join ',')"
 
 # Hold the game for the whole soak (#83). A soak does not launch the game --
@@ -1201,7 +1210,14 @@ return "installed save_name=" .. tostring(game.save_name)
         }
         if ((Get-Date) -ge $deadline) { $endReason = 'MAX_MINUTES'; break }
         if ($MaxLevel -gt 0 -and $s.level -ge $MaxLevel) { $endReason = 'MAX_LEVEL'; break }
-        if ($MaxTurns -gt 0 -and $s.turn -ge $MaxTurns) { $endReason = 'MAX_TURNS'; break }
+        # #179: a BUDGET, measured from this run's own first sample, not an
+        # absolute game turn. Runs do not start at zero -- across sweep-16 the
+        # start turn ranged 0 to 2000 -- and birth turn is a property of the
+        # class, so an absolute limit hands each class a different budget and
+        # biases the one comparison the sweep exists to make.
+        if ($MaxTurns -gt 0 -and $first -and ($s.turn - $first.turn) -ge $MaxTurns) {
+            $endReason = 'MAX_TURNS'; break
+        }
 
         # ----- (a) a dialog: close it through its own key -----
         if ($s.ndialogs -gt 0) {
