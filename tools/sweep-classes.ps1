@@ -306,6 +306,19 @@ if (-not $NoRunLease -and -not $SummarizeOnly) {
     Write-Host "[sweep] holding the game lease for this run (host pid $PID)"
 }
 
+# #186: stamp the build BEFORE the first class runs. Taken at summary time it
+# named whatever HEAD had become an hour later -- a sweep that started on
+# 9d18b9b reported b1fb91a, a commit that did not exist when 14 of its 15
+# classes ran. Read again at the end to catch a mid-sweep change.
+$startBuild = $null
+if (-not $SummarizeOnly) {
+    $startBuild = Get-BuildStamp -GameDir $script:GameDir
+    # Every machine that contributes leaves a line, so a merged table can name
+    # them all. Without this the merge printed only the runner's stamp and read
+    # as though one machine had run the lot (#182).
+    Add-Content -Path (Join-Path $OutDir 'stamps.txt') -Value (Format-BuildStamp $startBuild) -Encoding utf8
+}
+
 $results = @()
 $i = 0
 try {
@@ -530,7 +543,20 @@ finally {
 $judged  = @($results | Where-Object { $_.Outcome -in @('CLEARED','DIED','STUCK','ERROR') -and $_.Comparable })
 $cleared = @($judged | Where-Object { $_.Outcome -eq 'CLEARED' }).Count
 $ran     = $judged.Count
-$offZone = @($results | Where-Object { $_.Outcome -in @('CLEARED','DIED','STUCK','ERROR') -and -not $_.Comparable })
+# Genuinely started somewhere else -- a real zone, just not the one being
+# compared. A run that never reached a zone at all has StartZone '?' and does
+# not belong here; it was being reported as though it had merely started
+# elsewhere, which reads as a technicality rather than a failure.
+$offZone = @($results | Where-Object { $_.Outcome -in @('CLEARED','DIED','STUCK','ERROR') -and -not $_.Comparable -and $_.StartZone -and $_.StartZone -ne '?' })
+# Attempted, and produced nothing comparable. UNBIRTHABLE is not in the judged
+# outcome list at all, so it left no trace anywhere in this summary; a CRASHED
+# run has StartZone '?'. The first split sweep attempted 29 classes, counted
+# 27, lost one to each of those two shapes, and reported 100% (#187).
+$judgedNames = @($judged | ForEach-Object { $_.Class })
+$attempted   = @($results | Where-Object {
+    $_.Outcome -notin @('SKIPPED', 'MISSING') -and $judgedNames -notcontains $_.Class -and
+    ($_.Outcome -eq 'UNBIRTHABLE' -or -not $_.StartZone -or $_.StartZone -eq '?')
+})
 $pct     = $(if ($ran -gt 0) { [math]::Round(100 * $cleared / $ran) } else { 0 })
 
 $md = New-Object System.Collections.Generic.List[string]
@@ -539,7 +565,15 @@ $md.Add('')
 # #175: which code this measured. Resolved from the junction the game loads,
 # not from this script's directory, and carrying the uncommitted count because
 # a hash on its own lies whenever someone is mid-edit.
-$sweepBuild = Get-BuildStamp -GameDir $script:GameDir
+$endBuild   = Get-BuildStamp -GameDir $script:GameDir
+$sweepBuild = $(if ($startBuild) { $startBuild } else { $endBuild })
+if ($startBuild -and $startBuild.trees -ne $endBuild.trees) {
+    # Keyed on trees, not the commit: a commit touching only docs or tools
+    # changes nothing the game executes, and crying wolf over those is why the
+    # commit alone is not the honest key (#175).
+    $md.Add("**The loaded code CHANGED during this sweep** -- ``$($startBuild.short)`` ($($startBuild.trees)) -> ``$($endBuild.short)`` ($($endBuild.trees)). Classes before and after the change did not measure the same build; this table is not attributable to either.")
+    $md.Add('')
+}
 # A merged sweep did not run here, so this process's junctions describe the
 # controller and nothing else. Each machine records its own stamp as it
 # finishes; print those instead, or #175's guarantee is worse than absent --
@@ -555,6 +589,11 @@ if ($SummarizeOnly -and (Test-Path $stampFile)) {
 }
 $md.Add('')
 $md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in ``$expectedStart``. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
+if ($attempted.Count -gt 0) {
+    $md.Add('')
+    $md.Add("**$($attempted.Count) class(es) were attempted and produced no comparable run**, so they are not in that percentage: " +
+        (($attempted | ForEach-Object { "$($_.Class) ($($_.Outcome)$(if ($_.EndReason) { " -- $($_.EndReason)" }))" }) -join ', ') + '.')
+}
 # The percentage counts what arrived. A merge that lost a half would read
 # "10 of 10 (100%)" with the absent classes listed quietly further down, which
 # is the most flattering possible way to report a broken run -- so it is said
