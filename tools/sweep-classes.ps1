@@ -94,6 +94,13 @@ param(
     [string]$OutDir,
     # Re-run classes that already have a result file.
     [switch]$Force,
+    # -Only normally overrides the default skips ("run one anyway"). The
+    # parallel scheduler names every class with -Only, one worker each, which
+    # silently defeated the whole skip table -- Adventurer burned 613s in the
+    # first 8-slot run measuring the build, not the class (#194). With this
+    # switch, -Only selects but the skip policy still applies, and the skip
+    # rows come back like any other result.
+    [switch]$KeepSkips,
     # Reuse fixture saves that already exist instead of re-birthing.
     [switch]$SkipBirth,
     [int]$BirthTimeoutSec = 900,
@@ -263,8 +270,9 @@ foreach ($r in $rows) {
     if ($wanted.Count -gt 0 -and $wanted -notcontains $r.Class) { continue }
     # Asking for a class by name overrides a default skip: the skips are about
     # what a WHOLE-ROSTER sweep should spend its time on, not about what may be
-    # run.
-    if ($wanted -contains $r.Class) { $skip = $null }
+    # run. -KeepSkips restores the policy for callers that name classes only
+    # as a dispatch mechanism (#194).
+    if ($wanted -contains $r.Class -and -not $KeepSkips) { $skip = $null }
     $plan += [pscustomobject]@{
         Tree  = $r.Tree
         Class = $r.Class
@@ -279,7 +287,10 @@ if ($wanted.Count -gt 0) {
 $measurable = @($plan | Where-Object { -not $_.Skip })
 $skipped    = @($plan | Where-Object { $_.Skip })
 Write-Host ("        {0} to measure, {1} skipped, roster {2}" -f $measurable.Count, $skipped.Count, (Split-Path -Leaf $Roster))
-if ($measurable.Count -eq 0) { Fail 'nothing to measure' }
+if ($measurable.Count -eq 0 -and -not $KeepSkips) { Fail 'nothing to measure' }
+# Under -KeepSkips an all-skipped plan is a valid outcome, not a failure: the
+# run loop still writes each skip row to disk, and without those rows a merge
+# reports the class MISSING -- the lie #187 closed (#194).
 
 # One lease for the whole sweep, as run-scenarios.ps1 does (#83). Children
 # inherit it through SKOOBOT_HARNESS_HOST, which Enter-HarnessLease sets on
@@ -332,7 +343,12 @@ try {
 
         if ($p.Skip) {
             Write-Host "$tag  SKIPPED ($($p.Skip))"
-            $results += [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'SKIPPED'; Detail = $p.Skip }
+            $row = [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'SKIPPED'; Detail = $p.Skip }
+            # To disk as well: a parallel worker reports through its result
+            # file, and a skip that exists only in memory reads as MISSING when
+            # the halves are merged (#194).
+            ($row | ConvertTo-Json -Depth 4) | Set-Content $json -Encoding utf8
+            $results += $row
             continue
         }
         if ($SummarizeOnly) {

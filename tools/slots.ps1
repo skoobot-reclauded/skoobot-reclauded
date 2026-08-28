@@ -68,6 +68,20 @@ function New-SlotSet {
             }
         }
 
+        # The one popup a fresh home always shows is the FirstRun dialog
+        # ("Welcome to Tales of Maj'Eyal" -- boot mod/class/Game.lua:596), and
+        # its ONLY suppressor is profiles/online/generic/firstrun.profile with
+        # a truthy `firstrun` (engine/PlayerProfile.lua:427). The online dir,
+        # even for offline play. Seeding `profiles` covers it when SeedHome has
+        # the file; TestVM08's real home never did -- nobody ever dismissed the
+        # dialog on that machine -- so every slot there opened on the popup and
+        # the owner watched them sit on it (#196). Write it unconditionally.
+        $fr = Join-Path $eng 'profiles\online\generic\firstrun.profile'
+        if (-not (Test-Path $fr)) {
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $fr)
+            Set-Content -Path $fr -Value 'firstrun = 1' -Encoding ascii
+        }
+
         if ($Save) {
             # Get-SaveDirName, never a second copy of the rule: the save NAME
             # uses hyphens, the DIRECTORY uses underscores truncated to 25

@@ -137,8 +137,8 @@ function Start-ClassJob($item, $slot) {
 
     $job = Start-Job -Name "slot$($slot.N)" -ArgumentList `
         $RepoRoot, $slot.GameDir, $slot.Home, $item.Class, $Minutes, $workDir, $Race, `
-        $StartZone, $Conditions, $BirthTimeoutSec, [bool]$Dossier, $Roster -ScriptBlock {
-        param($repo, $gd, $hm, $class, $mins, $work, $race, $zone, $cond, $birth, $dossier, $roster)
+        $StartZone, $Conditions, $BirthTimeoutSec, [bool]$Dossier, $Roster, ($wanted.Count -eq 0) -ScriptBlock {
+        param($repo, $gd, $hm, $class, $mins, $work, $race, $zone, $cond, $birth, $dossier, $roster, $keepSkips)
         $env:TOME_DIR  = $gd
         $env:TOME_HOME = $hm
         $a = @('-ExecutionPolicy', 'Bypass', '-File', "$repo\tools\sweep-classes.ps1",
@@ -146,6 +146,7 @@ function Start-ClassJob($item, $slot) {
                '-Roster', $roster, '-StartZone', $zone, '-Conditions', $cond,
                '-BirthTimeoutSec', $birth, '-NoSetup', '-NoRunLease')
         if ($dossier) { $a += '-Dossier' }
+        if ($keepSkips) { $a += '-KeepSkips' }
         & powershell @a 2>&1 | Out-File -FilePath (Join-Path $work 'job.log') -Encoding utf8
     }
     Say ("slot$($slot.N) <- $($item.Class)$(if ($Repeat -gt 1) { " #$($item.Rep)" })  ($done/$totalJobs done)")
@@ -163,6 +164,27 @@ function Start-ClassJob($item, $slot) {
 function Complete-Run($r, [string]$forced) {
     $slug = Get-ResultSlug $r.Item.Class
     $secs = [int]((Get-Date) - $r.Started).TotalSeconds
+
+    # Reap EVERY game this slot's transcript launched, not just the one the
+    # lease remembers. The lease records the latest launch only, so when a
+    # birth game outlives its harness the next launch overwrites the record
+    # and the orphan becomes unkillable by lookup -- the first 8-slot run
+    # leaked 7 first-wave games that way, and 22 accumulated (#196). The
+    # transcript names them all, and pids parsed from THIS slot's transcript
+    # cannot belong to a sibling.
+    $jlPath = Join-Path $r.WorkDir 'job.log'
+    if (Test-Path $jlPath) {
+        $launched = @(Select-String -Path $jlPath -Pattern 'launched pid=(\d+)' -AllMatches |
+            ForEach-Object { $_.Matches } | ForEach-Object { [int]$_.Groups[1].Value } | Select-Object -Unique)
+        foreach ($lp in $launched) {
+            $proc = Get-Process -Id $lp -ErrorAction Ignore
+            if ($proc -and $proc.ProcessName -eq 't-engine' -and $proc.StartTime -ge $r.Started) {
+                Stop-Process -Id $lp -Force -ErrorAction Ignore
+                # Loudly: every reap here is a Stop-Game path that failed.
+                Say "slot$($r.Slot.N) -- REAPED leaked game pid=$lp ($($r.Item.Class)); a Stop-Game path failed"
+            }
+        }
+    }
 
     # Reps of one class share a filename, so they need separate directories.
     $dest = $(if ($Repeat -gt 1) { Join-Path $OutDir "rep$($r.Item.Rep)" } else { $OutDir })
@@ -187,10 +209,13 @@ function Complete-Run($r, [string]$forced) {
         $script:timedOut += $r.Item.Class
         Say "slot$($r.Slot.N) -- $($r.Item.Class) TIMEOUT after ${secs}s ($forced); slot recovered"
     } else {
-        # Only this class's files, never the whole directory: job.log and any
-        # stamps the worker wrote are its own business.
+        # Only this class's result files, plus the transcript under the class's
+        # name. The transcript used to be kept for TIMEOUT only; wave-1 of the
+        # first 8-slot run was then undiagnosable because each slot's next
+        # class had already cleared the directory (#196). Evidence first.
         Get-ChildItem $r.WorkDir -File -Filter "$slug.*" -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName (Join-Path $dest $_.Name) -Force }
+        if (Test-Path $jlPath) { Copy-Item $jlPath (Join-Path $dest "$slug.job.log") -Force }
         $res = Join-Path $dest "$slug.json"
         $out = if (Test-Path $res) {
             try { (Get-Content $res -Raw | ConvertFrom-Json).Outcome } catch { 'unreadable' }
