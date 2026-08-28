@@ -53,6 +53,10 @@ param(
     [string]$GameDir = 'C:\games\TalesMajEyal',
     [string]$SeedHome = "$env:USERPROFILE\T-Engine\4.0",
     [int]$PollSec = 5,
+    # Apply the sweep's skip policy even though classes are named with -Only.
+    # Auto-on for a full-roster run; pass it explicitly when a named list is
+    # one machine's share of a roster split, so Adventurer still SKIPs (#194).
+    [switch]$KeepSkips,
     [switch]$KeepSlots
 )
 $ErrorActionPreference = 'Continue'
@@ -109,8 +113,12 @@ if (-not (Test-Path $OutDir)) { $null = New-Item -ItemType Directory -Force -Pat
 $slotSet = New-SlotSet -Count $Slots -Root $Root -GameDir $GameDir -SeedHome $SeedHome
 
 # One stamp for the whole batch: every worker loads the same checkout, so eight
-# identical lines would say nothing that one does not (#186).
-$stamp = Get-BuildStamp -GameDir $GameDir
+# identical lines would say nothing that one does not (#186). Read from a
+# SLOT's game dir, not the real install: slot addon junctions are pinned to
+# this checkout, while the real install's may be repointed at any moment by a
+# dev session -- stamping the install would name whatever THAT session was
+# working on (#198).
+$stamp = Get-BuildStamp -GameDir $slotSet[0].GameDir
 Add-Content -Path (Join-Path $OutDir 'stamps.txt') -Value (Format-BuildStamp $stamp) -Encoding utf8
 Say (Format-BuildStamp $stamp)
 
@@ -137,7 +145,7 @@ function Start-ClassJob($item, $slot) {
 
     $job = Start-Job -Name "slot$($slot.N)" -ArgumentList `
         $RepoRoot, $slot.GameDir, $slot.Home, $item.Class, $Minutes, $workDir, $Race, `
-        $StartZone, $Conditions, $BirthTimeoutSec, [bool]$Dossier, $Roster, ($wanted.Count -eq 0) -ScriptBlock {
+        $StartZone, $Conditions, $BirthTimeoutSec, [bool]$Dossier, $Roster, ($KeepSkips -or $wanted.Count -eq 0) -ScriptBlock {
         param($repo, $gd, $hm, $class, $mins, $work, $race, $zone, $cond, $birth, $dossier, $roster, $keepSkips)
         $env:TOME_DIR  = $gd
         $env:TOME_HOME = $hm

@@ -31,7 +31,19 @@ function New-SlotSet {
         [switch]$Quiet
     )
 
-    $linkDirs = @('bootstrap', 'game', 'lib', 'lib64', 'locales')
+    $linkDirs = @('bootstrap', 'lib', 'lib64', 'locales')
+    # The slot's OWN addon junctions, pinned to the checkout these tools live
+    # in. Junctioning game\ wholesale resolved through the REAL install's
+    # addon junctions -- so a dev thread repointing them mid-sweep would
+    # silently switch what every slot measures, and Assert-JunctionsOwned
+    # would start refusing launches minutes into a run. Slots must not share
+    # the standard pipeline's moving parts (#198).
+    $repo = Split-Path -Parent $PSScriptRoot
+    $pins = @{
+        'tome-skoobot_reclauded' = Join-Path $repo 'src'
+        'tome-skoobot-devbridge' = Join-Path $repo 'tools\devbridge'
+        'boot-skoobot-devbridge' = Join-Path $repo 'tools\devbridge-boot'
+    }
     $slots = @()
 
     foreach ($n in 1..$Count) {
@@ -46,6 +58,36 @@ function New-SlotSet {
             if (-not (Test-Path $src)) { continue }
             $dst = Join-Path $sgame $d
             if (-not (Test-Path $dst)) { $null = New-Item -ItemType Junction -Path $dst -Target $src }
+        }
+        # game\ is mirrored one level down so addons\ can be the slot's own.
+        $gsrc = Join-Path $GameDir 'game'
+        $gdst = Join-Path $sgame 'game'
+        if (-not (Test-Path $gdst)) { $null = New-Item -ItemType Directory -Force -Path $gdst }
+        foreach ($child in (Get-ChildItem $gsrc)) {
+            if ($child.Name -eq 'addons') { continue }
+            $dst = Join-Path $gdst $child.Name
+            if (Test-Path $dst) { continue }
+            if ($child.PSIsContainer) { $null = New-Item -ItemType Junction -Path $dst -Target $child.FullName }
+            else {
+                try { $null = New-Item -ItemType HardLink -Path $dst -Target $child.FullName -ErrorAction Stop }
+                catch { Copy-Item $child.FullName $dst -Force }
+            }
+        }
+        $adst = Join-Path $gdst 'addons'
+        if (-not (Test-Path $adst)) { $null = New-Item -ItemType Directory -Force -Path $adst }
+        foreach ($child in (Get-ChildItem (Join-Path $gsrc 'addons') -Force)) {
+            $dst = Join-Path $adst $child.Name
+            if (Test-Path $dst) { continue }
+            if ($pins.ContainsKey($child.Name)) {
+                # Ours, pinned -- NOT resolved through the real install's
+                # junction, which another session may repoint at any time.
+                $null = New-Item -ItemType Junction -Path $dst -Target $pins[$child.Name]
+            } elseif ($child.PSIsContainer) {
+                $null = New-Item -ItemType Junction -Path $dst -Target $child.FullName
+            } else {
+                try { $null = New-Item -ItemType HardLink -Path $dst -Target $child.FullName -ErrorAction Stop }
+                catch { Copy-Item $child.FullName $dst -Force }
+            }
         }
         # Hard links, not copies: the same bytes on the same volume. Falls back
         # to copying if the volume refuses.
