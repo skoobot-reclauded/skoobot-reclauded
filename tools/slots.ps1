@@ -18,6 +18,13 @@
     the engine's own logging, not cores.
 #>
 
+# Get-LinkTarget lives with the junction assertion it is compared against.
+# Both callers dot-source harness.ps1 first, but this file documents itself as
+# dot-sourceable on its own, so do not depend on that.
+if (-not (Get-Command Get-LinkTarget -ErrorAction Ignore)) {
+    . (Join-Path $PSScriptRoot 'harness-lease.ps1')
+}
+
 function New-SlotSet {
     [CmdletBinding()]
     param(
@@ -77,12 +84,43 @@ function New-SlotSet {
         if (-not (Test-Path $adst)) { $null = New-Item -ItemType Directory -Force -Path $adst }
         foreach ($child in (Get-ChildItem (Join-Path $gsrc 'addons') -Force)) {
             $dst = Join-Path $adst $child.Name
-            if (Test-Path $dst) { continue }
             if ($pins.ContainsKey($child.Name)) {
                 # Ours, pinned -- NOT resolved through the real install's
                 # junction, which another session may repoint at any time.
-                $null = New-Item -ItemType Junction -Path $dst -Target $pins[$child.Name]
-            } elseif ($child.PSIsContainer) {
+                #
+                # Re-pinned, not merely created. Slot directories are reused
+                # between runs, so "create only if absent" made a pin permanent
+                # for the life of the directory: four slots kept pointing at a
+                # freeze worktree that had been deleted, and every class
+                # dispatched to them died at Assert-JunctionsOwned (#204).
+                $want = $pins[$child.Name]
+                if (-not (Test-Path $want)) {
+                    throw "[slots] pin source missing: $($child.Name) -> $want -- the tools' own checkout is broken or half-deleted. A pool pinned at nothing loses the whole batch."
+                }
+                $have = Get-LinkTarget $dst
+                if ($null -eq $have) {
+                    $null = New-Item -ItemType Junction -Path $dst -Target $want
+                    continue
+                }
+                if ($have -eq '<not-a-link>') {
+                    throw "[slots] $dst is a real directory where a pin belongs. Refusing to delete it; move it aside by hand."
+                }
+                # A target that no longer exists folds into "mismatch", so a
+                # rotted pool repairs itself on the next batch instead of
+                # needing an rmdir by hand. Get-LinkTarget is the same reader
+                # Assert-JunctionsOwned compares with, so the two ends of the
+                # check cannot disagree about normalisation.
+                $same = ($have -ne '<unknown>') -and (Test-Path $have) -and
+                        ([IO.Path]::GetFullPath($have).TrimEnd('\') -ieq [IO.Path]::GetFullPath($want).TrimEnd('\'))
+                if (-not $same) {
+                    Write-Host ("[slots] re-pinned slot{0} {1}: {2} -> {3}" -f $n, $child.Name, $have, $want)
+                    & cmd.exe /c rmdir "$dst"
+                    $null = New-Item -ItemType Junction -Path $dst -Target $want
+                }
+                continue
+            }
+            if (Test-Path $dst) { continue }
+            if ($child.PSIsContainer) {
                 $null = New-Item -ItemType Junction -Path $dst -Target $child.FullName
             } else {
                 try { $null = New-Item -ItemType HardLink -Path $dst -Target $child.FullName -ErrorAction Stop }

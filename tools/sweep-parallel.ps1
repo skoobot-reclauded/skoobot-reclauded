@@ -126,6 +126,13 @@ $slotSet = New-SlotSet -Count $Slots -Root $Root -GameDir $GameDir -SeedHome $Se
 # dev session -- stamping the install would name whatever THAT session was
 # working on (#198).
 $stamp = Get-BuildStamp -GameDir $slotSet[0].GameDir
+# Belt and braces beside the re-pin (#204): if slot 1 is wrong in some future
+# way New-SlotSet does not repair, the stamp reads `build=unknown trees=` and
+# the old code printed it and carried on for twenty minutes. Stop in one line
+# instead -- a batch that cannot name what it is measuring measures nothing.
+if (-not $stamp.trees -or $stamp.short -eq 'unknown') {
+    Fail "the batch stamp read no trees from $($slotSet[0].GameDir) -- slot 1's addon junctions are wrong, so every row would measure something unnamed"
+}
 Add-Content -Path (Join-Path $OutDir 'stamps.txt') -Value (Format-BuildStamp $stamp) -Encoding utf8
 Say (Format-BuildStamp $stamp)
 
@@ -275,6 +282,28 @@ function Complete-Run($r, [string]$forced) {
         $out = if (Test-Path $res) {
             try { (Get-Content $res -Raw | ConvertFrom-Json).Outcome } catch { 'unreadable' }
         } else { 'NO RESULT' }
+
+        if ($out -eq 'NO RESULT') {
+            # Write the row, do not merely print it. #187's headline machinery
+            # can only name what has a row, so half a roster once vanished into
+            # two-word console lines when the slot pins had rotted (#204).
+            # StartZone '?' lands it in the attempted-but-uncounted bucket; the
+            # reason is already beside it in job.log (#196), so lift the first
+            # line of it rather than inventing one.
+            $why = 'no result file'
+            if (Test-Path $jlPath) {
+                $hit = @(Get-Content $jlPath -ErrorAction Ignore |
+                         Where-Object { $_ -match 'JUNCTIONS POINT AT ANOTHER CHECKOUT|FAILED|Exception|ERROR|cannot be found|is not recognized' } |
+                         Select-Object -First 1)
+                if ($hit.Count -gt 0) { $why = (("$($hit[0])" -replace '\s+', ' ').Trim()) }
+            }
+            $row = [pscustomobject]@{
+                Class = $r.Item.Class; Race = $Race; Outcome = 'NO RESULT'
+                Detail = $why; StartZone = '?'; Comparable = $false
+                Turns = 0; Stops = 0; Descents = 0; CharLevel = '-1->-1'
+            }
+            ($row | ConvertTo-Json -Depth 4) | Set-Content $res -Encoding utf8
+        }
 
         if ($r.Item.Retry -and $ownRow) {
             # A pass on retry is a pass that says so, the same rule the launch

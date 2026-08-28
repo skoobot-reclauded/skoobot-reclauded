@@ -146,6 +146,11 @@ trees match** — the trees name the executed code; the commit is decoration (#1
   the launch path itself broke — worse, file it first (#196). A skipped class launches
   nothing and says so — `ledger: skipped, no launch` — so a clean sweep produces **no**
   `0 launch(es)` lines at all, and one that does is always worth reading (#203).
+- Slot addon pins **repair themselves**: `New-SlotSet` re-points any of the three that names
+  the wrong checkout, or one that no longer exists, and says so (`re-pinned slotN ...`). So
+  deleting a freeze worktree is safe — the next batch fixes the pool. It was not always: a
+  pool pinned at a deleted checkout lost four of eight slots to `NO RESULT` until the
+  junctions were removed by hand (#204).
 - `Skipped this run:` is derived from the rows, so it names what was actually skipped and
   why — not what the skip lists contain (#208). On a placed sweep (`-StartZone`) the
   town-start classes are **not** skipped and normally appear in the table.
