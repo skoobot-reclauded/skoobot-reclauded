@@ -256,9 +256,10 @@ function Get-BuildStamp {
             repo = ''; commit = 'unknown'; short = 'unknown'
             trees = ''; dirty = -1; dirty_elsewhere = -1; subject = ''
         }
-        try {
-            $stamp.cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
-        } catch { }
+        # NUMBER_OF_PROCESSORS, not Get-CimInstance: WMI is Access-denied for a
+        # non-admin over SSH, which is exactly how the second runner is driven.
+        # The CIM version threw on every call there and reported 0. (#180)
+        $stamp.cores = [int]$env:NUMBER_OF_PROCESSORS
         $link = Get-LinkTarget (Join-Path (Join-Path $GameDir 'game\addons') 'tome-skoobot_reclauded')
         $repo = $null
         if ($link -and $link -notmatch '^<') {
