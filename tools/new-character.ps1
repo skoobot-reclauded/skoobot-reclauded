@@ -225,6 +225,7 @@ if (-not $inWorld) { Write-Host "FAILED: no world after ${BirthTimeoutSec}s"; St
 # the level-up dialog closes with no change to accept.
 $settled = $false
 $quiet = 0
+$bridgeErrs = 0
 for ($i = 0; $i -lt 16 -and -not $settled; $i++) {
     $r = Invoke-Bridge -Lua @'
 local d = game.dialogs and game.dialogs[#game.dialogs]
@@ -267,7 +268,21 @@ table.sort(keys)
 return "stuck " .. title .. " binds=" .. table.concat(keys, ",")
 '@ -TimeoutSec 30
     Write-Host ('  dialog   {0,-8} {1}' -f $r.Status, $r.Result)
-    if ($r.Status -ne 'OK') { break }
+    # A transient bridge error costs a poll, not the birth. One flaky read used
+    # to end a birth that had otherwise worked -- twice within one poll of
+    # settling (#207). The claim is retried below the bridge now, so arriving
+    # here means it already failed several polls; three in a row is a fault
+    # worth stopping for, one is weather.
+    if ($r.Status -ne 'OK') {
+        $bridgeErrs++
+        if ($bridgeErrs -ge 3) {
+            Write-Host "FAILED: the bridge failed $bridgeErrs polls in a row: $($r.Status) $($r.Result)"
+            Stop-Game; exit 1
+        }
+        Start-Sleep -Seconds 2
+        continue
+    }
+    $bridgeErrs = 0
     # A callback can register the next dialog on a later tick, so "none"
     # has to hold twice in a row before birth counts as finished.
     if ($r.Result -eq 'none') { $quiet++; if ($quiet -ge 2) { $settled = $true; break } }

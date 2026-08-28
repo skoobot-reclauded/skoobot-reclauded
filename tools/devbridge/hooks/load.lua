@@ -17,7 +17,7 @@ local EngineGame = require "engine.Game"
 -- Addon hooks run in setmetatable({...}, {__index = _G}) (engine/Module.lua:699):
 -- reads chain to _G but writes stay local, so a bare global assignment is
 -- invisible to loadstring chunks. Export explicitly or every command sees nil.
-local bridge = { injecting = false, polls = 0, done = 0, last_seq = 0, tier = "tome" }
+local bridge = { injecting = false, polls = 0, done = 0, last_seq = 0, retry_seq = -1, retry_count = 0, tier = "tome" }
 _G.bridge = bridge
 local DIR = "/skoobot-bridge/"
 
@@ -89,6 +89,8 @@ end
 -- sequence makes execution idempotent whatever the filesystem does; the harness
 -- does the real cleanup.
 local claiming = false
+-- Polls one unreadable file may cost before it is failed rather than retried.
+local RETRY_MAX = 5
 
 local function claim()
 	if claiming then return nil end
@@ -107,8 +109,28 @@ local function claim()
 			end
 		end
 		if not pick then return end
-		bridge.last_seq = pickseq
+
+		-- Read BEFORE committing the claim. fs.delete no-ops here (see above),
+		-- so a file that fails to open is still on disk; what lost it was
+		-- advancing last_seq past it, after which the scan -- which only picks
+		-- n > last_seq -- skips it forever. An empty read counts as a failure
+		-- too: "" is truthy in Lua, so a partially visible write compiled to a
+		-- no-op and emitted OK nil, a command that never ran reporting
+		-- success. See #207.
 		src = readAll(DIR..pick)
+		if src == nil or src == "" then
+			bridge.retry_count = (bridge.retry_seq == pickseq) and bridge.retry_count + 1 or 1
+			bridge.retry_seq = pickseq
+			src = nil
+			-- Bounded: with last_seq unadvanced the scan re-picks this same
+			-- file every poll, so a permanently unreadable one would block
+			-- every later command. Stall a few frames, then fail the one
+			-- command loudly, as before.
+			if bridge.retry_count < RETRY_MAX then pick = nil return end
+			bridge.last_seq = pickseq
+			return
+		end
+		bridge.last_seq = pickseq
 		fs.delete(DIR..pick)   -- best effort; expected to no-op
 	end)
 
@@ -126,7 +148,7 @@ end
 local function poll()
 	local pick, src = claim()
 	if not pick then return end
-	if not src then emit(pick.." ERR unreadable") return end
+	if not src then emit(pick.." ERR unreadable after "..tostring(bridge.retry_count).." polls") return end
 
 	local fn, err = loadstring(src, "=bridge:"..pick)
 	if not fn then emit(pick.." ERR compile "..tostring(err)) return end
