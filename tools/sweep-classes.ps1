@@ -356,7 +356,16 @@ try {
             $born = ($LASTEXITCODE -eq 0) -and (Test-Path (Join-Path $saveDir 'game.teag'))
             if (-not $born) {
                 $why = ($bout | Select-String 'FAILED' | Select-Object -Last 1)
+                # Keep the whole transcript, not just the one line that says it
+                # failed. A birth can burn the full -BirthTimeoutSec (900s by
+                # default) and used to leave a 206-byte row behind, so the only
+                # record of a quarter hour was "no world after 900s" -- nothing
+                # to tell an environment fault from a stuck dialog. The soak
+                # timeout path already keeps screenshots; this one kept nothing.
+                $birthLog = Join-Path $OutDir "$slug.birth.log"
+                ($bout | Out-String) | Set-Content $birthLog -Encoding utf8
                 Write-Host "$tag  UNBIRTHABLE - $why"
+                Write-Host "$tag  birth transcript kept at $birthLog"
                 $row = [pscustomobject]@{ Class = $p.Class; Tree = $p.Tree; Race = $p.Race; Outcome = 'UNBIRTHABLE'
                                           Detail = "$why"; Save = $save }
                 ($row | ConvertTo-Json -Depth 4) | Set-Content $json -Encoding utf8

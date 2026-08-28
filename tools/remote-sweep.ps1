@@ -116,7 +116,12 @@ exit `$LASTEXITCODE
 $tmp = Join-Path $env:TEMP 'skoobot-remote-cmd.ps1'
 Set-Content -Path $tmp -Value $cmd -Encoding utf8
 if (-not (Copy-ToRunner $tmp "$RemoteBase/cmd.ps1")) { Fail 'could not copy the command file' }
-Say "sync to $short, $Minutes min/class$(if ($Only) { ", $($Only.Count) class(es)" } else { ', full roster' })"
+# Count what the far side will parse, not the array as passed: -File hands a
+# comma-joined list over as ONE string, so $Only.Count reports 1 for any
+# number of classes and the line claims a sweep far smaller than it dispatched.
+$onlyCount = 0
+if ($Only) { $onlyCount = @(($Only -join ',') -split ',' | Where-Object { $_.Trim() }).Count }
+Say "sync to $short, $Minutes min/class$(if ($Only) { ", $onlyCount class(es)" } else { ', full roster' })"
 
 # --- go ------------------------------------------------------------------
 $null = Invoke-Runner "Remove-Item '$RemoteBase\run.done' -ErrorAction SilentlyContinue; schtasks /run /tn skoobot-agent | Out-Null"
