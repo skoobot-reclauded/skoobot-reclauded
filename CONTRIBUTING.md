@@ -80,6 +80,31 @@ Nothing under `tools/` or `spec/` may be referenced from `src/`: `tools/` execut
 Lua from disk by design and is never packaged, and `tools/pack.ps1` refuses an archive that
 contains either.
 
+## Runbooks
+
+**A process intended to run twice exists when it has a runbook** (D-19, 2026-08-28 — the
+same move that made "a task exists when it is an issue" work for tracking). Before the issue
+that introduced a repeatable procedure closes: the procedure has a home under `docs/` — a new
+`runbook-*.md` or a section of an existing one — the CLAUDE.md "Read before acting" table
+routes to it, and every `tools/` script it uses is named in at least one `docs/*.md`.
+Writing it down is part of done, judged at close time (D-16: finished, not symptom-free).
+
+Each kind of knowledge has one home, because duplication is where drift comes from:
+
+| Knowledge | Home |
+|---|---|
+| Parameter surface, exit codes, a tool's own contract | The script header — authoritative; runbooks point at it, never restate it |
+| Operating procedure, which-tool-for-which-question, caps that are procedure-not-code | A runbook under `docs/` |
+| Rationale, measurements, incident archaeology | The paired `design-*.md` |
+| Label and milestone taxonomy | GitHub, mirrored under `.github/` |
+
+The template is [docs/runbook-sweeps.md](docs/runbook-sweeps.md): a dated status header
+naming its design doc ("everything here is copy-paste; the reasons live in the design doc"),
+recipes ordered by frequency, "Reading the result honestly" with per-rule issue citations,
+"When something wedges", and corrections made in place with their date. A `tools/` script
+that no doc names should carry a `# not doc-tracked: <reason>` line near its head; the
+coverage check that warns on the gap is #234.
+
 ## If the maintainer is absent
 
 The original SkooBot did not die of technical difficulty. It died with two working contributor
