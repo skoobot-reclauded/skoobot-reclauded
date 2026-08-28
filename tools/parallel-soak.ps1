@@ -35,65 +35,16 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-# For Get-SaveDirName. The save NAME uses hyphens; the save DIRECTORY uses
-# underscores and is truncated to 25 characters, so a second copy of that rule
-# looks for a directory the engine never creates. That mistake reported Cultist
-# of Entropy UNBIRTHABLE for eight sweeps with a valid save on disk (#121).
+# harness.ps1 for Get-SaveDirName, which New-SlotSet uses to find the save
+# directory: the save NAME uses hyphens, the DIRECTORY underscores truncated to
+# 25 characters. Never a second copy of that rule -- one cost Cultist of
+# Entropy eight sweeps of UNBIRTHABLE with a valid save on disk (#121).
 . (Join-Path $PSScriptRoot 'harness.ps1')
+. (Join-Path $PSScriptRoot 'slots.ps1')
 
 function Say($m) { Write-Host "[parallel] $m" }
 
-# ---- build the slots ----------------------------------------------------
-$LINK_DIRS = @('bootstrap', 'game', 'lib', 'lib64', 'locales')
-
-function New-Slot([int]$n) {
-    $slot = Join-Path $Root "slot$n"
-    $sgame = Join-Path $slot 'game-dir'
-    $shome = Join-Path $slot 'home'
-    foreach ($d in @($slot, $sgame, $shome)) {
-        if (-not (Test-Path $d)) { $null = New-Item -ItemType Directory -Force -Path $d }
-    }
-    foreach ($d in $LINK_DIRS) {
-        $src = Join-Path $GameDir $d
-        if (-not (Test-Path $src)) { continue }
-        $dst = Join-Path $sgame $d
-        if (-not (Test-Path $dst)) { $null = New-Item -ItemType Junction -Path $dst -Target $src }
-    }
-    # Hard links, not copies: the same bytes on the same volume, and a slot
-    # then costs nothing. Falls back to copying if the volume refuses.
-    foreach ($f in (Get-ChildItem $GameDir -File)) {
-        $dst = Join-Path $sgame $f.Name
-        if (Test-Path $dst) { continue }
-        try { $null = New-Item -ItemType HardLink -Path $dst -Target $f.FullName -ErrorAction Stop }
-        catch { Copy-Item $f.FullName $dst -Force }
-    }
-    # The engine appends T-Engine\4.0 to whatever --home is given.
-    $eng = Join-Path $shome 'T-Engine\4.0'
-    if (-not (Test-Path $eng)) { $null = New-Item -ItemType Directory -Force -Path $eng }
-    # 'boot' as well: without it the engine treats the home as a first run and
-    # opens a welcome dialog at the main menu, which nothing dismisses.
-    foreach ($d in @('settings', 'profiles', 'boot')) {
-        $src = Join-Path $SeedHome $d
-        if ((Test-Path $src) -and -not (Test-Path (Join-Path $eng $d))) {
-            Copy-Item $src (Join-Path $eng $d) -Recurse -Force
-        }
-    }
-    $saveDir = Get-SaveDirName -Name $Save
-    $saveSrc = Join-Path $SeedHome "tome\save\$saveDir"
-    if (-not (Test-Path $saveSrc)) { throw "no save directory at $saveSrc (from save name '$Save')" }
-    $saveDst = Join-Path $eng "tome\save\$saveDir"
-    if (-not (Test-Path $saveDst)) {
-        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $saveDst)
-        Copy-Item $saveSrc $saveDst -Recurse -Force
-    }
-    return [pscustomobject]@{ N = $n; Slot = $slot; GameDir = $sgame; Home = $shome }
-}
-
-Say "building $Count slot(s) under $Root"
-$slots = @()
-foreach ($n in 1..$Count) { $slots += (New-Slot $n) }
-$used = (Get-ChildItem $Root -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-Say ("slots ready, {0:N0} MB of real bytes on disk" -f ($used / 1MB))
+$slots = New-SlotSet -Count $Count -Root $Root -GameDir $GameDir -SeedHome $SeedHome -Save $Save
 
 # ---- run them all at once -----------------------------------------------
 # Each job sets TOME_DIR and TOME_HOME for its own process only. harness.ps1

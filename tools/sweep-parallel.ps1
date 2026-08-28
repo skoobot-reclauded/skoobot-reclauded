@@ -1,0 +1,227 @@
+<#
+    Run classes across several slots at once on one machine (#190).
+
+    A work queue, not a fixed split: every slot takes the next class the moment
+    it is free, so one slow class cannot hold up the rest. Any set of classes
+    works -- a whole roster, a handful, or the same class many times to dig
+    into one of them.
+
+        # everything, 8 at a time
+        .\tools\sweep-parallel.ps1 -Slots 8
+
+        # a few classes
+        .\tools\sweep-parallel.ps1 -Only 'Bulwark,Mindslayer,Doomed' -Slots 3
+
+        # one class eight times, for a distribution rather than an anecdote
+        .\tools\sweep-parallel.ps1 -Only 'Doomed' -Repeat 8 -Slots 8
+
+    Each worker runs sweep-classes.ps1 for ONE class inside its slot, so a row
+    produced here means exactly what a serial row means and merges with one.
+    The merge at the end is sweep-classes -SummarizeOnly over the same class
+    list.
+
+    Two timeouts, because a series must not be hostage to one run:
+
+    -BirthTimeoutSec  how long a birth may take (default 300; the serial
+                      default of 900 was set before anyone watched a birth fail,
+                      and Mindslayer spent every second of it -- #184).
+    -ClassTimeoutSec  the emergency cap on a whole class. A run that loops
+                      without advancing game time hits no other limit: soak's
+                      MaxMinutes is measured against progress it never makes.
+                      When it fires, that slot's game is killed by pid from its
+                      own lease file, the class is recorded TIMEOUT, and the
+                      queue carries on.
+#>
+[CmdletBinding()]
+param(
+    # Classes by leaf name, comma-separated or an array. Default: the roster.
+    [string[]]$Only,
+    [int]$Slots = 8,
+    # Run each requested class this many times. For deep-diving one class.
+    [int]$Repeat = 1,
+    [int]$Minutes = 4,
+    [string]$Race = 'Cornac',
+    [string]$Roster,
+    [string]$OutDir,
+    [switch]$Dossier,
+    [string]$StartZone = 'norgos-lair',
+    [string]$Conditions = 'SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN,SCOUTER_CROWDPOWER=WARN,SCOUTER_ENEMYCOUNT=WARN,LIFE_LOWLIFE=WARN',
+    [int]$BirthTimeoutSec = 300,
+    # 0 = derive from the other two, plus slack for launch and teardown.
+    [int]$ClassTimeoutSec = 0,
+    [string]$Root = 'C:\Users\localuser\slots',
+    [string]$GameDir = 'C:\games\TalesMajEyal',
+    [string]$SeedHome = "$env:USERPROFILE\T-Engine\4.0",
+    [int]$PollSec = 5,
+    [switch]$KeepSlots
+)
+$ErrorActionPreference = 'Continue'
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'harness.ps1')
+. (Join-Path $PSScriptRoot 'slots.ps1')
+
+function Say($m)  { Write-Host "[parallel] $m" }
+function Fail($m) { Write-Host "[parallel] FAILED - $m"; exit 1 }
+
+if (-not $OutDir) { $OutDir = Join-Path $RepoRoot 'build\results\sweep' }
+if (-not $Roster) { $Roster = Join-Path $RepoRoot ("build\results\classes-{0}.txt" -f (Get-ResultSlug $Race)) }
+if ($ClassTimeoutSec -le 0) { $ClassTimeoutSec = $BirthTimeoutSec + ($Minutes * 60) + 180 }
+
+# ---- what are we running? -----------------------------------------------
+if (-not (Test-Path $Roster)) {
+    Fail "no roster at $Roster -- run tools\unlock-classes.ps1"
+}
+$rosterRows = @(Get-Content $Roster | Where-Object { $_ -and $_.Trim() } | ForEach-Object {
+    $parts = $_.Trim() -split '/'
+    [pscustomobject]@{ Tree = $parts[0]; Class = $parts[-1].Trim() }
+})
+
+# -File hands a comma-joined list over as ONE string, so split again whatever
+# shape it arrives in (the trap tools/new-character.ps1 records).
+$wanted = @()
+if ($Only) { $wanted = @(($Only -join ',') -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+
+if ($wanted.Count -gt 0) {
+    $unknown = @($wanted | Where-Object { $n = $_; -not ($rosterRows | Where-Object { $_.Class -eq $n }) })
+    if ($unknown.Count -gt 0) { Fail "not in the roster: $($unknown -join ', ')" }
+    $classes = $wanted
+} else {
+    $classes = @($rosterRows | ForEach-Object { $_.Class })
+}
+
+# Repeat expands into separate queue items. They share a save name and a result
+# file, so only the last would survive -- give each run its own output
+# directory and let the caller compare the soak files.
+$queue = New-Object System.Collections.Generic.Queue[object]
+foreach ($r in 1..$Repeat) {
+    foreach ($c in $classes) {
+        $queue.Enqueue([pscustomobject]@{ Class = $c; Rep = $r })
+    }
+}
+$totalJobs = $queue.Count
+if ($totalJobs -eq 0) { Fail 'nothing to run' }
+if ($Slots -gt $totalJobs) { $Slots = $totalJobs }
+
+Say "$totalJobs run(s) over $Slots slot(s): $($classes.Count) class(es)$(if ($Repeat -gt 1) { " x $Repeat" })"
+Say "birth cap ${BirthTimeoutSec}s, class cap ${ClassTimeoutSec}s, $Minutes min per run"
+
+if (-not (Test-Path $OutDir)) { $null = New-Item -ItemType Directory -Force -Path $OutDir }
+$slotSet = New-SlotSet -Count $Slots -Root $Root -GameDir $GameDir -SeedHome $SeedHome
+
+# One stamp for the whole batch: every worker loads the same checkout, so eight
+# identical lines would say nothing that one does not (#186).
+$stamp = Get-BuildStamp -GameDir $GameDir
+Add-Content -Path (Join-Path $OutDir 'stamps.txt') -Value (Format-BuildStamp $stamp) -Encoding utf8
+Say (Format-BuildStamp $stamp)
+
+# ---- the queue ----------------------------------------------------------
+$free    = New-Object System.Collections.Generic.Queue[object]
+foreach ($s in $slotSet) { $free.Enqueue($s) }
+$running = New-Object System.Collections.Generic.List[object]
+$done    = 0
+$timedOut = @()
+$started = Get-Date
+
+function Start-ClassJob($item, $slot) {
+    # A worker's own directory, cleared first. Anything left from the previous
+    # class here would be copied up as though this run produced it -- #188.
+    $workDir = Join-Path $slot.Slot 'out'
+    if (Test-Path $workDir) { Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue }
+    $null = New-Item -ItemType Directory -Force -Path $workDir
+
+    $job = Start-Job -Name "slot$($slot.N)" -ArgumentList `
+        $RepoRoot, $slot.GameDir, $slot.Home, $item.Class, $Minutes, $workDir, $Race, `
+        $StartZone, $Conditions, $BirthTimeoutSec, [bool]$Dossier, $Roster -ScriptBlock {
+        param($repo, $gd, $hm, $class, $mins, $work, $race, $zone, $cond, $birth, $dossier, $roster)
+        $env:TOME_DIR  = $gd
+        $env:TOME_HOME = $hm
+        $a = @('-ExecutionPolicy', 'Bypass', '-File', "$repo\tools\sweep-classes.ps1",
+               '-Only', $class, '-Minutes', $mins, '-OutDir', $work, '-Race', $race,
+               '-Roster', $roster, '-StartZone', $zone, '-Conditions', $cond,
+               '-BirthTimeoutSec', $birth, '-NoSetup', '-NoRunLease')
+        if ($dossier) { $a += '-Dossier' }
+        & powershell @a 2>&1 | Out-File -FilePath (Join-Path $work 'job.log') -Encoding utf8
+    }
+    $running.Add([pscustomobject]@{
+        Job      = $job
+        Slot     = $slot
+        Item     = $item
+        WorkDir  = $workDir
+        Deadline = (Get-Date).AddSeconds($ClassTimeoutSec)
+        Started  = Get-Date
+    })
+    Say ("slot$($slot.N) <- $($item.Class)$(if ($Repeat -gt 1) { " #$($item.Rep)" })  ($done/$totalJobs done)")
+}
+
+function Complete-Run($r, [string]$forced) {
+    $slug = Get-ResultSlug $r.Item.Class
+    $secs = [int]((Get-Date) - $r.Started).TotalSeconds
+
+    if ($forced) {
+        # Kill this slot's game by the pid in its own lease file, so the other
+        # slots keep running. Then record the class, because a class that
+        # vanishes from the table is worse than one that failed loudly (#187).
+        $gp = Get-SlotGamePid $r.Slot
+        if ($gp) { Stop-Process -Id $gp -Force -ErrorAction SilentlyContinue }
+        Stop-Job $r.Job -ErrorAction SilentlyContinue
+        $row = [pscustomobject]@{
+            Class = $r.Item.Class; Race = $Race; Outcome = 'TIMEOUT'
+            Detail = "$forced after ${secs}s"; StartZone = '?'; Comparable = $false
+            Turns = 0; Stops = 0; Descents = 0; CharLevel = '-1->-1'
+        }
+        ($row | ConvertTo-Json -Depth 4) | Set-Content (Join-Path $OutDir "$slug.json") -Encoding utf8
+        # The transcript is the only account of a run nobody watched (#183).
+        $jl = Join-Path $r.WorkDir 'job.log'
+        if (Test-Path $jl) { Copy-Item $jl (Join-Path $OutDir "$slug.timeout.log") -Force }
+        $script:timedOut += $r.Item.Class
+        Say "slot$($r.Slot.N) -- $($r.Item.Class) TIMEOUT after ${secs}s ($forced); slot recovered"
+    } else {
+        # Only this class's files, never the whole directory: job.log and any
+        # stamps the worker wrote are its own business.
+        Get-ChildItem $r.WorkDir -File -Filter "$slug.*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName (Join-Path $OutDir $_.Name) -Force }
+        $res = Join-Path $OutDir "$slug.json"
+        $out = if (Test-Path $res) {
+            try { (Get-Content $res -Raw | ConvertFrom-Json).Outcome } catch { 'unreadable' }
+        } else { 'NO RESULT' }
+        Say "slot$($r.Slot.N) -- $($r.Item.Class) $out (${secs}s)"
+    }
+
+    Remove-Job $r.Job -Force -ErrorAction SilentlyContinue
+    $free.Enqueue($r.Slot)
+    $script:done++
+}
+
+while ($queue.Count -gt 0 -or $running.Count -gt 0) {
+    while ($queue.Count -gt 0 -and $free.Count -gt 0) {
+        Start-ClassJob $queue.Dequeue() $free.Dequeue()
+    }
+    Start-Sleep -Seconds $PollSec
+
+    foreach ($r in @($running)) {
+        if ($r.Job.State -in @('Completed', 'Failed', 'Stopped')) {
+            Complete-Run $r ''
+            $null = $running.Remove($r)
+        } elseif ((Get-Date) -gt $r.Deadline) {
+            Complete-Run $r "over the ${ClassTimeoutSec}s class cap"
+            $null = $running.Remove($r)
+        }
+    }
+}
+
+$elapsed = ((Get-Date) - $started).TotalSeconds
+Write-Host ''
+Say ("$totalJobs run(s) in {0:N0}s ({1:N1} min) over $Slots slot(s)" -f $elapsed, ($elapsed / 60))
+if ($timedOut.Count -gt 0) { Say "TIMED OUT: $($timedOut -join ', ')" }
+
+# ---- one table over the lot ---------------------------------------------
+Say 'merging'
+$m = @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'sweep-classes.ps1'),
+       '-SummarizeOnly', '-OutDir', $OutDir, '-Race', $Race, '-Roster', $Roster,
+       '-Minutes', $Minutes)
+# Summarise exactly what was asked for. Without this a three-class run reports
+# the other twenty-six as MISSING, which is true of the roster and a lie about
+# the run (#187).
+if ($wanted.Count -gt 0) { $m += @('-Only', ($classes -join ',')) }
+& powershell @m 2>&1 | Select-Object -Last 40
+exit 0

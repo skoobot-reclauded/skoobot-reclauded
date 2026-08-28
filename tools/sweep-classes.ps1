@@ -221,7 +221,8 @@ $RACE_EXCEPTIONS = @{ 'Stone Warden' = 'Dwarf' }
 
 function Fail($why) { Write-Host "[sweep] FAILED - $why"; exit 1 }
 
-function Slug([string]$s) { return (($s -replace '[^A-Za-z0-9]+', '-').Trim('-')).ToLower() }
+# One rule, in harness.ps1, because the scheduler has to name the same files.
+function Slug([string]$s) { return (Get-ResultSlug $s) }
 
 if (-not $Roster) { $Roster = Join-Path $RepoRoot ("build\results\classes-{0}.txt" -f (Slug $Race)) }
 if (-not $OutDir) { $OutDir = Join-Path $RepoRoot 'build\results\sweep' }

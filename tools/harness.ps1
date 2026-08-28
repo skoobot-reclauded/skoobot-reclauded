@@ -219,6 +219,17 @@ $script:RequiredSaveAddons = @('skoobot_reclauded', 'skoobot_devbridge')
     it as well, or a fixture with a hyphen in its name is reported as having
     no save at all (#27).
 #>
+function Get-ResultSlug {
+    <#
+        The file-name form of a class or race: lowercase, non-alphanumerics
+        collapsed to a single hyphen. Result files, save names and anything
+        that has to find them again all depend on agreeing about this, so it
+        lives here rather than in each caller.
+    #>
+    param([Parameter(Mandatory)][string]$Name)
+    return (($Name -replace '[^A-Za-z0-9]+', '-').Trim('-')).ToLower()
+}
+
 function Get-SaveDirName {
     param([Parameter(Mandatory)][string]$Name)
     # TRUNCATED TO 25 FIRST, because the engine does: mod/class/Game.lua:204
