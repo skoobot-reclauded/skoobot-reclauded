@@ -456,6 +456,54 @@ function Get-Vision {
     return $null
 }
 
+<#
+    #193: pin paradox to a deliberate level before a chronomancer run, and
+    write down what was chosen.
+
+    Left alone, a run starts at whatever birth happened to leave, so two runs
+    of the same class are not comparable on the one resource that gates its
+    talents -- and a class can spend a whole sweep near the anomaly threshold
+    without the record ever saying so.
+
+    Not a constant. The safe level moves with Willpower and with sustains, so
+    the number is the engine's OWN choice for its chronomancers, copied from
+    the Spacetime Tuning AI block (data/talents/chronomancy/other.lua:66-71):
+    it wants 200 modified paradox, i.e. 100 of margin before anomalies begin.
+
+    Set through incParadox, the game's own mutator, rather than by writing the
+    field -- the threshold messages and any hooks on the way are part of what
+    a real change does.
+
+    Gated on the talent, not on a class list, so anything with the pool
+    qualifies the same way.
+#>
+function Set-ParadoxPin {
+    $r = Invoke-Bridge -TimeoutSec 30 -Lua @'
+local p = game.player
+if not p then return "none" end
+if not (p.knowTalent and p.T_SPACETIME_TUNING and p:knowTalent(p.T_SPACETIME_TUNING)) then return "none" end
+local sustain_modifier = p:getMinParadox()
+local will_modifier = 2 * (p:getWil() + (p:attr("paradox_reduce_anomalies") or 0))
+local preferred = math.max(sustain_modifier, 200 + will_modifier - sustain_modifier)
+local before = p:getParadox()
+local delta = preferred - before
+if delta ~= 0 then p:incParadox(delta) end
+p.preferred_paradox = preferred
+p.paradox_tuning_turn = game.turn
+return ("preferred=%d before=%d set=%d wil=%d modified=%d fail=%d"):format(
+  math.floor(preferred), math.floor(before), math.floor(p:getParadox()), math.floor(p:getWil()),
+  math.floor((p:getModifiedParadox())), math.floor((p:paradoxFailChance())))
+'@
+    if ($r.Status -ne 'OK' -or "$($r.Result)" -eq 'none') { return $null }
+    if ("$($r.Result)" -match 'preferred=(-?\d+) before=(-?\d+) set=(-?\d+) wil=(-?\d+) modified=(-?\d+) fail=(-?\d+)') {
+        return [ordered]@{
+            preferred = [int]$Matches[1]; before = [int]$Matches[2]; set = [int]$Matches[3]
+            wil = [int]$Matches[4]; modified = [int]$Matches[5]; fail = [int]$Matches[6]
+        }
+    }
+    return $null
+}
+
 try {
     $g = Load-Save -Name $SaveName
     if (-not $g.Ready) { Write-Host "[soak] FAILED - could not load '$SaveName' ($($g.Reason))"; $endReason = 'LOAD_FAILED'; exit 1 }
@@ -501,14 +549,26 @@ function sk.status(step)
   -- die_at the two are different numbers. A soak log that recorded only
   -- the first could not explain a stop.
   local el = b.effectiveLife and b.effectiveLife(p) or { safe_pool = p.life, safe_max = p.max_life }
-  return ("turn=%s|level=%s|zone=%s|zlevel=%s|zmax=%s|x=%s|y=%s|life=%d|maxlife=%d|pool=%d|poolmax=%d|active=%s|dead=%s|killer=%s|ndialogs=%d|dialog=%s|stairs=%s|downs=%d|explored=%s|walk=%s|reason=%s"):format(
+  -- #193: paradox, for any actor that HAS the pool. Gated on the talent, not
+  -- on a class list -- Paradox Mage, Temporal Warden and anything an addon
+  -- adds all qualify the same way. raw/modified/fail% because the three move
+  -- independently: modified is raw adjusted for Willpower and sustains, and
+  -- the anomaly chance is driven by modified alone.
+  local para = ""
+  if p.knowTalent and p.T_SPACETIME_TUNING and p:knowTalent(p.T_SPACETIME_TUNING) then
+    local ok, raw, modified, fail = pcall(function()
+      return p:getParadox(), (p:getModifiedParadox()), (p:paradoxFailChance())
+    end)
+    if ok then para = ("%d/%d/%d"):format(math.floor(raw or 0), math.floor(modified or 0), math.floor(fail or 0)) end
+  end
+  return ("turn=%s|level=%s|zone=%s|zlevel=%s|zmax=%s|x=%s|y=%s|life=%d|maxlife=%d|pool=%d|poolmax=%d|active=%s|dead=%s|killer=%s|ndialogs=%d|dialog=%s|stairs=%s|downs=%d|explored=%s|paradox=%s|walk=%s|reason=%s"):format(
     tostring(game.turn), tostring(p.level), tostring(game.zone and game.zone.short_name or "none"),
     tostring(game.level and game.level.level or -1), tostring(game.zone and game.zone.max_level or -1),
     tostring(p.x or -1), tostring(p.y or -1), math.floor(p.life or -1), math.floor(p.max_life or -1),
     math.floor(el.safe_pool or -1), math.floor(el.safe_max or -1),
     tostring(b.active), tostring(p.dead and true or false), killer:gsub("|", "/"),
     game.dialogs and #game.dialogs or 0, dtitle:gsub("|", "/"), sk.stairs(), #sk.downs(), tostring(sk.explored()),
-    walk, tostring(b.last_reason))
+    para, walk, tostring(b.last_reason))
 end
 
 -- (a) the top dialog, through its own EXIT bind. Never the death dialog.
@@ -1127,6 +1187,16 @@ return "installed save_name=" .. tostring(game.save_name)
 
     $visionStart = Get-Vision
     if ($visionStart) { Write-Host "  vision   lite=$($visionStart.lite) sight=$($visionStart.sight)" }
+
+    # #193: before the first decision, so the whole run is measured at it.
+    $paradoxPinned = Set-ParadoxPin
+    if ($paradoxPinned) {
+        Write-Host ("  paradox  pinned {0} -> {1} (wil {2}); modified {3}, anomaly chance {4}%" -f
+            $paradoxPinned.before, $paradoxPinned.set, $paradoxPinned.wil, $paradoxPinned.modified, $paradoxPinned.fail)
+        if ($paradoxPinned.set -ne $paradoxPinned.preferred) {
+            Warn "paradox pin asked for $($paradoxPinned.preferred) and the game settled at $($paradoxPinned.set)"
+        }
+    }
 
     # #158: spend whatever birth left unspent, before the first decision.
     $buildApplied = $null
@@ -1767,7 +1837,11 @@ finally {
         wall_seconds = $wall
         end_reason   = $endReason
         stuck        = $stuckLabel
-        limits       = [ordered]@{ max_minutes = $MaxMinutes; max_level = $MaxLevel; max_turns = $MaxTurns }
+        limits       = [ordered]@{ max_minutes = $MaxMinutes; max_level = $MaxLevel; max_turns = $MaxTurns
+                                   # Named beside the other limits because it is one: the run
+                                   # was measured at this paradox, not at whatever birth left
+                                   # (#193). Null for a class without the pool.
+                                   paradox_pin = $(if ($paradoxPinned) { $paradoxPinned.set } else { $null }) }
         turns        = [ordered]@{ start = $(if ($first) { $first.turn } else { -1 }); end = $(if ($last) { $last.turn } else { -1 }); delta = $(if ($first -and $last) { $last.turn - $first.turn } else { 0 }) }
         level        = [ordered]@{ start = $(if ($first) { $first.level } else { -1 }); end = $(if ($last) { $last.level } else { -1 }); max = $peakLevel }
         zones        = @($zoneTrail)
@@ -1809,6 +1883,15 @@ finally {
         placed_in    = $placedIn
         auto_spend   = $(if ($NoAutoSpend) { 'off' } else { 'on' })
         build_at_start = $buildApplied
+        # #193: raw/modified/fail% at both ends, plus what the pin chose. Both
+        # ends because Willpower and sustains move under the run and the
+        # threshold moves with them -- one reading would misattribute a whole
+        # run's anomaly exposure to the wrong number.
+        paradox      = [ordered]@{
+            pinned = $paradoxPinned
+            start  = $(if ($first) { "$($first.paradox)" } else { '' })
+            end    = $(if ($last)  { "$($last.paradox)"  } else { '' })
+        }
         # #178: light radius and sight, at both ends. See Get-Vision above for
         # why this is the number #153's prediction turns on.
         vision       = [ordered]@{ start = $visionStart; end = $visionEnd }
@@ -1851,6 +1934,9 @@ finally {
     $md.Add("| conditions | $(if ($conditionsApplied.Count -gt 0) { $conditionsApplied -join ', ' } else { 'defaults' }) |")
     if ($conditionsMissing.Count -gt 0) {
         $md.Add("| conditions NOT applied | **$($conditionsMissing -join ', ')** -- this run is not comparable (#206) |")
+    }
+    if ($paradoxPinned) {
+        $md.Add("| paradox | pinned $($paradoxPinned.before) -> $($paradoxPinned.set) (wil $($paradoxPinned.wil)); start $($summary.paradox.start), end $($summary.paradox.end) -- raw/modified/anomaly% (#193) |")
     }
     $md.Add("| take_stairs | $stairsApplied |")
     if ($placedIn) { $md.Add("| placed_in | $placedIn -- the character was PUT here, it did not walk (#160) |") }
