@@ -26,7 +26,15 @@ $script:LogPath   = Join-Path $script:GameDir 'te4_log.txt'
 
 # T-Engine's home directory. bootstrap/boot.lua mounts it at / inside the game,
 # so <home>\skoobot-bridge is /skoobot-bridge to the devbridge addons.
-$script:TomeHome  = Join-Path $env:USERPROFILE 'T-Engine\4.0'
+# TOME_HOME names the PARENT the engine is given as --home; it appends
+# T-Engine\4.0 itself. Set it, with TOME_DIR pointing at a slot game directory,
+# to run several games at once on one machine -- each gets its own saves,
+# bridge channel and te4_log.txt. The log is the reason a slot needs its own
+# game directory at all: the engine writes it to the working directory, and
+# bootstraps its engine code from there too, so the two cannot be separated
+# (#189).
+if ($env:TOME_HOME) { $script:TomeHome = Join-Path $env:TOME_HOME 'T-Engine\4.0' }
+else { $script:TomeHome = Join-Path $env:USERPROFILE 'T-Engine\4.0' }
 $script:BridgeDir = Join-Path $script:TomeHome 'skoobot-bridge'
 $script:SaveRoot  = Join-Path $script:TomeHome 'tome\save'
 
@@ -325,6 +333,12 @@ function Stop-Game {
         $script:GamePid = $null
         return
     }
+    if ($env:TOME_HOME) {
+        # Slot mode: by name would kill every other slot's game. Only ours.
+        if ($script:GamePid) { Stop-Process -Id $script:GamePid -Force -ErrorAction Ignore }
+        $script:GamePid = $null
+        return
+    }
     Get-Process -Name 't-engine' -ErrorAction Ignore | ForEach-Object { Stop-Process -Id $_.Id -Force }
     $script:GamePid = $null
 
@@ -373,8 +387,10 @@ function Start-Game {
     Get-ChildItem $script:BridgeDir -Filter 'cmd-*' -ErrorAction Ignore | Remove-Item -Force
     Clear-GameLog
     $script:Seq = 0
+    $launchArgs = @('--flush-stdout', '--no-steam', '--no-web')
+    if ($env:TOME_HOME) { $launchArgs += @('--home', $env:TOME_HOME) }
     $p = Start-Process -FilePath $script:GameExe `
-                       -ArgumentList '--flush-stdout','--no-steam','--no-web' `
+                       -ArgumentList $launchArgs `
                        -WorkingDirectory $script:GameDir -PassThru
     $script:GamePid = $p.Id
     $null = Enter-HarnessLease -GamePid $p.Id
