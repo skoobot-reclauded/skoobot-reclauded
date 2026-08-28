@@ -400,6 +400,40 @@ function Bump-Count([hashtable]$t, [string]$k) {
 }
 
 $exit = 1
+# Defined OUTSIDE the try below, though both its callers are inside it. The
+# second call is in the `finally`, and `try` begins 663 lines before this
+# function used to be declared -- so any failure in birth, placement or setup
+# reached the finally with Get-Vision never defined and reported "The term
+# 'Get-Vision' is not recognized", burying the real error under a missing
+# function. A soak that fails early must still say why (#195).
+<#
+    #178: the character's own light radius and sight range.
+
+    map.seens -- the only thing spotHostiles tests -- is set for a grid in
+    field of view ONLY IF THE GRID IS LIT (engine/Map.lua:649), and
+    unconditionally within the character's own light radius
+    (applyExtraLite, :663). So `lite` decides how much of a run's
+    accumulated field of view the bot can still see once runStopped wipes
+    it, which is the whole of #153 and the live-lock in #164.
+
+    The prediction this exists to test: a poor light radius should make a
+    character MORE prone to the stall, because a larger one marks more
+    grids unconditionally and leaves less for the accumulated view to add.
+    Nothing recorded it before, so the corpus could not answer it.
+
+    Read at both ends because equipment changes them -- a lantern picked up
+    on floor one is exactly the interesting case, and a single reading at
+    birth would attribute its whole run to the wrong number.
+#>
+function Get-Vision {
+    $r = Invoke-Bridge -TimeoutSec 30 -Lua 'local p = game.player if not p then return "none" end return ("lite=%s sight=%s"):format(tostring(p.lite or 0), tostring(p.sight or 10))'
+    if ($r.Status -ne 'OK') { return $null }
+    if ("$($r.Result)" -match 'lite=([\d.]+) sight=([\d.]+)') {
+        return [ordered]@{ lite = [double]$Matches[1]; sight = [double]$Matches[2] }
+    }
+    return $null
+}
+
 try {
     $g = Load-Save -Name $SaveName
     if (-not $g.Ready) { Write-Host "[soak] FAILED - could not load '$SaveName' ($($g.Reason))"; $endReason = 'LOAD_FAILED'; exit 1 }
@@ -1044,33 +1078,6 @@ return "installed save_name=" .. tostring(game.save_name)
         Write-Host "  prelevel $($pl.Status) $($pl.Result)"
     }
 
-    <#
-        #178: the character's own light radius and sight range.
-
-        map.seens -- the only thing spotHostiles tests -- is set for a grid in
-        field of view ONLY IF THE GRID IS LIT (engine/Map.lua:649), and
-        unconditionally within the character's own light radius
-        (applyExtraLite, :663). So `lite` decides how much of a run's
-        accumulated field of view the bot can still see once runStopped wipes
-        it, which is the whole of #153 and the live-lock in #164.
-
-        The prediction this exists to test: a poor light radius should make a
-        character MORE prone to the stall, because a larger one marks more
-        grids unconditionally and leaves less for the accumulated view to add.
-        Nothing recorded it before, so the corpus could not answer it.
-
-        Read at both ends because equipment changes them -- a lantern picked up
-        on floor one is exactly the interesting case, and a single reading at
-        birth would attribute its whole run to the wrong number.
-    #>
-    function Get-Vision {
-        $r = Invoke-Bridge -TimeoutSec 30 -Lua 'local p = game.player if not p then return "none" end return ("lite=%s sight=%s"):format(tostring(p.lite or 0), tostring(p.sight or 10))'
-        if ($r.Status -ne 'OK') { return $null }
-        if ("$($r.Result)" -match 'lite=([\d.]+) sight=([\d.]+)') {
-            return [ordered]@{ lite = [double]$Matches[1]; sight = [double]$Matches[2] }
-        }
-        return $null
-    }
     $visionStart = Get-Vision
     if ($visionStart) { Write-Host "  vision   lite=$($visionStart.lite) sight=$($visionStart.sight)" }
 
