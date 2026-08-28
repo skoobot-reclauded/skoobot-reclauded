@@ -92,10 +92,10 @@ if ($wanted.Count -gt 0) {
 # Repeat expands into separate queue items. Every rep of a class produces the
 # SAME result filename, so writing them all to one directory would leave one
 # survivor and silently call it the answer. Each rep gets its own directory.
-$queue = New-Object System.Collections.Generic.Queue[object]
+$queue = @()
 foreach ($r in 1..$Repeat) {
     foreach ($c in $classes) {
-        $queue.Enqueue([pscustomobject]@{ Class = $c; Rep = $r })
+        $queue += [pscustomobject]@{ Class = $c; Rep = $r }
     }
 }
 $totalJobs = $queue.Count
@@ -115,9 +115,15 @@ Add-Content -Path (Join-Path $OutDir 'stamps.txt') -Value (Format-BuildStamp $st
 Say (Format-BuildStamp $stamp)
 
 # ---- the queue ----------------------------------------------------------
-$free    = New-Object System.Collections.Generic.Queue[object]
-foreach ($s in $slotSet) { $free.Enqueue($s) }
-$running = New-Object System.Collections.Generic.List[object]
+# Plain arrays, rebuilt each pass. A List[object] here threw "Argument types
+# do not match" out of $running.Remove() on every iteration, which spun the
+# loop forever while printing nothing -- and the Select-String the caller
+# piped through hid the exception completely, so it read as a hung watchdog
+# rather than a crashing one. Rebuilding also removes the
+# modify-while-enumerating hazard that made Remove() necessary.
+$free    = @($slotSet)
+$running = @()
+$next    = 0
 $done    = 0
 $timedOut = @()
 $started = Get-Date
@@ -142,15 +148,16 @@ function Start-ClassJob($item, $slot) {
         if ($dossier) { $a += '-Dossier' }
         & powershell @a 2>&1 | Out-File -FilePath (Join-Path $work 'job.log') -Encoding utf8
     }
-    $running.Add([pscustomobject]@{
+    Say ("slot$($slot.N) <- $($item.Class)$(if ($Repeat -gt 1) { " #$($item.Rep)" })  ($done/$totalJobs done)")
+    # Returned, not pushed onto a shared collection: the caller owns the list.
+    return [pscustomobject]@{
         Job      = $job
         Slot     = $slot
         Item     = $item
         WorkDir  = $workDir
         Deadline = (Get-Date).AddSeconds($ClassTimeoutSec)
         Started  = Get-Date
-    })
-    Say ("slot$($slot.N) <- $($item.Class)$(if ($Repeat -gt 1) { " #$($item.Rep)" })  ($done/$totalJobs done)")
+    }
 }
 
 function Complete-Run($r, [string]$forced) {
@@ -192,25 +199,30 @@ function Complete-Run($r, [string]$forced) {
     }
 
     Remove-Job $r.Job -Force -ErrorAction SilentlyContinue
-    $free.Enqueue($r.Slot)
+    $script:free += $r.Slot
     $script:done++
 }
 
-while ($queue.Count -gt 0 -or $running.Count -gt 0) {
-    while ($queue.Count -gt 0 -and $free.Count -gt 0) {
-        Start-ClassJob $queue.Dequeue() $free.Dequeue()
+while ($next -lt $totalJobs -or $running.Count -gt 0) {
+    while ($next -lt $totalJobs -and $free.Count -gt 0) {
+        $slot = $free[0]
+        $free = @($free | Select-Object -Skip 1)
+        $running += (Start-ClassJob $queue[$next] $slot)
+        $next++
     }
     Start-Sleep -Seconds $PollSec
 
-    foreach ($r in @($running)) {
+    $still = @()
+    foreach ($r in $running) {
         if ($r.Job.State -in @('Completed', 'Failed', 'Stopped')) {
             Complete-Run $r ''
-            $null = $running.Remove($r)
         } elseif ((Get-Date) -gt $r.Deadline) {
             Complete-Run $r "over the ${ClassTimeoutSec}s class cap"
-            $null = $running.Remove($r)
+        } else {
+            $still += $r
         }
     }
+    $running = @($still)
 }
 
 $elapsed = ((Get-Date) - $started).TotalSeconds
@@ -235,7 +247,8 @@ if ($Repeat -gt 1) {
         }
     }
     Write-Host ''
-    Say "per-rep results under $OutDirep1..rep$Repeat -- each is one sample, summarise a rep with -SummarizeOnly -OutDir <rep dir>"
+    Say "per-rep results under $OutDir
+ep1..rep$Repeat -- each is one sample, summarise a rep with -SummarizeOnly -OutDir <rep dir>"
     exit 0
 }
 
