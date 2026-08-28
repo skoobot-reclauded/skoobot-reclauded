@@ -56,6 +56,14 @@ foreach ($d in $dirList) {
     $zoneMain  = if ($zoneTally.Count) { $zoneTally[0].Name } else { '' }
     $zoneOther = ($zoneTally | Select-Object -Skip 1 | Measure-Object -Property Count -Sum).Sum
 
+    # Race is per-CLASS for the same reason: the roster is per-race and the
+    # exception table births a Dwarf Stone Warden beside Cornacs (#123), so a
+    # mixed sweep is normal and must not read as a policy change (#223).
+    $raceTally = @($rows | ForEach-Object { "$($_.Row.Race)" } | Where-Object { $_ } |
+                  Group-Object | Sort-Object Count -Descending)
+    $raceMain  = if ($raceTally.Count) { $raceTally[0].Name } else { '' }
+    $raceOther = ($raceTally | Select-Object -Skip 1 | Measure-Object -Property Count -Sum).Sum
+
     $sweeps += [pscustomobject]@{
         Name    = $d.Name
         Rows    = $rows
@@ -71,6 +79,8 @@ foreach ($d in $dirList) {
         Mins      = Distinct @($soaks | ForEach-Object { $_.limits.max_minutes })
         Conds     = Distinct @($soaks | ForEach-Object { (@($_.conditions) -join ' ') })
         CondSet   = (Distinct @($soaks | ForEach-Object { @($_.conditions) })) -join ' '
+        Race      = $raceMain
+        RaceOther = [int]$raceOther
         Zone      = $zoneMain
         ZoneOther = [int]$zoneOther
     }
@@ -94,19 +104,20 @@ Say ''
 # ------------------------------------------------------------- fingerprint --
 # Protocol and policy only. Host and commit are provenance and get their own
 # line: a sweep spanning two of either is a MERGED sweep, not a broken one.
-function Fp($s) { "$($s.Trees -join ',')|$($s.Protos -join ',')|$($s.Zone)|$($s.CondSet)|$($s.Mins -join ',')|$($s.Rules -join ',')" }
+function Fp($s) { "$($s.Trees -join ',')|$($s.Protos -join ',')|$($s.Race)|$($s.Zone)|$($s.CondSet)|$($s.Mins -join ',')|$($s.Rules -join ',')" }
 
 Say '## Sweeps'
 Say ''
-Say '| # | sweep | when | runs | host | commit | trees | proto | start zone | minutes | rules |'
-Say '|---:|---|---|---:|---|---|---|---|---|---:|---|'
+Say '| # | sweep | when | runs | host | commit | trees | proto | race | start zone | minutes | rules |'
+Say '|---:|---|---|---:|---|---|---|---|---|---|---:|---|'
 $n = 0
 foreach ($s in $sweeps) {
     $n++
     $s | Add-Member -NotePropertyName Ord -NotePropertyValue $n -Force
     $runs = "$($s.Rows.Count)$(if ($s.NoSoak) { " (+$($s.NoSoak) no soak)" })"
     $zone = "$($s.Zone)$(if ($s.ZoneOther) { " (+$($s.ZoneOther) class-specific)" })"
-    Say "| $($s.Ord) | $($s.Name) | $($s.When) | $runs | $(Show $s.Hosts) | $(Show $s.Commits) | $(Show $s.Trees) | $(Show $s.Protos '--') | $zone | $(Show $s.Mins) | $(Show $s.Rules) |"
+    $race = "$($s.Race)$(if ($s.RaceOther) { " (+$($s.RaceOther) by exception)" })"
+    Say "| $($s.Ord) | $($s.Name) | $($s.When) | $runs | $(Show $s.Hosts) | $(Show $s.Commits) | $(Show $s.Trees) | $(Show $s.Protos '--') | $race | $zone | $(Show $s.Mins) | $(Show $s.Rules) |"
 }
 Say ''
 
@@ -136,6 +147,7 @@ for ($i = 1; $i -lt $sweeps.Count; $i++) {
     $what = @()
     if (($a.Trees  -join ',') -ne ($b.Trees  -join ',')) { $what += "trees $(Show $a.Trees) -> $(Show $b.Trees)" }
     if (($a.Protos -join ',') -ne ($b.Protos -join ',')) { $what += "proto $(Show $a.Protos '--') -> $(Show $b.Protos '--')" }
+    if ($a.Race -ne $b.Race)                             { $what += "race $($a.Race) -> $($b.Race)" }
     if ($a.Zone -ne $b.Zone)                             { $what += "start zone $($a.Zone) -> $($b.Zone)" }
     if (($a.Mins   -join ',') -ne ($b.Mins   -join ',')) { $what += "minutes $(Show $a.Mins) -> $(Show $b.Mins)" }
     if (($a.Rules  -join ',') -ne ($b.Rules  -join ',')) { $what += "rules $(Show $a.Rules) -> $(Show $b.Rules)" }
