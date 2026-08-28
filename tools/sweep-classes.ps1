@@ -543,6 +543,13 @@ try {
             # descents on a run that was entirely injected.
             Descents = ((@($s.resumes.by_action) | Where-Object { $_.action -eq 'stairs-down' } | ForEach-Object { $_.count }) + 0)[0] + $s.rungs.descend.taken
             NextZone = $s.rungs.next_zone.taken
+            # The SOURCE half of the first injected zone move, e.g.
+            # "norgos-lair:1". The floor is the diagnostic payload: ":1" means
+            # the level was explored and no way down was ever seen, while ":3"
+            # is the designed bottom-floor hand-off (#202).
+            NextZoneFrom = $(if ($s.rungs.next_zone.transitions -and $s.rungs.next_zone.transitions.Count -gt 0) {
+                                 (("$($s.rungs.next_zone.transitions[0])" -split ' -> ')[0]).Trim()
+                             } else { '' })
             StartZone= $startZone
             Comparable = $comparable
             Stops    = $s.stop_total
@@ -612,11 +619,25 @@ if ($SummarizeOnly -and (Test-Path $stampFile)) {
     $md.Add("Measured on **``$($sweepBuild.short)``**$(if ($sweepBuild.dirty -gt 0) { " plus **$($sweepBuild.dirty) uncommitted file(s)**" }) in ``$(Split-Path -Leaf $sweepBuild.repo)`` -- $($sweepBuild.subject)")
 }
 $md.Add('')
-$md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in ``$expectedStart``. The clearing is the bot's; the harness presses '>' and `Descents` says how often.")
+$md.Add("**$cleared of $ran cleared their first floor ($pct%).** Comparable runs only -- every class starting in ``$expectedStart``. The clearing is the bot's; ``Descents`` counts the stairs the harness pressed and ``NextZone`` the zone moves it injected.")
 if ($attempted.Count -gt 0) {
     $md.Add('')
     $md.Add("**$($attempted.Count) class(es) were attempted and produced no comparable run**, so they are not in that percentage: " +
         (($attempted | ForEach-Object { "$($_.Class) ($($_.Outcome)$(if ($_.EndReason) { " -- $($_.EndReason)" }))" }) -join ', ') + '.')
+}
+# A STUCK that was moved out of its start zone by the harness is a different
+# fact from a STUCK that sat on floor one, and the table alone cannot tell them
+# apart: $cleared looks for a second floor OF THE START ZONE, which a teleported
+# run can never satisfy. The floor in "first from" is the payload -- ":1" means
+# the level was explored and no way down was ever seen (#202).
+$injected = @($results | Where-Object { $_.Outcome -eq 'STUCK' -and $_.NextZone -gt 0 })
+if ($injected.Count -gt 0) {
+    $md.Add('')
+    $md.Add("**$($injected.Count) STUCK class(es) left their start zone on the harness's initiative**, not by clearing it: " +
+        (($injected | ForEach-Object {
+            $from = if ($_.NextZoneFrom) { ", first from ``$($_.NextZoneFrom)``" } else { '' }
+            "$($_.Class) ($($_.NextZone)x next-zone$from)"
+        }) -join ', ') + '.')
 }
 # The percentage counts what arrived. A merge that lost a half would read
 # "10 of 10 (100%)" with the absent classes listed quietly further down, which
@@ -639,14 +660,17 @@ if ($offZone.Count -gt 0) {
     $md.Add("Reported but NOT in that percentage, because they do not start in $expectedStart and so did not clear the same floor: " + (($offZone | ForEach-Object { "$($_.Class) ($($_.StartZone))" }) -join ', ') + '.')
 }
 $md.Add('')
-$md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | Escorts | Most common stops |')
-$md.Add('|---|---|---|---|---|---|---|---|---|---|---|')
+# Two injected-progression counters side by side, one per rung -- never one
+# composite "Injected" column: a staircase the bot found and pressed and a
+# teleport past a zone it never solved mean different things (#202).
+$md.Add('| Class | Tree | Race | Outcome | Floors | Char lvl | Turns | Stops | Descents | NextZone | Escorts | Most common stops |')
+$md.Add('|---|---|---|---|---|---|---|---|---|---|---|---|')
 foreach ($r in ($results | Sort-Object @{e={$_.Outcome}}, @{e={$_.Class}})) {
     $esc = if ($r.Escorts -gt 0) { "$($r.EscDone)/$($r.Escorts)$(if ($r.SelfKill -gt 0) { " **-$($r.SelfKill) self**" })" } else { '-' }
-    $md.Add("| $($r.Class) | $($r.Tree) | $($r.Race) | **$($r.Outcome)** | $($r.Trail) | $($r.CharLevel) | $($r.Turns) | $($r.Stops) | $($r.Descents) | $esc | $($r.TopStop) |")
+    $md.Add("| $($r.Class) | $($r.Tree) | $($r.Race) | **$($r.Outcome)** | $($r.Trail) | $($r.CharLevel) | $($r.Turns) | $($r.Stops) | $($r.Descents) | $($r.NextZone) | $esc | $($r.TopStop) |")
 }
 $md.Add('')
-$md.Add('`Descents` counts stairs the HARNESS took, so it says how much of a `CLEARED` was injected; the clearing itself is the bot''s. A `STUCK` row is not necessarily a class problem -- read the stop column first, because a known bug eating the whole budget (a sealed door, #64; a talent that opens a dialog every turn) looks exactly like a class that cannot cope.')
+$md.Add('`Descents` counts stairs the HARNESS pressed and `NextZone` counts zone moves it injected; a `CLEARED`''s clearing is the bot''s, but any row with `NextZone` above 0 left at least one zone on the harness''s initiative -- read the trail against both counts. A `STUCK` row is not necessarily a class problem -- read the stop column *and* `NextZone` first, because a known bug eating the whole budget (a sealed door, #64; a talent that opens a dialog every turn), and a level explored with no staircase ever seen (#202), both look exactly like a class that cannot cope.')
 $md.Add('')
 if ($StartZone) { $md.Add("Every class was PLACED in ``$StartZone`` before its run (#160) -- it did not walk there. Town-start and island-start exclusions do not apply."); $md.Add('') }
 $md.Add('Skipped: town-start classes (#123) -- ' + ($TOWN_STARTS -join ', ') + '. Steamtech classes are campaign-gated and never appear in a Maj''Eyal roster.')
