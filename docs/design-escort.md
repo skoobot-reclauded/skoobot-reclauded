@@ -65,18 +65,29 @@ readable at any moment.
 ### 1.4 The reward chat, in detail
 
 `data/chats/escort-quest.lua` builds its answers from `EscortRewards:rewardChatAnwsers`
-(`mod/class/EscortRewards.lua`), which emits one answer per available reward with a generated
-label:
+(`mod/class/EscortRewards.lua:489-587`), which emits one answer per available reward with a
+generated label (amounts are static: +5 stats, +12 saves, +1 talent level, mastery 1.0):
 
 ```
-[Improve Strength by +3]
-[Improve Physical save by +4]
+[Improve Strength by +5]
+[Improve physical save by +12]
 [Learn talent Stunning Blow (+1 level(s))]
+[Allow training of talent category Technique / Conditioning (at mastery 1.00)]
 ```
 
-Each answer's `action` calls `game.party:reward(...)`, which opens **a second dialog** to choose
-the recipient. So answering a reward chat unattended is two dialogs, not one, and the labels are
-generated strings rather than stable ids — the stable key is the escortee's `reward_type`.
+Note the last one: the label renders capitalized display names, never the type string
+`technique/conditioning` — the one row that looks like it carries a stable id is the one that
+does not. Talent rows vanish at max raw level, and the category rows — present on 7 of 8
+kinds — vanish for a character who carries the category even locked. Only the stat rows have
+a deterministic emission order; saves, talents and categories iterate `pairs`, so **nothing
+may match by position** — labels are generated strings, and the stable keys are the
+escortee's `reward_type` plus the row's own id in the plan's vocabulary (stat short name,
+save key `mental|spell|phys`, talent id, type string — `design-build-plan.md` §3.2).
+
+Each answer's `action` calls `game.party:reward(...)`, which opens a **second dialog** to
+choose the recipient only when more than one eligible full-control party member exists
+(`mod/class/Party.lua:471-473`) — for a solo character the reward applies at once, one dialog;
+an Alchemist's golem makes it two.
 
 ---
 
@@ -150,11 +161,16 @@ An escort changes what the bot does, so the player is told once and can turn it 
 
 ### 3.5 What is deliberately not built
 
-**Answering the reward chat.** #93's step 3 wants per-escort-type reward preferences. The data
-shape is settled by §1.4 — key on `reward_type` (`warrior`, `divination`, `thief`, `alchemist`,
-`sun-paladin`, `defiler`, `temporal`, `loremaster`), value being an ordered preference over
-`stat` / `save` / `talent`, plus `decline` and `betray` — but three things argue for leaving it
-until the mechanism above has been played with:
+**Answering the reward chat.** #93's step 3 wants per-escort-type reward preferences. Since
+the 2026-08-26 split (recorded on #88), the *ordering* half lives in the build plan
+(`design-build-plan.md` §3.2): per `reward_type` — the actual table keys `warrior`,
+`divination`, `survival`, `alchemy`, `sun_paladin`, `defiler`, `temporal`, `exotic` — an
+ordered preference over rows of kind `stat` / `save` / `talent` / `talent_type`, both the
+normal and antimagic variants, ids only. `decline` and `betray` are **not** part of that
+value: they are this issue's escort policy, wanting their own guard. What stays here is
+decline, betray and its guard, answering the chat at all, the
+recipient dialog, and matching the plan's ids to the generated labels. Three things argue for
+leaving the chat half until the mechanism above has been played with:
 
 1. Answering means matching **generated label strings**, not stable ids, and then handling the
    second `game.party:reward` dialog. That is a fragile pair to build blind.
