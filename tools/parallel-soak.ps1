@@ -50,14 +50,16 @@ $slots = New-SlotSet -Count $Count -Root $Root -GameDir $GameDir -SeedHome $Seed
 # Each job sets TOME_DIR and TOME_HOME for its own process only. harness.ps1
 # reads both, so the slot's game, saves, bridge channel and log are its own.
 $started = Get-Date
-$jobs = @()
+# Job AND slot together: a wedged job has to be reaped through its own slot,
+# and two parallel arrays would be one edit away from reaping the wrong one.
+$runs = @()
 foreach ($s in $slots) {
     $out = Join-Path $s.Slot 'soak.json'
     # A result left from a previous run is read as though this run produced it.
     # That is exactly #188 again, in the script written to fix the last one: the
     # first 4-slot run reported a baseline's 18,381 turns as a parallel result.
     Remove-Item $out -Force -ErrorAction SilentlyContinue
-    $jobs += Start-Job -Name "slot$($s.N)" -ArgumentList $RepoRoot, $s.GameDir, $s.Home, $Save, $Minutes, $out, $StartZone, $Conditions -ScriptBlock {
+    $job = Start-Job -Name "slot$($s.N)" -ArgumentList $RepoRoot, $s.GameDir, $s.Home, $Save, $Minutes, $out, $StartZone, $Conditions -ScriptBlock {
         param($repo, $gd, $hm, $save, $mins, $out, $zone, $cond)
         $env:TOME_DIR  = $gd
         $env:TOME_HOME = $hm
@@ -68,10 +70,28 @@ foreach ($s in $slots) {
             -Conditions $cond -NoRunLease 2>&1 |
             Out-File -FilePath (Join-Path (Split-Path -Parent $out) 'job.log') -Encoding utf8
     }
+    $runs += [pscustomobject]@{ Slot = $s; Job = $job }
 }
+$jobs = @($runs | ForEach-Object { $_.Job })
 Say "$($jobs.Count) soak(s) launched at $($started.ToString('HH:mm:ss')); waiting"
 $null = Wait-Job -Job $jobs -Timeout (($Minutes + 12) * 60)
 $elapsed = ((Get-Date) - $started).TotalSeconds
+
+# Wait-Job's timeout stops WAITING, not the job, so the table below used to be
+# rendered while a wedged slot's soak and game were still running. Measured
+# against a deliberately wedged slot: the Remove-Job -Force at the foot does
+# take the chain down a few seconds later, so this is an ordering and
+# reporting fix, not the outright leak #196 predicted. Stop first, reap
+# through the same function the scheduler uses, and name the slot wedged.
+$wedged = @()
+foreach ($r in $runs) {
+    if ($r.Job.State -eq 'Running') {
+        Say "slot$($r.Slot.N) -- still running at the timeout; stopping it"
+        Stop-Job $r.Job -ErrorAction SilentlyContinue
+        $wedged += $r.Slot.N
+    }
+}
+foreach ($r in $runs) { $null = Invoke-SlotReap $r.Slot }
 
 # ---- what happened ------------------------------------------------------
 Write-Host ''
@@ -85,7 +105,10 @@ foreach ($s in $slots) {
     if (-not (Test-Path $out)) {
         $jl = Join-Path $s.Slot 'job.log'
         $why = if (Test-Path $jl) { (Get-Content $jl | Where-Object { $_ -match 'IN USE|FAILED|Exception|error' } | Select-Object -Last 1) } else { 'no job.log' }
-        Write-Host ('  {0,-7} {1} -- {2}' -f "slot$($s.N)", 'NO RESULT', $why)
+        # A wedged slot said nothing at all before: "NO RESULT" reads as a run
+        # that failed, when it is a run that never ended (#196).
+        $what = if ($wedged -contains $s.N) { 'NO RESULT (wedged)' } else { 'NO RESULT' }
+        Write-Host ('  {0,-7} {1} -- {2}' -f "slot$($s.N)", $what, $why)
         continue
     }
     $j = Get-Content $out -Raw | ConvertFrom-Json

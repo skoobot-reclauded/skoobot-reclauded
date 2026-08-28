@@ -167,6 +167,52 @@ function New-SlotSet {
     return $slots
 }
 
+function Invoke-SlotReap {
+    <#
+        Kill every game the slot's launch ledger still accounts for, and clear
+        the ledger. One home for the rule, because the scheduler and
+        parallel-soak both need it and a second hand-written copy is exactly
+        the two-places drift that cost Cultist of Entropy eight sweeps (#121).
+
+        Reaps by IDENTITY -- pid AND launch time -- so a recycled pid belonging
+        to somebody else is not a match, and only t-engine is ever killed. Pids
+        come from the slot's own home, so a sibling slot's game can never be in
+        range.
+
+        Always prints the ledger count, even when it is zero: 0 launches
+        recorded means the ledger itself is broken, and silence is how the
+        previous, inert reaper hid (#196).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Slot)
+
+    $ledger = Join-Path (Join-Path $Slot.Home 'T-Engine\4.0') 'skoobot-bridge\launched.log'
+    $entries = @()
+    if (Test-Path $ledger) {
+        $entries = @(Get-Content $ledger -ErrorAction Ignore | Where-Object { $_.Trim() })
+    }
+    $reaped = 0
+    foreach ($e in $entries) {
+        $parts = "$e" -split ','
+        $lp = 0; try { $lp = [int]$parts[0] } catch { continue }
+        $proc = Get-Process -Id $lp -ErrorAction Ignore
+        if (-not $proc -or $proc.ProcessName -ne 't-engine') { continue }
+        if ($parts.Count -ge 2) {
+            # Identity, not just pid: a recycled pid belongs to someone else.
+            try {
+                $ls = [datetime]::Parse($parts[1], $null, [Globalization.DateTimeStyles]::RoundtripKind)
+                if ([math]::Abs(($proc.StartTime - $ls).TotalSeconds) -gt 5) { continue }
+            } catch { continue }
+        }
+        Stop-Process -Id $lp -Force -ErrorAction Ignore
+        $reaped++
+    }
+    if (Test-Path $ledger) { Remove-Item $ledger -Force -ErrorAction Ignore }
+    Write-Host ("[slots] slot$($Slot.N) -- ledger: $($entries.Count) launch(es), $reaped reaped" +
+                $(if ($reaped -gt 0) { ' -- a Stop-Game path failed' }))
+    return [pscustomobject]@{ Launches = $entries.Count; Reaped = $reaped }
+}
+
 function Get-SlotGamePid {
     <#
         The pid of the game a slot is running, or 0. Read from the slot's own

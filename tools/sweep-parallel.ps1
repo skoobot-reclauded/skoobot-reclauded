@@ -154,6 +154,11 @@ function Start-ClassJob($item, $slot) {
         $RepoRoot, $slot.GameDir, $slot.Home, $item.Class, $Minutes, $workDir, $Race, `
         $StartZone, $Conditions, $BirthTimeoutSec, [bool]$Dossier, $Roster, ($KeepSkips -or $wanted.Count -eq 0) -ScriptBlock {
         param($repo, $gd, $hm, $class, $mins, $work, $race, $zone, $cond, $birth, $dossier, $roster, $keepSkips)
+        # First act: this process is the root of the worker tree. The
+        # `& powershell` below, whatever IT runs, and any game they launch are
+        # all descendants of it, and on Windows Stop-Job kills none of them --
+        # so the watchdog needs a pid it can tree-kill (#196).
+        Set-Content -Path (Join-Path $work 'worker.pid') -Value $PID -Encoding ascii
         $env:TOME_DIR  = $gd
         $env:TOME_HOME = $hm
         $a = @('-ExecutionPolicy', 'Bypass', '-File', "$repo\tools\sweep-classes.ps1",
@@ -176,6 +181,29 @@ function Start-ClassJob($item, $slot) {
     }
 }
 
+function Stop-WorkerTree($r) {
+    # Stop-Job ends the job's own process and nothing else: on Windows a job
+    # does not own the native processes it spawned, so the `& powershell`
+    # running sweep-classes, whatever IT is running, and any game they launched
+    # all survive it. A mid-birth new-character could then relaunch a game into
+    # the slot we are about to hand to the next class -- the narrow window
+    # #196 left open. taskkill /T walks the parent chain in one call: no
+    # hand-rolled Win32_Process walk, and no ordering problem.
+    $wp = Join-Path $r.WorkDir 'worker.pid'
+    if (Test-Path $wp) {
+        $wpid = 0
+        try { $wpid = [int]((Get-Content $wp -Raw -ErrorAction Stop).Trim()) } catch { $wpid = 0 }
+        if ($wpid -gt 0) {
+            & taskkill.exe /T /F /PID $wpid 2>$null | Out-Null
+            Say "slot$($r.Slot.N) -- worker tree $wpid killed"
+        }
+    }
+    # A backstop, not the mechanism: this slot's own lease pid, so the other
+    # slots keep running. The ledger reap that follows is the second.
+    $gp = Get-SlotGamePid $r.Slot
+    if ($gp) { Stop-Process -Id $gp -Force -ErrorAction SilentlyContinue }
+}
+
 function Add-Detail([string]$path, [string]$note) {
     # Append a parenthetical to a result row's Detail, leaving the rest of the
     # row alone. Idempotent, so a re-run cannot stack the same note twice.
@@ -192,35 +220,14 @@ function Complete-Run($r, [string]$forced) {
     $slug = Get-ResultSlug $r.Item.Class
     $secs = [int]((Get-Date) - $r.Started).TotalSeconds
 
-    # Reap from the slot's launch LEDGER, which harness.ps1 appends at every
-    # launch. The first version of this grepped job.log for "launched pid="
-    # lines -- and was INERT, because sweep-classes captures its children's
-    # output into variables, so those lines never reach the job transcript.
-    # The happy-path test read "no REAPED lines" as no false positives when it
-    # was actually blindness: a test that could not fail (#196). The line below
-    # therefore always prints the ledger count -- 0 launches recorded would
-    # mean the ledger itself is broken, and silence is how the last one hid.
-    $ledger = Join-Path (Join-Path $r.Slot.Home 'T-Engine\4.0') 'skoobot-bridge\launched.log'
-    $entries = @()
-    if (Test-Path $ledger) { $entries = @(Get-Content $ledger -ErrorAction Ignore | Where-Object { $_.Trim() }) }
-    $reaped = 0
-    foreach ($e in $entries) {
-        $parts = "$e" -split ','
-        $lp = 0; try { $lp = [int]$parts[0] } catch { continue }
-        $proc = Get-Process -Id $lp -ErrorAction Ignore
-        if (-not $proc -or $proc.ProcessName -ne 't-engine') { continue }
-        if ($parts.Count -ge 2) {
-            # Identity, not just pid: a recycled pid belongs to someone else.
-            try {
-                $ls = [datetime]::Parse($parts[1], $null, [Globalization.DateTimeStyles]::RoundtripKind)
-                if ([math]::Abs(($proc.StartTime - $ls).TotalSeconds) -gt 5) { continue }
-            } catch { continue }
-        }
-        Stop-Process -Id $lp -Force -ErrorAction Ignore
-        $reaped++
-    }
-    if (Test-Path $ledger) { Remove-Item $ledger -Force -ErrorAction Ignore }
-    Say "slot$($r.Slot.N) -- ledger: $($entries.Count) launch(es), $reaped reaped$(if ($reaped -gt 0) { ' -- a Stop-Game path failed' })"
+    # A forced end kills the worker TREE first, so nothing the worker is still
+    # doing can launch into the slot between here and the reap (#196).
+    if ($forced) { Stop-WorkerTree $r }
+
+    # Then the ledger reap, which every completion does -- the backstop for
+    # whatever the tree kill could not reach and for any Stop-Game path that
+    # failed. Invoke-SlotReap, never a second copy of the rule (#121).
+    $null = Invoke-SlotReap $r.Slot
 
     # Reps of one class share a filename, so they need separate directories.
     # (Eaten once by a careless region edit: with $dest undefined every copy
@@ -230,11 +237,9 @@ function Complete-Run($r, [string]$forced) {
     $jlPath = Join-Path $r.WorkDir 'job.log'
 
     if ($forced) {
-        # Kill this slot's game by the pid in its own lease file, so the other
-        # slots keep running. Then record the class, because a class that
-        # vanishes from the table is worse than one that failed loudly (#187).
-        $gp = Get-SlotGamePid $r.Slot
-        if ($gp) { Stop-Process -Id $gp -Force -ErrorAction SilentlyContinue }
+        # The killing is done (Stop-WorkerTree, above). Record the class,
+        # because one that vanishes from the table is worse than one that
+        # failed loudly (#187).
         Stop-Job $r.Job -ErrorAction SilentlyContinue
         $row = [pscustomobject]@{
             Class = $r.Item.Class; Race = $Race; Outcome = 'TIMEOUT'
