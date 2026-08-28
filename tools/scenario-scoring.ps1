@@ -200,10 +200,27 @@ function sc.reset(state, conds)
   b.activation = nil; b.loop = nil; b.prevloop = nil
 end
 -- Spawn a normal-rank hostile at (x, y) with 'armor' added and 'rank' set.
+--
+-- MOBILE, deliberately. The draw is random, and probe D asserts the bot would
+-- FLEE -- which the product correctly refuses to do against something that
+-- cannot follow and is not adjacent (#97, and #124's part G). Draw a giant
+-- venus flytrap and the scenario fails on the bot behaving as designed, which
+-- is what happened on 2026-08-27:
+--
+--   why=[giant venus flytrap is 61.3x your limit at distance 4: step away
+--        first]  log=[SkooBot] AI would move to the southwest
+--
+-- The bot retreated, correctly, and the probe wanted the word "flee".
+--
+-- #122's closing note predicted exactly this for this scenario and for
+-- scenario-salvage-power. It is only real here: salvage-power asserts nothing
+-- about fleeing, so an immobile draw does it no harm.
 local function spawnAt(x, y, armor, rank)
   for _ = 1, 8 do
     local m = game.zone:makeEntity(game.level, "actor",
-      { special = function(e) return not e.unique and (e.rank or 1) <= 2 end }, nil, true)
+      { special = function(e)
+          return not e.unique and (e.rank or 1) <= 2 and not e.never_move
+        end }, nil, true)
     if not m then return nil, "SETUP no actor to spawn" end
     m.rank = rank or 2
     m.combat_armor = (m.combat_armor or 0) + (armor or 0)
