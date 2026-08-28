@@ -203,16 +203,32 @@ Write-Host 'confirm    SENT     birth + worldgen; polling for the world'
 
 $deadline = (Get-Date).AddSeconds($BirthTimeoutSec)
 $inWorld = $false
+# #183: a non-OK poll used to print nothing, so a birth whose bridge went quiet
+# left a transcript that simply STOPS after `confirm SENT` and the reader had to
+# infer the silence from absence. The two families this transcript exists to
+# separate now say which they are outright:
+#   worldgen never finished, bridge alive -> N poll lines, all zone=nil
+#   bridge dead since the confirm         -> N `poll <status>` lines, 0 answered
+$polls = 0; $answered = 0; $lastOk = $null; $quiet = 0
 while ((Get-Date) -lt $deadline -and -not $inWorld) {
     Start-Sleep -Seconds 10
     if (-not (Test-GameAlive)) { Write-Host 'FAILED: game process died during birth'; exit 1 }
     $r = Invoke-Bridge -Lua 'return bridge.state()' -TimeoutSec 15
+    $polls++
     if ($r.Status -eq 'OK') {
+        $answered++; $quiet = 0; $lastOk = Get-Date
         Write-Host ('  poll     {0}' -f $r.Result)
         if ($r.Result -match 'zone=\S' -and $r.Result -notmatch 'zone=nil') { $inWorld = $true }
+    } else {
+        $quiet++
+        Write-Host ('  poll     {0} ({1} in a row unanswered)' -f $r.Status, $quiet)
     }
 }
-if (-not $inWorld) { Write-Host "FAILED: no world after ${BirthTimeoutSec}s"; Stop-Game; exit 1 }
+if (-not $inWorld) {
+    $last = $(if ($lastOk) { $lastOk.ToString('HH:mm:ss') } else { 'never' })
+    Write-Host "FAILED: no world after ${BirthTimeoutSec}s ($answered/$polls polls answered, last OK $last)"
+    Stop-Game; exit 1
+}
 
 # The world exists, but birth has not finished. The engine is now showing the
 # birth level-up dialog, and closing it runs the rest: the welcome text, then
