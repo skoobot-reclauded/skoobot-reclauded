@@ -1344,10 +1344,17 @@ return "installed save_name=" .. tostring(game.save_name)
     $stairsApplied = 'leave'
     if ($TakeStairs -ne 'leave') {
         $vals = @{ ask = 0; always = 1; never = 2 }
-        $sr = Invoke-Bridge -TimeoutSec 30 -Lua ("local ok = skoobot_reclauded.setCharSetting('TAKE_STAIRS', {0}) return tostring(ok) .. ' ' .. tostring(skoobot_reclauded.cfg and skoobot_reclauded.cfg('TAKE_STAIRS'))" -f $vals[$TakeStairs])
+        # settingSource, not cfg(): `skoobot_reclauded.cfg` is not exported, so
+        # `cfg and cfg(...)` short-circuited to nil and this line recorded `nil`
+        # for 145 runs while claiming OK. And the value is COMPARED, not merely
+        # checked for not being an error -- the old guard only ever inspected
+        # tostring(ok), so a read-back returning nil, the wrong value or an error
+        # string still set $stairsApplied (#216, the same lesson as #206).
+        $sr = Invoke-Bridge -TimeoutSec 30 -Lua ("local ok = skoobot_reclauded.setCharSetting('TAKE_STAIRS', {0}) local src, val = skoobot_reclauded.settingSource('TAKE_STAIRS') return tostring(ok) .. ' ' .. tostring(src) .. '=' .. tostring(val)" -f $vals[$TakeStairs])
         Write-Host "  stairs   $($sr.Status) TAKE_STAIRS=$TakeStairs ($($sr.Result))"
-        if ($sr.Status -eq 'OK' -and $sr.Result -notmatch '^false') { $stairsApplied = $TakeStairs }
-        else { Warn 'TAKE_STAIRS was not applied; the run may decline its own descent' }
+        $wantStairs = "true character=$($vals[$TakeStairs])"
+        if ($sr.Status -eq 'OK' -and "$($sr.Result)".Trim() -eq $wantStairs) { $stairsApplied = $TakeStairs }
+        else { Warn "TAKE_STAIRS was not applied: wanted '$wantStairs', got $($sr.Status) $($sr.Result); the run may decline its own descent" }
     }
 
     # #160: place the character, before anything reads the zone. Dialogs first
