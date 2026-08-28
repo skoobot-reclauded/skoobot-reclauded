@@ -803,6 +803,10 @@ function Invoke-Bridge {
         }
     } elseif (-not (Test-GameAlive)) { $status = 'CRASHED'; $result = 'process died' }
 
+    # Kept here rather than at the 53 sites that read .Tainted: a voided
+    # measurement that cannot say what voided it is not attributable (#220).
+    if ($interference.Count -gt 0) { $script:HarnessInterference += $interference }
+
     [pscustomobject]@{
         Status       = $status
         Result       = $result
@@ -823,6 +827,7 @@ function Invoke-Bridge {
 
 $script:HarnessFailures = @()
 $script:HarnessTainted  = $false
+$script:HarnessInterference = @()
 $script:ResultsDir      = Join-Path $script:RepoRoot 'build\results'
 
 <#
@@ -857,7 +862,7 @@ function Assert-Result {
     )
     if ($Result.Tainted) {
         $script:HarnessTainted = $true
-        Write-Host "  TAINT $What -- human input during this step"
+        foreach ($i in @($Result.Interference)) { Write-Host "  TAINT $What -- $i" }
     }
     $ok = ($Result.Status -eq 'OK')
     $why = ''

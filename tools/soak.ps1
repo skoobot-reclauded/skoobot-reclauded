@@ -2074,6 +2074,10 @@ finally {
         dialog_choices = @($dialogChoices)
         lua_errors   = [ordered]@{ count = $luaErrors.Count; samples = @($luaErrors | Select-Object -First 10) }
         tainted      = $tainted
+        # What tainted it, not just that it was: a void result nobody can
+        # attribute cannot be told from a false positive (#220). Accumulated by
+        # Invoke-Bridge, so every bridge call in the run contributes.
+        interference = @($script:HarnessInterference)
         polls        = $polls
         auto_rules   = (-not $NoAutoRules)
         rules_source = $(if ($NoAutoRules) { 'none' } elseif ($ProposedRules) { 'loadout-proposal' } else { 'every-known-talent' })
@@ -2140,7 +2144,7 @@ finally {
     $md.Add("| waits | $waits (a change refused for two turns after a kill) |")
     $md.Add("| warnings | $(if ($warnings.Count -gt 0) { "**$($warnings.Count)** -- " + ($warnings -join '; ') } else { 'none' }) |")
     $md.Add("| Lua errors | $($luaErrors.Count) |")
-    $md.Add("| tainted | $tainted |")
+    $md.Add("| tainted | $tainted$(if ($tainted) { ' -- ' + ((@($script:HarnessInterference) | Select-Object -Unique) -join '; ') }) |")
     $md.Add("| conditions | $(if ($conditionsApplied.Count -gt 0) { $conditionsApplied -join ', ' } else { 'defaults' }) |")
     if ($conditionsMissing.Count -gt 0) {
         $md.Add("| conditions NOT applied | **$($conditionsMissing -join ', ')** -- this run is not comparable (#206) |")
