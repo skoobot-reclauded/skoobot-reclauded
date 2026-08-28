@@ -42,6 +42,32 @@ is missing:
 | No `localuser` session | Log `localuser` on at the VM console and leave it logged on — the agent launches work into that session; ssh lands in session 0, which can never own a window (#182) |
 | No task row | `.\tools\remote-sweep.ps1 -Runner 192.168.50.88 -InstallAgent` |
 
+## Preflight: is the runner FREE?
+
+**Treat TestVM08 as single-occupancy, and check before every poke.** The agent has no
+occupancy control (#213): any controller may overwrite `cmd.ps1` and `schtasks /run` at any
+moment, and nothing tells the run already in flight that it has been replaced. On 2026-08-28
+that destroyed a 30-class sweep and handed its owner a foreign 1-class result to archive in
+its place.
+
+```bash
+ssh -i ~/.ssh/skoobot_runner -o BatchMode=yes -o ConnectTimeout=10 localuser@192.168.50.88   "powershell -NoProfile -Command \"(schtasks /query /tn skoobot-agent /fo list | Select-String 'Status'); 'games: ' + (Get-Process t-engine -EA SilentlyContinue).Count\""
+```
+
+`Status: Ready` and `games: 0` means it is yours. **`Status: Running`, or any non-zero game
+count, means someone is mid-sweep — do not poke it.** Ask them, or work locally.
+
+Two reading rules from the same incident, for when the check was skipped:
+
+- **A fetch an order of magnitude smaller than usual is the tell.** Every sweep in the series
+  produced 243–274 files; the foreign result was 11. Nothing else in the output looked wrong —
+  the build stamp was correct and the table read `1 of 1 cleared their first floor (100%)`.
+- **`sweep-stale-*` directories on the runner are evidence, not litter.** They are what #188's
+  move-aside preserved when a second controller took over, and until the results directory is
+  stamped with an owner they are the only trace of whose run was displaced.
+
+Do not delete a `sweep-stale-*` directory you cannot account for.
+
 ## Recipe 1 — full roster, remote only (fastest simple case, ~20 min)
 
 Everything the runner executes goes through the agent: drop a command file, poke the task,
