@@ -1,5 +1,5 @@
 <#
-    Run classes across several slots at once on one machine (#190).
+    Run classes across several slots at once on one machine (#194).
 
     A work queue, not a fixed split: every slot takes the next class the moment
     it is free, so one slow class cannot hold up the rest. Any set of classes
@@ -89,9 +89,9 @@ if ($wanted.Count -gt 0) {
     $classes = @($rosterRows | ForEach-Object { $_.Class })
 }
 
-# Repeat expands into separate queue items. They share a save name and a result
-# file, so only the last would survive -- give each run its own output
-# directory and let the caller compare the soak files.
+# Repeat expands into separate queue items. Every rep of a class produces the
+# SAME result filename, so writing them all to one directory would leave one
+# survivor and silently call it the answer. Each rep gets its own directory.
 $queue = New-Object System.Collections.Generic.Queue[object]
 foreach ($r in 1..$Repeat) {
     foreach ($c in $classes) {
@@ -157,6 +157,10 @@ function Complete-Run($r, [string]$forced) {
     $slug = Get-ResultSlug $r.Item.Class
     $secs = [int]((Get-Date) - $r.Started).TotalSeconds
 
+    # Reps of one class share a filename, so they need separate directories.
+    $dest = $(if ($Repeat -gt 1) { Join-Path $OutDir "rep$($r.Item.Rep)" } else { $OutDir })
+    if (-not (Test-Path $dest)) { $null = New-Item -ItemType Directory -Force -Path $dest }
+
     if ($forced) {
         # Kill this slot's game by the pid in its own lease file, so the other
         # slots keep running. Then record the class, because a class that
@@ -169,18 +173,18 @@ function Complete-Run($r, [string]$forced) {
             Detail = "$forced after ${secs}s"; StartZone = '?'; Comparable = $false
             Turns = 0; Stops = 0; Descents = 0; CharLevel = '-1->-1'
         }
-        ($row | ConvertTo-Json -Depth 4) | Set-Content (Join-Path $OutDir "$slug.json") -Encoding utf8
+        ($row | ConvertTo-Json -Depth 4) | Set-Content (Join-Path $dest "$slug.json") -Encoding utf8
         # The transcript is the only account of a run nobody watched (#183).
         $jl = Join-Path $r.WorkDir 'job.log'
-        if (Test-Path $jl) { Copy-Item $jl (Join-Path $OutDir "$slug.timeout.log") -Force }
+        if (Test-Path $jl) { Copy-Item $jl (Join-Path $dest "$slug.timeout.log") -Force }
         $script:timedOut += $r.Item.Class
         Say "slot$($r.Slot.N) -- $($r.Item.Class) TIMEOUT after ${secs}s ($forced); slot recovered"
     } else {
         # Only this class's files, never the whole directory: job.log and any
         # stamps the worker wrote are its own business.
         Get-ChildItem $r.WorkDir -File -Filter "$slug.*" -ErrorAction SilentlyContinue |
-            ForEach-Object { Copy-Item $_.FullName (Join-Path $OutDir $_.Name) -Force }
-        $res = Join-Path $OutDir "$slug.json"
+            ForEach-Object { Copy-Item $_.FullName (Join-Path $dest $_.Name) -Force }
+        $res = Join-Path $dest "$slug.json"
         $out = if (Test-Path $res) {
             try { (Get-Content $res -Raw | ConvertFrom-Json).Outcome } catch { 'unreadable' }
         } else { 'NO RESULT' }
@@ -213,6 +217,27 @@ $elapsed = ((Get-Date) - $started).TotalSeconds
 Write-Host ''
 Say ("$totalJobs run(s) in {0:N0}s ({1:N1} min) over $Slots slot(s)" -f $elapsed, ($elapsed / 60))
 if ($timedOut.Count -gt 0) { Say "TIMED OUT: $($timedOut -join ', ')" }
+
+# ---- what came out ------------------------------------------------------
+if ($Repeat -gt 1) {
+    # Reps are separate samples of the same class, not one table: averaging
+    # them would hide the spread, which is the entire reason for running a
+    # class more than once.
+    Write-Host ''
+    Write-Host ('  {0,-20} {1,-4} {2,-12} {3,9} {4,-9} {5}' -f 'class', 'rep', 'outcome', 'turns', 'level', 'floors')
+    foreach ($rep in 1..$Repeat) {
+        foreach ($c in $classes) {
+            $f = Join-Path (Join-Path $OutDir "rep$rep") ("{0}.json" -f (Get-ResultSlug $c))
+            if (-not (Test-Path $f)) { Write-Host ('  {0,-20} {1,-4} {2}' -f $c, $rep, 'NO RESULT'); continue }
+            $j = Get-Content $f -Raw | ConvertFrom-Json
+            Write-Host ('  {0,-20} {1,-4} {2,-12} {3,9} {4,-9} {5}' -f
+                $c, $rep, $j.Outcome, $j.Turns, $j.CharLevel, $j.Trail)
+        }
+    }
+    Write-Host ''
+    Say "per-rep results under $OutDirep1..rep$Repeat -- each is one sample, summarise a rep with -SummarizeOnly -OutDir <rep dir>"
+    exit 0
+}
 
 # ---- one table over the lot ---------------------------------------------
 Say 'merging'
