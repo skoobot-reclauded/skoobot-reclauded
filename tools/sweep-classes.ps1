@@ -614,7 +614,17 @@ try {
     }
 }
 finally {
-    Stop-Game
+    # A summarize launches nothing, so it has nothing to stop -- and Stop-Game's
+    # serial branch kills every t-engine on the machine BY NAME (#196's janitor,
+    # deliberate there). Re-tabling an archive is a normal thing to do at any
+    # time (#210), and the merge step of a split sweep runs while the other half
+    # may still be going, so a read-only report was destroying live sweeps: four
+    # summarize runs cost a concurrent 8-slot roster fifteen births (#215).
+    #
+    # The measuring path keeps it: sweep-classes launches nothing in its own
+    # process either, but its children can leak, and in serial mode it owns the
+    # machine -- which is exactly what that janitor is for.
+    if (-not $SummarizeOnly) { Stop-Game }
 }
 
 # ---- the table the morning is read from ---------------------------------
