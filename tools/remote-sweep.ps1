@@ -107,6 +107,18 @@ $cmd = @"
 & git -C `$repo reset --hard --quiet $Ref 2>&1 | Out-Null
 `$at = (& git -C `$repo rev-parse --short HEAD).Trim()
 if (`$at -ne '$short') { Write-Output "[cmd] SYNC FAILED - wanted $short, on `$at"; exit 4 }
+# Everything under the results dir comes home in one zip and is expanded over
+# the controller's own results, so a leftover file there does not merely tag
+# along -- it OVERWRITES a fresh local result of the same name. A smoke-test
+# Berserker left from an earlier run replaced the real one this way, and the
+# merged table reported a 7,630-turn run in place of a 14,794-turn one with no
+# sign anything had happened (#188). Start from an empty directory.
+`$out = "`$repo\build\results\sweep"
+if (Test-Path `$out) {
+    `$stale = "`$repo\build\results\sweep-stale-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
+    Move-Item `$out `$stale
+    Write-Output "[cmd] moved a leftover results dir aside: `$stale"
+}
 . "`$repo\tools\harness-lease.ps1"
 Write-Output ("[stamp] " + (Format-BuildStamp (Get-BuildStamp -GameDir 'C:\games\TalesMajEyal')))
 & powershell -ExecutionPolicy Bypass -File "`$repo\tools\sweep-classes.ps1" -Minutes $Minutes$onlyArg$dossierArg
