@@ -31,6 +31,11 @@
                       When it fires, that slot's game is killed by pid from its
                       own lease file, the class is recorded TIMEOUT, and the
                       queue carries on.
+
+    Wave 1 is the only dispatch that is not naturally staggered, and eight
+    simultaneous cold starts can cost a class (#197): -WaveStaggerSec spaces
+    them, and a class that comes back UNBIRTHABLE is requeued once at the tail
+    where it runs alone against warm caches.
 #>
 [CmdletBinding()]
 param(
@@ -53,6 +58,8 @@ param(
     [string]$GameDir = 'C:\games\TalesMajEyal',
     [string]$SeedHome = "$env:USERPROFILE\T-Engine\4.0",
     [int]$PollSec = 5,
+    # Seconds between the launches of wave 1 only. 0 disables the stagger.
+    [int]$WaveStaggerSec = 8,
     # Apply the sweep's skip policy even though classes are named with -Only.
     # Auto-on for a full-roster run; pass it explicitly when a named list is
     # one machine's share of a roster split, so Adventurer still SKIPs (#194).
@@ -169,6 +176,18 @@ function Start-ClassJob($item, $slot) {
     }
 }
 
+function Add-Detail([string]$path, [string]$note) {
+    # Append a parenthetical to a result row's Detail, leaving the rest of the
+    # row alone. Idempotent, so a re-run cannot stack the same note twice.
+    if (-not (Test-Path $path)) { return }
+    $j = Get-Content $path -Raw | ConvertFrom-Json
+    $d = "$($j.Detail)".Trim()
+    if ($d -like "*$note*") { return }
+    $j | Add-Member -NotePropertyName Detail -NotePropertyValue $(
+        if ($d) { "$d ($note)" } else { $note }) -Force
+    ($j | ConvertTo-Json -Depth 4) | Set-Content $path -Encoding utf8
+}
+
 function Complete-Run($r, [string]$forced) {
     $slug = Get-ResultSlug $r.Item.Class
     $secs = [int]((Get-Date) - $r.Started).TotalSeconds
@@ -229,6 +248,11 @@ function Complete-Run($r, [string]$forced) {
         $script:timedOut += $r.Item.Class
         Say "slot$($r.Slot.N) -- $($r.Item.Class) TIMEOUT after ${secs}s ($forced); slot recovered"
     } else {
+        # Whether THIS run produced a row, read before the copy overwrites the
+        # previous attempt's. A retry that produced nothing must not be allowed
+        # to stamp attempt 1's row as its own.
+        $ownRow = Test-Path (Join-Path $r.WorkDir "$slug.json")
+
         # Only this class's result files, plus the transcript under the class's
         # name. The transcript used to be kept for TIMEOUT only; wave-1 of the
         # first 8-slot run was then undiagnosable because each slot's next
@@ -240,7 +264,25 @@ function Complete-Run($r, [string]$forced) {
         $out = if (Test-Path $res) {
             try { (Get-Content $res -Raw | ConvertFrom-Json).Outcome } catch { 'unreadable' }
         } else { 'NO RESULT' }
-        Say "slot$($r.Slot.N) -- $($r.Item.Class) $out (${secs}s)"
+
+        if ($r.Item.Retry -and $ownRow) {
+            # A pass on retry is a pass that says so, the same rule the launch
+            # retry already follows: a class that needs the retry every sweep
+            # stays visible as birth-flaky instead of being laundered (#197).
+            Add-Detail $res 'attempt 2'
+        } elseif ($r.Item.Retry) {
+            Say "slot$($r.Slot.N) -- $($r.Item.Class) attempt 2 produced no row; attempt 1's stands"
+        } elseif ($out -eq 'UNBIRTHABLE') {
+            # Cold-start contention is launch weather, not a finding: requeue
+            # once at the tail, where it runs alone against warm caches, and
+            # convert a missing row into wall time (#197). TIMEOUT and CRASHED
+            # are findings and are never retried.
+            $script:queue += [pscustomobject]@{ Class = $r.Item.Class; Rep = $r.Item.Rep; Retry = $true }
+            $script:totalJobs = $script:queue.Count
+            Say "slot$($r.Slot.N) -- $($r.Item.Class) UNBIRTHABLE; requeued once at the tail"
+        }
+
+        Say "slot$($r.Slot.N) -- $($r.Item.Class)$(if ($r.Item.Retry) { ' (attempt 2)' }) $out (${secs}s)"
     }
 
     Remove-Job $r.Job -Force -ErrorAction SilentlyContinue
@@ -250,6 +292,14 @@ function Complete-Run($r, [string]$forced) {
 
 while ($next -lt $totalJobs -or $running.Count -gt 0) {
     while ($next -lt $totalJobs -and $free.Count -gt 0) {
+        # Wave 1 only. Eight simultaneous cold starts put all eight against the
+        # same two 60s windows -- the launch banner and the menu bridge -- and
+        # one of eight missed in sweep-18. Its natural 17s spread was not
+        # enough, so the spacing has to be deliberate rather than incidental
+        # (#197). Every later dispatch is staggered by class completion.
+        if ($next -gt 0 -and $next -lt $Slots -and $WaveStaggerSec -gt 0) {
+            Start-Sleep -Seconds $WaveStaggerSec
+        }
         $slot = $free[0]
         $free = @($free | Select-Object -Skip 1)
         $running += (Start-ClassJob $queue[$next] $slot)
