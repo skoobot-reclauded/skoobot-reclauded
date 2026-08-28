@@ -142,8 +142,10 @@ trees match** — the trees name the executed code; the commit is decoration (#1
   is not the whole story (#187).
 - Every class-end prints `ledger: N launch(es), M reaped`. **N is usually 3** (birth, zone
   read, soak). `M > 0` means a Stop-Game path failed and the reaper cleaned up — file it.
-  `N = 0` on a class that ran means the launch ledger itself broke — worse, file it first
-  (#196).
+  `N = 0` on a class whose row says anything other than `SKIPPED` means the launch ledger or
+  the launch path itself broke — worse, file it first (#196). A skipped class launches
+  nothing and says so — `ledger: skipped, no launch` — so a clean sweep produces **no**
+  `0 launch(es)` lines at all, and one that does is always worth reading (#203).
 - Per-class turn counts run slightly lower under 8-way load than solo; compare outcomes
   across sweeps, not raw turns.
 

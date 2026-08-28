@@ -182,9 +182,20 @@ function Invoke-SlotReap {
         Always prints the ledger count, even when it is zero: 0 launches
         recorded means the ledger itself is broken, and silence is how the
         previous, inert reaper hid (#196).
+
+        -Outcome is the run's own result, when the caller knows it, and only
+        changes the WORDING -- never whether the line is printed.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Slot)
+    param(
+        [Parameter(Mandatory)]$Slot,
+        # A skipped class launches nothing, so its zero is legitimate. Every
+        # full-roster sweep skips Adventurer, so the alarm value fired once per
+        # clean run -- and a signal that cries wolf every time teaches the
+        # reader, and any script watching the transcript, to filter it out,
+        # which restores exactly the blindness #196 removed (#203).
+        [string]$Outcome = ''
+    )
 
     $ledger = Join-Path (Join-Path $Slot.Home 'T-Engine\4.0') 'skoobot-bridge\launched.log'
     $entries = @()
@@ -208,8 +219,14 @@ function Invoke-SlotReap {
         $reaped++
     }
     if (Test-Path $ledger) { Remove-Item $ledger -Force -ErrorAction Ignore }
-    Write-Host ("[slots] slot$($Slot.N) -- ledger: $($entries.Count) launch(es), $reaped reaped" +
-                $(if ($reaped -gt 0) { ' -- a Stop-Game path failed' }))
+    # A skip with a NON-zero count keeps the alarm form: a class that skipped
+    # and still launched something is a real anomaly.
+    $note = if ($entries.Count -eq 0 -and $Outcome -eq 'SKIPPED') {
+        'skipped, no launch'
+    } else {
+        "$($entries.Count) launch(es), $reaped reaped" + $(if ($reaped -gt 0) { ' -- a Stop-Game path failed' })
+    }
+    Write-Host "[slots] slot$($Slot.N) -- ledger: $note"
     return [pscustomobject]@{ Launches = $entries.Count; Reaped = $reaped }
 }
 

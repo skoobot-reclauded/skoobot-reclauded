@@ -220,6 +220,17 @@ function Complete-Run($r, [string]$forced) {
     $slug = Get-ResultSlug $r.Item.Class
     $secs = [int]((Get-Date) - $r.Started).TotalSeconds
 
+    # The worker's OWN row, read from its work directory before anything is
+    # copied over it. Read this early for two reasons: the ledger line's
+    # wording depends on the outcome (#203), and a retry that produced no row
+    # must not stamp the previous attempt's as its own (#197).
+    $ownRow  = Test-Path (Join-Path $r.WorkDir "$slug.json")
+    $outcome = ''
+    if ($ownRow) {
+        try { $outcome = "$((Get-Content (Join-Path $r.WorkDir "$slug.json") -Raw | ConvertFrom-Json).Outcome)" }
+        catch { $outcome = '' }
+    }
+
     # A forced end kills the worker TREE first, so nothing the worker is still
     # doing can launch into the slot between here and the reap (#196).
     if ($forced) { Stop-WorkerTree $r }
@@ -227,7 +238,7 @@ function Complete-Run($r, [string]$forced) {
     # Then the ledger reap, which every completion does -- the backstop for
     # whatever the tree kill could not reach and for any Stop-Game path that
     # failed. Invoke-SlotReap, never a second copy of the rule (#121).
-    $null = Invoke-SlotReap $r.Slot
+    $null = Invoke-SlotReap $r.Slot -Outcome $outcome
 
     # Reps of one class share a filename, so they need separate directories.
     # (Eaten once by a careless region edit: with $dest undefined every copy
@@ -253,11 +264,6 @@ function Complete-Run($r, [string]$forced) {
         $script:timedOut += $r.Item.Class
         Say "slot$($r.Slot.N) -- $($r.Item.Class) TIMEOUT after ${secs}s ($forced); slot recovered"
     } else {
-        # Whether THIS run produced a row, read before the copy overwrites the
-        # previous attempt's. A retry that produced nothing must not be allowed
-        # to stamp attempt 1's row as its own.
-        $ownRow = Test-Path (Join-Path $r.WorkDir "$slug.json")
-
         # Only this class's result files, plus the transcript under the class's
         # name. The transcript used to be kept for TIMEOUT only; wave-1 of the
         # first 8-slot run was then undiagnosable because each slot's next
