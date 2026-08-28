@@ -1619,15 +1619,23 @@ finally {
         }
     }
 
+    # #178: read BEFORE Stop-Game, for the reason recorded four lines above
+    # about the dossier. This sat after Stop-Game on its first outing and
+    # reported `end: null` on a MAX_MINUTES run that had ended with the game
+    # perfectly alive -- so the field would have been null on EVERY run, and
+    # the equipment change it exists to catch would never have been seen.
+    #
+    # Still nil where the bridge genuinely cannot answer -- a death, an eidolon
+    # rescue, a crash -- and recorded as nil rather than backfilled from the
+    # start reading, because "we do not know" and "it did not change" are
+    # different and only one of them is true.
+    $visionEnd = Get-Vision
+    if ($visionEnd) { Write-Host "  vision   end lite=$($visionEnd.lite) sight=$($visionEnd.sight)" }
+
     Stop-Game
 
     $ended = Get-Date
     $wall = [math]::Round(($ended - $started).TotalSeconds)
-    # #178. Nil when the run ended somewhere the bridge cannot answer -- a
-    # death, an eidolon rescue, a crash -- which is recorded as nil rather than
-    # backfilled from the start reading, because "we do not know" and "it did
-    # not change" are different and only one of them is true.
-    $visionEnd = Get-Vision
     $stopRows = @($stops.Keys | ForEach-Object {
         [ordered]@{ reason = $_; count = $stops[$_].count; severity = $stops[$_].severity; first_turn = $stops[$_].first_turn; last_turn = $stops[$_].last_turn }
     } | Sort-Object { -$_.count }, { $_.reason })
