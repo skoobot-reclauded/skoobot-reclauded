@@ -168,6 +168,36 @@ kept no log, #185; a fetch overwrote a fresh result, #188; the scheduler cleared
 transcripts; the inert reaper). Every fix was the same shape — make something print or
 persist unconditionally, because silence reads as success.
 
+### 5.1 The sibling rule: evidence that is never co-located is as good as absent
+
+A second night produced five more defects with a different shape, and it is worth naming
+because the cure is different. Here nothing was destroyed -- **both halves were on disk every
+time.** The fact and the thing it contradicted simply lived in different files, so no reader
+ever held them at once and a contradiction that would be obvious side by side was invisible in
+the artefacts anyone opens.
+
+| # | The fact | Where | What it invalidated | Where |
+|---|---|---|---|---|
+| #206 | four of five stop conditions applied | `<class>.soak.md` | "Stop conditions for every run: *five*" | `summary.md` |
+| #210 | the data was measured at commit A | `stamps.txt` | the table was rendered by commit B | nowhere |
+| #214 | the run protocol was version A | nowhere | "identical trees are one measurement" | this document, §6 |
+| #215 | a summarize ran at 05:09:17 | the summarizer's output | eight games died at 05:09:50 | the sweep's transcript |
+| #213 | controller X owns this run | nowhere | controller Y's `run.done` poll | `run.log`, truncated by Y |
+
+Every cure was the same move: carry the fact into the artefact that makes the claim
+(`conditions_missing` into the row, `NextZone` into the table, `proto` into the stamp), record
+the missing half at all (`tabled.txt`), or make the two collide loudly (`UNREADABLE`, the
+reworded ledger line).
+
+**The rule, as a design test rather than a reading test: the artefact that makes a claim must
+be self-contained -- facts flow toward claims, never the reverse.** At review time, ask which
+artefact holds the fact that would falsify this assertion; if the answer is "a different file
+that nobody opens", the assertion is unguarded. Carry the fact in, or drop the assertion.
+
+No mechanical check: the question is about meaning, and a linter for "does this sentence have
+its falsifier nearby" would be worse than asking it. What the rule buys is that it gets asked
+at review time rather than at 05:09 with eight dead games. See #219.
+
 ## 6. Measurement integrity, and combining sweep data
 
 The rules that keep a merged table honest, each learned from a specific lie:

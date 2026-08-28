@@ -600,6 +600,15 @@ try {
                              } else { '' })
             StartZone= $startZone
             Comparable = $comparable
+            # #219: which run protocol MEASURED this row. The stamp lines
+            # describe the directory's runs; without this nothing ties a row to
+            # the one it ran under -- and the resume path below ("already done")
+            # deliberately lets one directory accumulate rows across several
+            # invocations, so a directory can hold rows measured under two
+            # protocols, each true, with no way to tell which is which. Written
+            # at measurement time beside Outcome, so it is frozen with the
+            # verdict and survives a re-table (#210's boundary rule).
+            Proto = $(if ($startBuild) { "$($startBuild.proto)" } else { '' })
             Conditions        = (@($s.conditions) -join ',')
             ConditionsMissing = ($condMissing -join ',')
             Stops    = $s.stop_total
@@ -713,6 +722,17 @@ if ($SummarizeOnly -and (Test-Path $stampFile)) {
     }
 } else {
     $md.Add("Measured on **``$($sweepBuild.short)``**$(if ($sweepBuild.dirty -gt 0) { " plus **$($sweepBuild.dirty) uncommitted file(s)**" }) in ``$(Split-Path -Leaf $sweepBuild.repo)`` -- $($sweepBuild.subject)")
+}
+# #219: the stamp lines describe the directory's RUNS; this describes its ROWS.
+# A directory that accumulated rows across invocations -- the resume path, or a
+# -Force re-run of a few classes after the protocol moved -- disagrees here even
+# when every stamp line agrees, and the rows are what the table is made of.
+$rowProtos = @($results | Where-Object { $_.Proto } | ForEach-Object { "$($_.Proto)" } | Select-Object -Unique)
+if ($rowProtos.Count -gt 1) {
+    $md.Add('')
+    $md.Add("**The rows in this directory were not all measured by the same protocol** (``proto`` differs: $($rowProtos -join ', ')). " +
+        (($rowProtos | ForEach-Object { $pr = $_; "$pr -- " + ((@($results | Where-Object { "$($_.Proto)" -eq $pr }) | ForEach-Object { $_.Class }) -join ', ') }) -join '; ') +
+        ". Each row is true of the run that produced it; the table is not one measurement (#219).")
 }
 $md.Add('')
 $md.Add("Tabled by ``$($tabler.short)``$(if (($tabler.dirty + $tabler.dirty_elsewhere) -gt 0) { " plus **$($tabler.dirty + $tabler.dirty_elsewhere) uncommitted file(s)**" }), from data measured on the build(s) above. Full history in ``tabled.txt`` (#210).")
