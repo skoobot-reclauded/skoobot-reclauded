@@ -447,6 +447,26 @@ $exit = 1
     on floor one is exactly the interesting case, and a single reading at
     birth would attribute its whole run to the wrong number.
 #>
+<#
+    #148: how often the aim search ran, and what it weighed.
+
+    Declared here with Get-Vision and for the same reason (#195): anything the
+    run's `finally` may reach has to exist before the `try` it guards, or the
+    cleanup path only works when nothing went wrong.
+
+    End only. These are cumulative for the process, so a start reading is
+    always zero -- unlike vision, which equipment moves under the run.
+#>
+function Get-AimStats {
+    $r = Invoke-Bridge -TimeoutSec 30 -Lua 'local b = skoobot_reclauded if not b or not b.aimstats then return "none" end local s = b.aimstats return ("searched=%s rearmed=%s ally_seen=%s foes=%s allies=%s selfhit=%s"):format(tostring(s.searched), tostring(s.rearmed), tostring(s.ally_seen), tostring(s.foes), tostring(s.allies), tostring(s.selfhit))'
+    if ($r.Status -ne 'OK' -or "$($r.Result)" -notmatch 'searched=') { return $null }
+    $o = [ordered]@{}
+    foreach ($m in [regex]::Matches("$($r.Result)", '(\w+)=([\d.]+)')) {
+        $o[$m.Groups[1].Value] = [double]$m.Groups[2].Value
+    }
+    return $o
+}
+
 function Get-Vision {
     $r = Invoke-Bridge -TimeoutSec 30 -Lua 'local p = game.player if not p then return "none" end return ("lite=%s sight=%s"):format(tostring(p.lite or 0), tostring(p.sight or 10))'
     if ($r.Status -ne 'OK') { return $null }
@@ -2026,6 +2046,11 @@ finally {
 
     $visionEnd = Get-Vision
     if ($visionEnd) { Write-Host "  vision   end lite=$($visionEnd.lite) sight=$($visionEnd.sight)" }
+    $aimStats = Get-AimStats
+    if ($aimStats) {
+        Write-Host ("  aim      searched={0} rearmed={1} ally_seen={2} (foes {3}, allies {4}, self {5})" -f `
+            $aimStats.searched, $aimStats.rearmed, $aimStats.ally_seen, $aimStats.foes, $aimStats.allies, $aimStats.selfhit)
+    }
 
     Stop-Game
 
@@ -2109,6 +2134,9 @@ finally {
         # #178: light radius and sight, at both ends. See Get-Vision above for
         # why this is the number #153's prediction turns on.
         vision       = [ordered]@{ start = $visionStart; end = $visionEnd }
+        # #148: whether the aim search ran at all, so an escort-kill sweep can
+        # be read as dose-response rather than as an outcome with no dose.
+        aim          = $aimStats
         # #175: the CODE, as opposed to build_at_start, which is the character's
         # stats and talents. Resolved from the junction the game loads.
         build          = $script:BuildStamp

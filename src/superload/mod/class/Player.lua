@@ -2742,9 +2742,30 @@ local function aimPointFor(tid, enemies)
             end
         end
     end
-    return (aim.best(cands))
+    -- #148: record that the search RAN, and what it had to weigh. An outcome
+    -- sweep on escort deaths cannot tell "the caution does not help" from "it
+    -- never fired", and the first A/B could not tell them apart.
+    local best = aim.best(cands)
+    if #cands > 0 then
+        local st = bot.aimstats
+        st.searched = st.searched + 1
+        for _, c in ipairs(cands) do
+            if (c.allies or 0) > 0 then st.ally_seen = st.ally_seen + 1 break end
+        end
+        if best then
+            st.foes    = st.foes + (best.foes or 0)
+            st.allies  = st.allies + (best.allies or 0)
+            st.selfhit = st.selfhit + (best.selfhit or 0)
+        end
+    end
+    return best
 end
 bot.aimPointFor = aimPointFor
+
+-- #148: cumulative for the life of the process, which is one run under the
+-- harness. Read at the end rather than at both ends -- unlike vision (#178)
+-- these only ever grow, so a start reading would always be zero.
+bot.aimstats = { searched = 0, rearmed = 0, ally_seen = 0, foes = 0, allies = 0, selfhit = 0 }
 
 -- The decision (v1 skoobot_act)
 -------------------------------------------------------------------------------
@@ -3283,9 +3304,14 @@ function skoobot_act(noAction)
                         -- be the wrong trade.
                         local aimAt = bot.aimPointFor(tid, targets)
                         if aimAt and aimAt.actor and aimAt.actor ~= enemy.actor then
-                            chan.info("[Combat] Aiming %s at %s rather than %s: catches %d",
-                                      tostring(tid), tostring(aimAt.name),
-                                      tostring(enemy.name), aimAt.foes or 0)
+                            bot.aimstats.rearmed = bot.aimstats.rearmed + 1
+                            -- Both actors are named, so the uid disambiguates:
+                            -- two of one creature type read as the same line
+                            -- otherwise, which is #142's lesson one level over.
+                            chan.info("[Combat] Aiming %s at %s (uid %s) rather than %s (uid %s): catches %d",
+                                      tostring(tid), tostring(aimAt.name), tostring(aimAt.actor.uid),
+                                      tostring(enemy.name), tostring(enemy.actor and enemy.actor.uid),
+                                      aimAt.foes or 0)
                             game.player:setTarget(aimAt.actor)
                             SAI_useTalent(tid, nil, nil, nil, aimAt.actor)
                         else
