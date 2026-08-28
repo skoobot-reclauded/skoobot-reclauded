@@ -1,4 +1,4 @@
-﻿<#
+<#
     Harness lease: one live host owns the game at a time.
 
     The game install is a single resource -- one t-engine process, one
@@ -39,7 +39,13 @@
     kills anything; it only answers "whose is the game right now?".
 #>
 
-$script:LeasePath = Join-Path $env:USERPROFILE 'T-Engine\4.0\skoobot-bridge\harness.lock'
+# The lease guards ONE engine home, so it belongs in that home. Hardcoded to
+# the user profile it was machine-wide, which is right for the ordinary case
+# and fatal for slots (#189): four games sharing one lock file, and
+# Enter-HarnessLease throws "IN USE" at whichever ones arrive second. They died
+# before writing a log, so the failure looked like the game never starting.
+$script:LeaseHome = $(if ($env:TOME_HOME) { Join-Path $env:TOME_HOME 'T-Engine\4.0' } else { Join-Path $env:USERPROFILE 'T-Engine\4.0' })
+$script:LeasePath = Join-Path $script:LeaseHome 'skoobot-bridge\harness.lock'
 $script:LeaseRoot = Split-Path -Parent $PSScriptRoot
 
 <#

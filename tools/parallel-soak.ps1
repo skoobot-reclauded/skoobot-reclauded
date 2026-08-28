@@ -28,6 +28,9 @@ param(
     [string]$GameDir = 'C:\games\TalesMajEyal',
     [string]$SeedHome = "$env:USERPROFILE\T-Engine\4.0",
     [string]$StartZone = 'norgos-lair',
+    # Match sweep-classes, or the runs are not comparable with a sweep: shipped
+    # defaults are STOP, so a class stops dead wherever a boss stays in view.
+    [string]$Conditions = 'SCOUTER_STRONGERENEMY=WARN,SCOUTER_BIGENEMY=WARN,SCOUTER_CROWDPOWER=WARN,SCOUTER_ENEMYCOUNT=WARN,LIFE_LOWLIFE=WARN',
     [switch]$KeepSlots
 )
 $ErrorActionPreference = 'Continue'
@@ -67,7 +70,9 @@ function New-Slot([int]$n) {
     # The engine appends T-Engine\4.0 to whatever --home is given.
     $eng = Join-Path $shome 'T-Engine\4.0'
     if (-not (Test-Path $eng)) { $null = New-Item -ItemType Directory -Force -Path $eng }
-    foreach ($d in @('settings', 'profiles')) {
+    # 'boot' as well: without it the engine treats the home as a first run and
+    # opens a welcome dialog at the main menu, which nothing dismisses.
+    foreach ($d in @('settings', 'profiles', 'boot')) {
         $src = Join-Path $SeedHome $d
         if ((Test-Path $src) -and -not (Test-Path (Join-Path $eng $d))) {
             Copy-Item $src (Join-Path $eng $d) -Recurse -Force
@@ -97,12 +102,20 @@ $started = Get-Date
 $jobs = @()
 foreach ($s in $slots) {
     $out = Join-Path $s.Slot 'soak.json'
-    $jobs += Start-Job -Name "slot$($s.N)" -ArgumentList $RepoRoot, $s.GameDir, $s.Home, $Save, $Minutes, $out, $StartZone -ScriptBlock {
-        param($repo, $gd, $hm, $save, $mins, $out, $zone)
+    # A result left from a previous run is read as though this run produced it.
+    # That is exactly #188 again, in the script written to fix the last one: the
+    # first 4-slot run reported a baseline's 18,381 turns as a parallel result.
+    Remove-Item $out -Force -ErrorAction SilentlyContinue
+    $jobs += Start-Job -Name "slot$($s.N)" -ArgumentList $RepoRoot, $s.GameDir, $s.Home, $Save, $Minutes, $out, $StartZone, $Conditions -ScriptBlock {
+        param($repo, $gd, $hm, $save, $mins, $out, $zone, $cond)
         $env:TOME_DIR  = $gd
         $env:TOME_HOME = $hm
+        # Output kept, not discarded: a slot that dies before writing a result
+        # has nothing else to explain itself, and two of four did exactly that.
         & powershell -ExecutionPolicy Bypass -File "$repo\tools\soak.ps1" `
-            -SaveName $save -MaxMinutes $mins -OutFile $out -StartZone $zone -NoRunLease 2>&1
+            -SaveName $save -MaxMinutes $mins -OutFile $out -StartZone $zone `
+            -Conditions $cond -NoRunLease 2>&1 |
+            Out-File -FilePath (Join-Path (Split-Path -Parent $out) 'job.log') -Encoding utf8
     }
 }
 Say "$($jobs.Count) soak(s) launched at $($started.ToString('HH:mm:ss')); waiting"
@@ -117,7 +130,12 @@ Write-Host ('  {0,-7} {1,-10} {2,10} {3,10} {4}' -f 'slot', 'ended', 'turns', 't
 $total = 0
 foreach ($s in $slots) {
     $out = Join-Path $s.Slot 'soak.json'
-    if (-not (Test-Path $out)) { Write-Host ('  {0,-7} {1}' -f "slot$($s.N)", 'NO RESULT'); continue }
+    if (-not (Test-Path $out)) {
+        $jl = Join-Path $s.Slot 'job.log'
+        $why = if (Test-Path $jl) { (Get-Content $jl | Where-Object { $_ -match 'IN USE|FAILED|Exception|error' } | Select-Object -Last 1) } else { 'no job.log' }
+        Write-Host ('  {0,-7} {1} -- {2}' -f "slot$($s.N)", 'NO RESULT', $why)
+        continue
+    }
     $j = Get-Content $out -Raw | ConvertFrom-Json
     $t = 0
     if ($j.turns -and $j.turns.delta) { $t = [int]$j.turns.delta }
