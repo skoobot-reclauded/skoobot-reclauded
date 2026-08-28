@@ -590,11 +590,100 @@ end
 -- ACCEPT and which cannot be escaped -- gets ACCEPT, i.e. its first answer,
 -- which is reported as such. Anything with neither is reported with the
 -- binds it does have, and ends the run.
+--- Deliberate answers to specific dialogs, matched BEFORE the EXIT ladder.
+--
+-- EXIT is the wrong currency for a dialog whose buttons are real choices: on
+-- Cursed Fate, EXIT *is* "Suppress your affliction", so 33 runs took a build
+-- decision through a keypress meant as "dismiss" (#191). A policy names the
+-- BUTTON CAPTION a player would press, or the LIST ITEM they would select --
+-- and a caption that no longer matches fails loudly as policy-miss rather than
+-- silently reverting to the accidental answer.
+--
+-- Ships EMPTY on purpose. Which answer is right for Cursed Fate is the owner's
+-- call (#191) and so is who receives an escort reward (#93); this is the
+-- mechanism those rulings need, not the ruling. One line activates one dialog:
+--
+--   sk.dialogPolicy["Cursed Fate"] = { pick = "Release your hate upon the object" }
+--   sk.dialogPolicy["Select the party member to receive the reward:"] =
+--     { pick_item = function(d, item) return item.actor == game.player end }
+--
+-- Anything not in the table keeps today's ladder untouched, including the
+-- hand-backs #166 ruled real choices.
+sk.dialogPolicy = {}
+sk.dialogChoices = {}
+
+--- The Buttons of a dialog, by caption. Bounded and cycle-safe: ToME hangs its
+-- widgets off d.uis[i].ui, and an unbounded walk of a dialog table would chase
+-- the whole game graph.
+local function findButton(d, caption)
+  local seen = {}
+  local function walk(u, depth)
+    if depth > 4 or type(u) ~= "table" or seen[u] then return nil end
+    seen[u] = true
+    if u.text and tostring(u.text) == caption and type(u.fct) == "function" then return u end
+    for _, key in ipairs({ "uis", "ui", "c_list", "list" }) do
+      local child = u[key]
+      if type(child) == "table" then
+        local hit = walk(child, depth + 1)
+        if hit then return hit end
+      end
+    end
+    for i = 1, #u do
+      local hit = walk(u[i], depth + 1)
+      if hit then return hit end
+    end
+    return nil
+  end
+  return walk(d, 0)
+end
+
+local function applyPolicy(d, title)
+  local pol = sk.dialogPolicy[title]
+  if not pol then return nil end
+
+  if pol.pick then
+    local b = findButton(d, pol.pick)
+    if not b then return "policy-miss " .. title .. " (no button '" .. tostring(pol.pick) .. "')" end
+    bridge.injecting = true
+    local ok, err = pcall(b.fct)
+    bridge.injecting = false
+    if not ok then return "policy-error " .. title .. " " .. tostring(err) end
+    sk.dialogChoices[#sk.dialogChoices + 1] = { dialog = title, choice = pol.pick, turn = game.turn }
+    return "policy " .. title .. " -> " .. pol.pick
+  end
+
+  if pol.pick_item then
+    -- A List dialog has no button to caption-match: choosing means d:use(item)
+    -- on an entry, which is how PartyRewardSelector works and why the button
+    -- rung alone could not express it (#191).
+    if type(d.list) ~= "table" or type(d.use) ~= "function" then
+      return "policy-miss " .. title .. " (not a list dialog)"
+    end
+    for _, item in ipairs(d.list) do
+      local okp, want = pcall(pol.pick_item, d, item)
+      if okp and want then
+        local label = tostring(item.name or item.text or "?")
+        bridge.injecting = true
+        local ok, err = pcall(d.use, d, item)
+        bridge.injecting = false
+        if not ok then return "policy-error " .. title .. " " .. tostring(err) end
+        sk.dialogChoices[#sk.dialogChoices + 1] = { dialog = title, choice = label, turn = game.turn }
+        return "policy " .. title .. " -> " .. label
+      end
+    end
+    return "policy-miss " .. title .. " (no matching item)"
+  end
+  return nil
+end
+
 function sk.closeDialog()
   local d = game.dialogs and game.dialogs[#game.dialogs]
   if not d then return "none" end
   local name = sk.dialogName(d)
   if d.__CLASSNAME == "mod.dialogs.DeathDialog" then return "death" end
+  -- Before the ladder, never after: the ladder is what mis-answers these.
+  local pol = applyPolicy(d, tostring(d.title or ""))
+  if pol then return pol end
   local v = d.key and d.key.virtuals
   if v and v.EXIT then
     return press(d, "EXIT") or ("closed " .. name)
@@ -1191,6 +1280,7 @@ return "installed save_name=" .. tostring(game.save_name)
         Write-Host "[soak] FAILED - helpers: $($install.Status) $($install.Result)"; $endReason = 'SETUP_FAILED'; exit 1
     }
     Write-Host "  $($install.Result)"
+
 
     if (-not $NoAutoRules) {
         $call  = $(if ($ProposedRules) { 'return sk.proposedRules()' } else { 'return sk.rules()' })
@@ -1913,6 +2003,20 @@ finally {
     # rescue, a crash -- and recorded as nil rather than backfilled from the
     # start reading, because "we do not know" and "it did not change" are
     # different and only one of them is true.
+    # #191: every deliberate dialog answer this run made. The #160 contract --
+    # an injected choice is counted, not mistaken for the bot's own.
+    $dialogChoices = @()
+    $dc = Invoke-Bridge -TimeoutSec 30 -Lua 'local out = {} for _, c in ipairs(sk.dialogChoices or {}) do out[#out+1] = tostring(c.turn) .. "|" .. tostring(c.dialog) .. "|" .. tostring(c.choice) end return table.concat(out, " ;; ")'
+    if ($dc.Status -eq 'OK' -and "$($dc.Result)".Trim()) {
+        foreach ($row in ("$($dc.Result)" -split ' ;; ')) {
+            $parts = $row -split '\|'
+            if ($parts.Count -ge 3) {
+                $dialogChoices += [ordered]@{ turn = [int]$parts[0]; dialog = $parts[1]; choice = $parts[2] }
+            }
+        }
+    }
+    if ($dialogChoices.Count -gt 0) { Write-Host "  dialogs  $($dialogChoices.Count) policy answer(s)" }
+
     $visionEnd = Get-Vision
     if ($visionEnd) { Write-Host "  vision   end lite=$($visionEnd.lite) sight=$($visionEnd.sight)" }
 
@@ -1956,6 +2060,11 @@ finally {
             waits     = $waits
         }
         warnings     = @($warnings)
+        # #191: which dialogs this run answered on policy rather than by the
+        # EXIT ladder, so an injected build choice is never mistaken for the
+        # bot's own. Empty while the policy table is (the entries are the
+        # owner's rulings, #191 and #93).
+        dialog_choices = @($dialogChoices)
         lua_errors   = [ordered]@{ count = $luaErrors.Count; samples = @($luaErrors | Select-Object -First 10) }
         tainted      = $tainted
         polls        = $polls
@@ -2032,6 +2141,7 @@ finally {
     if ($paradoxPinned) {
         $md.Add("| paradox | pinned $($paradoxPinned.before) -> $($paradoxPinned.set) (wil $($paradoxPinned.wil)); start $($summary.paradox.start), end $($summary.paradox.end) -- raw/modified/anomaly% (#193) |")
     }
+    $md.Add("| dialog policy | $(if ($dialogChoices.Count -gt 0) { ($dialogChoices | ForEach-Object { "$($_.dialog) -> $($_.choice) (turn $($_.turn))" }) -join '; ' } else { 'none active' }) |")
     $md.Add("| take_stairs | $stairsApplied |")
     if ($placedIn) { $md.Add("| placed_in | $placedIn -- the character was PUT here, it did not walk (#160) |") }
     $md.Add("| polls | $polls every $PollSec s |")
